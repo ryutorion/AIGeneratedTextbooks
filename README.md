@@ -4,11 +4,15 @@ AI生成教科書置き場
 # unchecked
 内容未精査のもの
 
-* LearningD3D12
+* [LearningD3D12](unchecked/LearningD3D12)
   * NVIDIAのGPUを前提としたDirectX 12の入門書
-* CppModule
+* [CppModule](unchecked/CppModule)
   * C++20で導入されたモジュールに関する入門書
-* CppMemoryModel
+* [CppMemoryModel](unchecked/CppMemoryModel
   * C++のメモリーモデルについて理解するための入門書
-* CppMemoryAllocator
+* [CppMemoryAllocator](unchecked/CppMemoryAllocator)
   * C++でのメモリーアロケーターについての入門書
+* [GameCollision](unchecked/GameCollision/)
+  * ゲーム向けコリジョンの入門書
+* [GameAnimationProgramming](unchecked/GameAnimationProgramming)
+  * ゲーム向けアニメーションプログラミングの入門書
