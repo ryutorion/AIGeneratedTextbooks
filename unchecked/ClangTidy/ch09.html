@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第9章 警告を抑制する作法 ─ Clang-Tidy入門</title>
+<style>
+  :root{
+    --ink:#1f2933; --sub:#5a6b7a; --line:#d8dee4; --bg:#ffffff;
+    --code-bg:#f6f8fa; --code-line:#e2e8ee;
+    --accent:#2f6f9f; --accent-bg:#eef4f9;
+    --warn:#b4661a; --warn-bg:#fbf4ea;
+    --ok:#3d7a52; --ok-bg:#eef5f0;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0; background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Noto Sans JP","Meiryo",sans-serif;
+    font-size:16px; line-height:1.95; font-feature-settings:"palt" 1;}
+  .page{max-width:47rem; margin:0 auto; padding:3.5rem 1.6rem 6rem}
+  .chap-no{font-size:.8rem; letter-spacing:.22em; color:var(--accent); font-weight:700; margin:0 0 .5rem}
+  h1{font-size:1.85rem; line-height:1.5; margin:0 0 .6rem; letter-spacing:.01em}
+  .lede{color:var(--sub); font-size:1rem; margin:0 0 2.2rem; padding-bottom:1.6rem; border-bottom:2px solid var(--ink)}
+  h2{font-size:1.28rem; margin:3rem 0 1rem; padding-left:.7rem; border-left:4px solid var(--accent); line-height:1.6}
+  h3{font-size:1.05rem; margin:2.2rem 0 .7rem}
+  h3::before{content:"◆ "; color:var(--accent); font-size:.8em}
+  p{margin:0 0 1.1rem}
+  ul,ol{margin:0 0 1.2rem; padding-left:1.6rem}
+  li{margin:.35rem 0}
+  code{font-family:"Cascadia Mono","Consolas","SFMono-Regular",monospace; font-size:.9em;
+       background:var(--code-bg); border:1px solid var(--code-line); border-radius:4px; padding:.08em .35em}
+  pre{background:var(--code-bg); border:1px solid var(--code-line); border-radius:8px;
+      padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.7}
+  pre code{background:none; border:none; padding:0; font-size:.86rem}
+  pre.term{background:#1f2933; border-color:#1f2933; color:#e6edf3}
+  pre.term code{color:#e6edf3}
+  pre.term .p{color:#7fb2d6}
+  pre.term .o{color:#9fb3c0}
+  .cap{font-size:.82rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+  figure{margin:2rem 0 2.2rem}
+  figure svg{display:block; width:100%; height:auto; border:1px solid var(--line); border-radius:8px; background:#fff}
+  figcaption{font-size:.85rem; color:var(--sub); margin-top:.6rem}
+  figcaption b{color:var(--ink)}
+  .box{border-radius:8px; padding:1rem 1.2rem; margin:1.6rem 0; font-size:.94rem}
+  .box p:last-child{margin-bottom:0}
+  .box .t{font-weight:700; display:block; margin-bottom:.35rem; font-size:.88rem; letter-spacing:.04em}
+  .note{background:var(--accent-bg); border-left:4px solid var(--accent)} .note .t{color:var(--accent)}
+  .warn{background:var(--warn-bg); border-left:4px solid var(--warn)} .warn .t{color:var(--warn)}
+  .tip{background:var(--ok-bg); border-left:4px solid var(--ok)} .tip .t{color:var(--ok)}
+  .hands{border:1px solid var(--line); border-radius:10px; margin:2rem 0; overflow:hidden}
+  .hands>.hd{background:var(--ink); color:#fff; padding:.55rem 1.1rem; font-size:.85rem; letter-spacing:.1em; font-weight:700}
+  .hands>.bd{padding:1.3rem 1.3rem .4rem}
+  .hands ol{counter-reset:step; list-style:none; padding-left:0}
+  .hands ol>li{counter-increment:step; position:relative; padding-left:2.4rem; margin:0 0 1.2rem}
+  .hands ol>li::before{content:counter(step); position:absolute; left:0; top:.25rem;
+    width:1.7rem; height:1.7rem; border-radius:50%; background:var(--accent); color:#fff;
+    font-size:.82rem; font-weight:700; display:flex; align-items:center; justify-content:center; line-height:1}
+  table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+  th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+  th{background:var(--code-bg); font-weight:700}
+  .summary{border:2px solid var(--ink); border-radius:10px; padding:1.3rem 1.5rem; margin:3rem 0 1rem}
+  .summary h2{margin:0 0 .8rem; border:none; padding:0; font-size:1.1rem}
+  .summary ul{margin-bottom:0}
+  .next{color:var(--sub); font-size:.94rem; border-top:1px solid var(--line); padding-top:1.2rem; margin-top:2.5rem}
+  @media (max-width:600px){ body{font-size:15px} .page{padding:2.2rem 1.1rem 4rem} h1{font-size:1.5rem} }
+</style>
+</head>
+<body>
+<div class="page">
+
+<p class="chap-no">第 9 章</p>
+<h1>警告を抑制する作法</h1>
+<p class="lede">静的解析には必ず誤検出があり、また「分かっていてやっている」コードもあります。それらを個別に黙らせる仕組みが <code>NOLINT</code> です。ただしこれは劇薬で、安易に使うと解析が形骸化します。書式を覚えるのは5分で終わるので、この章の本題は <strong>いつ使ってよいか</strong> のほうです。</p>
+
+<h2>9.1 抑制が正当化される場面</h2>
+
+<p>抑制してよいのは、おおむね次の場合です。</p>
+
+<table>
+<tr><th>場面</th><th>例</th></tr>
+<tr><td><strong>誤検出</strong></td><td>解析器がフローを追いきれず、実際には起こりえない NULL 参照を指摘した</td></tr>
+<tr><td><strong>意図的な逸脱</strong></td><td>性能上の理由で、あえて規約に反する書き方をしている（測定根拠あり）</td></tr>
+<tr><td><strong>外部要因</strong></td><td>OS やサードパーティ API のシグネチャがそうなっているため避けられない</td></tr>
+<tr><td><strong>生成コード</strong></td><td>ツールが生成したソースで、手で直せない</td></tr>
+<tr><td><strong>段階導入の途中</strong></td><td>既存コードに新ルールを入れる過程での一時的な措置（第39章）</td></tr>
+</table>
+
+<p>逆に、抑制してはいけないのは <strong>「意味が分からないから消した」</strong> 場合です。これが積み重なると、警告が出ないことに意味がなくなります。</p>
+
+<h2>9.2 三つの書式</h2>
+
+<p>抑制コメントは3種類あり、効く範囲が違います。</p>
+
+<figure>
+<svg viewBox="0 0 760 400" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="NOLINT / NOLINTNEXTLINE / NOLINTBEGIN-END の適用範囲">
+  <g font-family="sans-serif">
+
+  <!-- NOLINT -->
+  <text x="30" y="28" font-size="12.5" font-weight="bold" fill="#2f6f9f" letter-spacing="1">① NOLINT ── 同じ行</text>
+  <rect x="30" y="38" width="700" height="86" rx="8" fill="#1f2933"/>
+  <text x="52" y="62" font-size="12.5" font-family="monospace" fill="#6b7d8a">int  a = compute();</text>
+  <rect x="44" y="72" width="672" height="24" rx="4" fill="#2f6f9f" opacity="0.35"/>
+  <text x="52" y="89" font-size="12.5" font-family="monospace" fill="#e6edf3">strcpy(dst, src);  <tspan fill="#e8b075">// NOLINT(clang-analyzer-security.insecureAPI.strcpy)</tspan></text>
+  <text x="52" y="114" font-size="12.5" font-family="monospace" fill="#6b7d8a">int  b = compute();</text>
+
+  <!-- NOLINTNEXTLINE -->
+  <text x="30" y="158" font-size="12.5" font-weight="bold" fill="#b4661a" letter-spacing="1">② NOLINTNEXTLINE ── 次の行</text>
+  <rect x="30" y="168" width="700" height="86" rx="8" fill="#1f2933"/>
+  <text x="52" y="192" font-size="12.5" font-family="monospace" fill="#e8b075">// NOLINTNEXTLINE(bugprone-*)</text>
+  <rect x="44" y="202" width="672" height="24" rx="4" fill="#b4661a" opacity="0.4"/>
+  <text x="52" y="219" font-size="12.5" font-family="monospace" fill="#e6edf3">legacy_api_call(handle, 0, NULL);</text>
+  <text x="52" y="244" font-size="12.5" font-family="monospace" fill="#6b7d8a">next_line();</text>
+
+  <!-- NOLINTBEGIN -->
+  <text x="30" y="288" font-size="12.5" font-weight="bold" fill="#3d7a52" letter-spacing="1">③ NOLINTBEGIN … NOLINTEND ── 範囲</text>
+  <rect x="30" y="298" width="700" height="86" rx="8" fill="#1f2933"/>
+  <text x="52" y="318" font-size="12" font-family="monospace" fill="#a3d9a5">// NOLINTBEGIN(readability-magic-numbers)</text>
+  <rect x="44" y="326" width="672" height="34" rx="4" fill="#3d7a52" opacity="0.35"/>
+  <text x="52" y="340" font-size="12" font-family="monospace" fill="#e6edf3">const int kLut[] = { 0x1F, 0x3C, 0x7E, ... };</text>
+  <text x="52" y="356" font-size="12" font-family="monospace" fill="#e6edf3">const int kOfs[] = { 12, 47, 93, ... };</text>
+  <text x="52" y="376" font-size="12" font-family="monospace" fill="#a3d9a5">// NOLINTEND(readability-magic-numbers)</text>
+  </g>
+</svg>
+<figcaption><b>図9-1</b>　三つの抑制コメントの適用範囲。網掛けが抑制の効く行。<code>NOLINTBEGIN</code> と <code>NOLINTEND</code> は必ず対で書く。</figcaption>
+</figure>
+
+<pre><code>// ① 同じ行
+strcpy(e.name, line);  // NOLINT
+
+// ② 次の1行
+// NOLINTNEXTLINE
+strcpy(e.name, line);
+
+// ③ 範囲
+// NOLINTBEGIN
+strcpy(e.name, line);
+strcpy(e.value, val);
+// NOLINTEND</code></pre>
+
+<h3>チェック名を指定する</h3>
+
+<p>括弧の中にチェック名を書くと、そのチェックだけを抑制します。<strong>括弧なしの裸の <code>NOLINT</code> は、その行のすべてのチェックを止めます</strong>。これは強すぎます。</p>
+
+<pre><code>// 悪い：何を黙らせているのか分からない。将来別のバグも隠す
+strcpy(e.name, line);  // NOLINT
+
+// 良い：対象が明確
+strcpy(e.name, line);  // NOLINT(clang-analyzer-security.insecureAPI.strcpy)
+
+// 複数指定・グロブも使える
+foo();  // NOLINT(bugprone-*, readability-magic-numbers)</code></pre>
+
+<div class="warn">
+<span class="t">否定グロブは無視される</span>
+<p>公式ドキュメントに明記されています。「<strong>否定グロブはここでは無視される。警告を再有効化してしまうことになるため</strong>」。つまり <code>// NOLINT(-bugprone-*)</code> のような書き方はできません。抑制コメントは「止める」専用です。</p>
+</div>
+
+<h2>9.3 抑制できないもの</h2>
+
+<p><code>NOLINT</code> は Clang-Tidy の診断を止めるものです。<strong>Clang コンパイラ自体のエラー（構文エラー、意味解析のエラーなど）は抑制できません。</strong> 公式ドキュメントの言い方では「clang-tidy は正しいコードを必要とするため」です。</p>
+
+<p>第2章 2.5 節で触れた「Clang でパースできないコード」の問題は、<code>NOLINT</code> では解決しません。解析対象から外す（第10章）か、コンパイルオプションを調整する（第12章）必要があります。</p>
+
+<div class="note">
+<span class="t">マクロの中の警告</span>
+<p>マクロ展開の結果として出た警告は、診断がマクロの<strong>定義側</strong>に付くことも<strong>使用側</strong>に付くこともあります。<code>NOLINT</code> を置いたのに効かないときは、警告メッセージが指しているファイル・行を正確に読み、そちら側に置いてください。マクロ定義に <code>NOLINT</code> を付けると、そのマクロを使うすべての箇所で抑制が効いてしまう点にも注意が必要です。</p>
+</div>
+
+<h2>9.4 抑制する前に考えること</h2>
+
+<p>抑制は最後の手段です。その前に検討すべき選択肢が4つあります。</p>
+
+<figure>
+<svg viewBox="0 0 760 430" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="警告への対処の意思決定フロー">
+  <defs>
+    <marker id="j" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5a6b7a"/>
+    </marker>
+  </defs>
+  <g font-family="sans-serif">
+
+  <rect x="280" y="14" width="200" height="36" rx="18" fill="#1f2933"/>
+  <text x="380" y="38" text-anchor="middle" fill="#fff" font-size="12.5" font-weight="bold">警告が出た</text>
+  <line x1="380" y1="50" x2="380" y2="70" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#j)"/>
+
+  <path d="M380,74 L500,106 L380,138 L260,106 Z" fill="#eef5f0" stroke="#3d7a52" stroke-width="1.5"/>
+  <text x="380" y="103" text-anchor="middle" font-size="12" fill="#1f2933" font-weight="bold">指摘は正しいか？</text>
+  <text x="380" y="121" text-anchor="middle" font-size="11" fill="#5a6b7a">（コードに問題があるか）</text>
+
+  <line x1="260" y1="106" x2="196" y2="106" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#j)"/>
+  <text x="216" y="98" font-size="11" fill="#3d7a52" font-weight="bold">はい</text>
+  <rect x="24" y="86" width="168" height="40" rx="8" fill="#3d7a52"/>
+  <text x="108" y="111" text-anchor="middle" fill="#fff" font-size="12.5" font-weight="bold">コードを直す</text>
+
+  <line x1="380" y1="138" x2="380" y2="158" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#j)"/>
+  <text x="396" y="154" font-size="11" fill="#b4661a" font-weight="bold">いいえ</text>
+
+  <path d="M380,162 L510,196 L380,230 L250,196 Z" fill="#eef4f9" stroke="#2f6f9f" stroke-width="1.5"/>
+  <text x="380" y="191" text-anchor="middle" font-size="12" fill="#1f2933" font-weight="bold">同じ理由の警告が</text>
+  <text x="380" y="209" text-anchor="middle" font-size="12" fill="#1f2933" font-weight="bold">たくさん出ているか？</text>
+
+  <line x1="510" y1="196" x2="570" y2="196" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#j)"/>
+  <text x="524" y="188" font-size="11" fill="#2f6f9f" font-weight="bold">はい</text>
+  <rect x="574" y="158" width="162" height="76" rx="8" fill="#2f6f9f"/>
+  <text x="655" y="182" text-anchor="middle" fill="#fff" font-size="12.5" font-weight="bold">設定で対処</text>
+  <text x="655" y="202" text-anchor="middle" fill="#d6e6f2" font-size="11">・オプション調整（第8章）</text>
+  <text x="655" y="220" text-anchor="middle" fill="#d6e6f2" font-size="11">・Checks から外す（第6章）</text>
+
+  <line x1="380" y1="230" x2="380" y2="250" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#j)"/>
+  <text x="396" y="246" font-size="11" fill="#b4661a" font-weight="bold">いいえ（局所的）</text>
+
+  <path d="M380,254 L510,288 L380,322 L250,288 Z" fill="#fbf4ea" stroke="#b4661a" stroke-width="1.5"/>
+  <text x="380" y="283" text-anchor="middle" font-size="12" fill="#1f2933" font-weight="bold">そのファイル群全体を</text>
+  <text x="380" y="301" text-anchor="middle" font-size="12" fill="#1f2933" font-weight="bold">対象外にしてよいか？</text>
+
+  <line x1="510" y1="288" x2="570" y2="288" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#j)"/>
+  <text x="524" y="280" font-size="11" fill="#b4661a" font-weight="bold">はい</text>
+  <rect x="574" y="266" width="162" height="46" rx="8" fill="#b4661a"/>
+  <text x="655" y="284" text-anchor="middle" fill="#fff" font-size="12" font-weight="bold">ディレクトリ単位で除外</text>
+  <text x="655" y="302" text-anchor="middle" fill="#fde9d0" font-size="10.5">第7章 / 第10章</text>
+
+  <line x1="380" y1="322" x2="380" y2="346" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#j)"/>
+
+  <rect x="230" y="350" width="300" height="66" rx="8" fill="#1f2933"/>
+  <text x="380" y="374" text-anchor="middle" fill="#fff" font-size="13" font-weight="bold">ここで初めて NOLINT</text>
+  <text x="380" y="394" text-anchor="middle" fill="#b8c4cd" font-size="11">チェック名を指定し、理由をコメントに書く</text>
+  <text x="380" y="410" text-anchor="middle" fill="#b8c4cd" font-size="11">範囲は最小に</text>
+  </g>
+</svg>
+<figcaption><b>図9-2</b>　警告への対処の順序。<code>NOLINT</code> は「一件だけ、局所的に、正当な理由がある」ときの最後の手段。</figcaption>
+</figure>
+
+<h2>9.5 抑制の書き方の作法</h2>
+
+<h3>理由を必ず書く</h3>
+
+<p><code>NOLINT</code> の直後に理由を書く欄はありませんが、隣接するコメントとして残せます。<strong>これを義務にしてください。</strong> 半年後の自分と、レビュアーのためです。</p>
+
+<pre><code>// この API は Windows SDK のシグネチャ上、非 const ポインタを要求する。
+// 呼び出し先が書き換えないことはドキュメントで保証されている。
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+auto* p = const_cast&lt;wchar_t*&gt;(path.c_str());</code></pre>
+
+<h3>範囲を最小にする</h3>
+
+<p><code>NOLINTBEGIN</code>〜<code>NOLINTEND</code> は便利ですが、範囲が広がりやすい書式です。「ファイルの先頭で BEGIN、末尾で END」は実質的にそのファイルを解析対象から外すのと同じで、しかも設定ファイルからは見えません。<strong>ファイル全体を外したいなら、第7章のディレクトリ単位の設定で明示的に行うべきです。</strong></p>
+
+<h3>チェック名を必ず括弧に書く</h3>
+
+<p>裸の <code>NOLINT</code> は、将来そこに追加される別のチェックの警告まで隠します。題材コードの <code>strcpy</code> の行に裸の <code>NOLINT</code> を置くと、第32章で作る自作の「禁止 API チェック」まで効かなくなります。</p>
+
+<h2>9.6 抑制を可視化する</h2>
+
+<p>抑制は増えます。放置すると「解析は通っているが、実は半分が抑制されている」状態になります。定期的に数えてください。</p>
+
+<pre class="term"><code><span class="p">&gt;</span> findstr /s /c:"NOLINT" *.cpp *.h | find /c /v ""
+<span class="o">23</span>
+
+<span class="p">&gt;</span> findstr /s /c:"NOLINT" *.cpp *.h | findstr /v "("
+<span class="o">(チェック名を書いていない裸の NOLINT を洗い出す)</span></code></pre>
+
+<p>Clang-Tidy 自身も、抑制した件数を実行の最後に報告します。</p>
+
+<pre class="term"><code><span class="p">&gt;</span> clang-tidy config_loader.cpp -- -std=c++23
+<span class="o">...
+Suppressed 7 warnings (5 in non-user code, 2 NOLINT).</span></code></pre>
+
+<p>この行の <code>NOLINT</code> の数が増え続けているなら、ルールが実態に合っていないサインです。第8章のオプション調整か、そもそも <code>Checks</code> から外すことを検討してください。<code>--quiet</code> を付けるとこの統計は出なくなりますが、<strong>普段は出したままにしておくことをおすすめします</strong>。</p>
+
+<div class="note">
+<span class="t">「non-user code」とは</span>
+<p>統計に出る「in non-user code」は、ヘッダフィルタによって表示されなかった診断の数です。<code>NOLINT</code> による抑制とは別物で、次章の主題になります。この2つの数字が分かれて表示されるのは、切り分けに役立ちます。</p>
+</div>
+
+<h2>9.7 【ハンズオン】抑制を使い分ける</h2>
+
+<div class="hands">
+<div class="hd">HANDS-ON 9　抑制の効き方を確かめる</div>
+<div class="bd">
+<ol>
+  <li><strong>抑制対象を用意する。</strong> <code>.clang-tidy</code> の <code>Checks</code> に <code>readability-magic-numbers</code> が入っている状態で <code>config_loader.cpp</code> をビルドし、<code>4096</code> / <code>4095</code> に警告が出ることを確認します。</li>
+
+  <li><strong>裸の NOLINT を試す。</strong> <code>new char[4096];</code> の行末に <code>// NOLINT</code> を付けてビルドし、警告が消えることを確認します。</li>
+
+  <li><strong>裸の NOLINT の副作用を確かめる。</strong> <code>Checks</code> に <code>cppcoreguidelines-owning-memory</code>（またはお使いのバージョンで <code>new</code> に反応するチェック）を足してビルドします。<strong>裸の <code>NOLINT</code> がそちらの警告まで消してしまう</strong> ことを確認してください。</li>
+
+  <li><strong>チェック名を指定する。</strong> <code>// NOLINT(readability-magic-numbers)</code> に書き換え、マジックナンバーの警告だけが消え、もう一方は残ることを確認します。</li>
+
+  <li><strong>NOLINTNEXTLINE を使う。</strong> 行が長くて行末コメントが読みにくい場合を想定し、前の行に移して同じ結果になることを確認します。</li>
+
+  <li><strong>範囲抑制を試す。</strong> <code>load()</code> の while ループ全体を <code>NOLINTBEGIN(readability-magic-numbers)</code> 〜 <code>NOLINTEND(readability-magic-numbers)</code> で囲み、範囲内だけ抑制されることを確認します。確認したら削除します。</li>
+
+  <li><strong>統計を読む。</strong> コマンドラインで解析し、末尾の <code>Suppressed N warnings</code> の行を確認します。
+<pre><code>clang-tidy config_loader.cpp -- -std=c++23</code></pre>
+  </li>
+
+  <li><strong>棚卸しの練習。</strong> 手順で入れた <code>NOLINT</code> を <code>findstr</code> で数え、理由コメントが書かれていないものを洗い出します。最後に、すべて削除して元の状態に戻してください。<strong>この章の <code>NOLINT</code> は練習用であり、第10章以降には持ち込みません。</strong></li>
+</ol>
+</div>
+</div>
+
+<div class="tip">
+<span class="t">レビューでの合言葉</span>
+<p>コードレビューで <code>NOLINT</code> を見つけたら、聞くべきことは一つです。<strong>「なぜ指摘が誤りだと言えるのか」</strong>。答えられるなら、その答えをコメントに書いてもらう。答えられないなら、それは抑制ではなく修正の対象です。この一問だけで、抑制の質はかなり保てます。</p>
+</div>
+
+<div class="summary">
+<h2>この章のまとめ</h2>
+<ul>
+  <li>抑制が正当なのは、誤検出・意図的な逸脱・外部要因・生成コード・段階導入の途中に限る。</li>
+  <li>書式は <code>// NOLINT</code>（同じ行）、<code>// NOLINTNEXTLINE</code>（次の行）、<code>// NOLINTBEGIN</code>〜<code>// NOLINTEND</code>（範囲）。</li>
+  <li><strong>必ず括弧でチェック名を指定する。</strong> 裸の <code>NOLINT</code> は将来のチェックまで隠す。否定グロブは無視される。</li>
+  <li>Clang コンパイラ自身のエラーは <code>NOLINT</code> では抑制できない。</li>
+  <li>抑制の前に、コードの修正 → オプション調整 → チェックの除外 → ディレクトリ単位の除外、を順に検討する。</li>
+  <li>理由をコメントで残し、範囲は最小にする。抑制の件数は定期的に棚卸しする。</li>
+  <li>実行末尾の <code>Suppressed N warnings</code> は、<code>NOLINT</code> による抑制とヘッダフィルタによる非表示を分けて教えてくれる。</li>
+</ul>
+</div>
+
+<p class="next"><strong>次章：</strong> 第10章「ヘッダファイルの扱い」では、統計に出てきた「non-user code」の正体を扱います。同じヘッダが何度も解析されて同じ警告が重複する問題と、その制御方法が主題です。</p>
+
+</div>
+</body>
+</html>

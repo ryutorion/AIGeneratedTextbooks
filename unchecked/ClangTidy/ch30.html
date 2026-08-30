@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第30章 最初のカスタムチェック ─ Clang-Tidy入門</title>
+<style>
+  :root{
+    --ink:#1f2933; --sub:#5a6b7a; --line:#d8dee4; --bg:#ffffff;
+    --code-bg:#f6f8fa; --code-line:#e2e8ee;
+    --accent:#2f6f9f; --accent-bg:#eef4f9;
+    --warn:#b4661a; --warn-bg:#fbf4ea;
+    --ok:#3d7a52; --ok-bg:#eef5f0;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0; background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Noto Sans JP","Meiryo",sans-serif;
+    font-size:16px; line-height:1.95; font-feature-settings:"palt" 1;}
+  .page{max-width:47rem; margin:0 auto; padding:3.5rem 1.6rem 6rem}
+  .chap-no{font-size:.8rem; letter-spacing:.22em; color:var(--accent); font-weight:700; margin:0 0 .5rem}
+  h1{font-size:1.85rem; line-height:1.5; margin:0 0 .6rem; letter-spacing:.01em}
+  .lede{color:var(--sub); font-size:1rem; margin:0 0 2.2rem; padding-bottom:1.6rem; border-bottom:2px solid var(--ink)}
+  h2{font-size:1.28rem; margin:3rem 0 1rem; padding-left:.7rem; border-left:4px solid var(--accent); line-height:1.6}
+  h3{font-size:1.05rem; margin:2.2rem 0 .7rem}
+  h3::before{content:"◆ "; color:var(--accent); font-size:.8em}
+  p{margin:0 0 1.1rem}
+  ul,ol{margin:0 0 1.2rem; padding-left:1.6rem}
+  li{margin:.35rem 0}
+  code{font-family:"Cascadia Mono","Consolas","SFMono-Regular",monospace; font-size:.9em;
+       background:var(--code-bg); border:1px solid var(--code-line); border-radius:4px; padding:.08em .35em}
+  pre{background:var(--code-bg); border:1px solid var(--code-line); border-radius:8px;
+      padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.7}
+  pre code{background:none; border:none; padding:0; font-size:.86rem}
+  pre.term{background:#1f2933; border-color:#1f2933; color:#e6edf3}
+  pre.term code{color:#e6edf3}
+  pre.term .p{color:#7fb2d6}
+  pre.term .o{color:#9fb3c0}
+  pre.term .y{color:#e8b075}
+  pre.term .e{color:#e08a74}
+  .cap{font-size:.82rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+  figure{margin:2rem 0 2.2rem}
+  figure svg{display:block; width:100%; height:auto; border:1px solid var(--line); border-radius:8px; background:#fff}
+  figcaption{font-size:.85rem; color:var(--sub); margin-top:.6rem}
+  figcaption b{color:var(--ink)}
+  .box{border-radius:8px; padding:1rem 1.2rem; margin:1.6rem 0; font-size:.94rem}
+  .box p:last-child{margin-bottom:0}
+  .box .t{font-weight:700; display:block; margin-bottom:.35rem; font-size:.88rem; letter-spacing:.04em}
+  .note{background:var(--accent-bg); border-left:4px solid var(--accent)} .note .t{color:var(--accent)}
+  .warn{background:var(--warn-bg); border-left:4px solid var(--warn)} .warn .t{color:var(--warn)}
+  .tip{background:var(--ok-bg); border-left:4px solid var(--ok)} .tip .t{color:var(--ok)}
+  .hands{border:1px solid var(--line); border-radius:10px; margin:2rem 0; overflow:hidden}
+  .hands>.hd{background:var(--ink); color:#fff; padding:.55rem 1.1rem; font-size:.85rem; letter-spacing:.1em; font-weight:700}
+  .hands>.bd{padding:1.3rem 1.3rem .4rem}
+  .hands ol{counter-reset:step; list-style:none; padding-left:0}
+  .hands ol>li{counter-increment:step; position:relative; padding-left:2.4rem; margin:0 0 1.2rem}
+  .hands ol>li::before{content:counter(step); position:absolute; left:0; top:.25rem;
+    width:1.7rem; height:1.7rem; border-radius:50%; background:var(--accent); color:#fff;
+    font-size:.82rem; font-weight:700; display:flex; align-items:center; justify-content:center; line-height:1}
+  table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+  th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+  th{background:var(--code-bg); font-weight:700}
+  .summary{border:2px solid var(--ink); border-radius:10px; padding:1.3rem 1.5rem; margin:3rem 0 1rem}
+  .summary h2{margin:0 0 .8rem; border:none; padding:0; font-size:1.1rem}
+  .summary ul{margin-bottom:0}
+  .next{color:var(--sub); font-size:.94rem; border-top:1px solid var(--line); padding-top:1.2rem; margin-top:2.5rem}
+  @media (max-width:600px){ body{font-size:15px} .page{padding:2.2rem 1.1rem 4rem} h1{font-size:1.5rem} }
+</style>
+</head>
+<body>
+<div class="page">
+
+<p class="chap-no">第 30 章</p>
+<h1>最初のカスタムチェック</h1>
+<p class="lede">書きます。第28章で <code>clang-query</code> で確認したクエリを、<code>.clang-tidy</code> に移すだけです。ただし、そのまま貼っても動きません。<strong>clang-query のセッション設定は設定ファイルに持っていけない</strong>という第27章の話が、ここで具体的な作業になります。</p>
+
+<h2>30.1 公式の例</h2>
+
+<p>まず、公式ドキュメントに載っている最小の例を見ます。</p>
+
+<pre><code>Checks: -*,custom-call-main-function
+CustomChecks:
+  - Name: call-main-function
+    Query: |
+        match callExpr(
+          callee(
+            functionDecl(isMain()).bind("fn")
+          )
+        ).bind("callee")
+    Diagnostic:
+      - BindName: fn
+        Message: main function.
+        Level: Note
+      - BindName: callee
+        Message: call to main function.
+        Level: Warning</code></pre>
+<p class="cap">リスト30-1　公式ドキュメントの例（<code>main</code> 関数の呼び出しを検出する）</p>
+
+<p>この短い YAML に、必要な要素がすべて入っています。読み解きましょう。</p>
+
+<table>
+<tr><th>要素</th><th>役割</th></tr>
+<tr><td><code>CustomChecks</code></td><td>カスタムチェックの<strong>リスト</strong>。複数書ける</td></tr>
+<tr><td><code>Name</code></td><td>チェック名。<code>-checks</code> で指定するときに使う</td></tr>
+<tr><td><code>Query</code></td><td>clang-query の文字列。<strong><code>match</code> キーワードから始まる</strong></td></tr>
+<tr><td><code>Diagnostic</code></td><td>報告する診断の<strong>リスト</strong></td></tr>
+<tr><td><code>BindName</code></td><td>Query の中で <code>.bind()</code> した名前</td></tr>
+<tr><td><code>Message</code></td><td>表示するメッセージ</td></tr>
+<tr><td><code>Level</code></td><td><code>Warning</code> または <code>Note</code></td></tr>
+</table>
+
+<div class="note">
+<span class="t">この例は C++ ではコンパイルできない</span>
+<p>C++ では <code>main</code> を呼び出すこと自体が規格違反です。この例はドキュメント上の説明用と考えてください。<strong>実際に動かすなら、次節以降の例を使います。</strong></p>
+</div>
+
+<h2>30.2 名前の流れ</h2>
+
+<p>混乱しやすいのが名前です。<code>Name</code> に書いた文字列と、<code>Checks</code> に書く文字列は<strong>一致しません</strong>。</p>
+
+<figure>
+<svg viewBox="0 0 760 280" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="カスタムチェックの名前の流れ">
+  <defs>
+    <marker id="a30" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5a6b7a"/>
+    </marker>
+  </defs>
+  <g font-family="sans-serif">
+
+  <rect x="24" y="30" width="200" height="76" rx="8" fill="#2f6f9f"/>
+  <text x="124" y="54" text-anchor="middle" fill="#fff" font-size="12" font-weight="bold">① 定義するとき</text>
+  <rect x="42" y="64" width="164" height="30" rx="5" fill="#fff"/>
+  <text x="124" y="84" text-anchor="middle" font-size="11" font-family="monospace" fill="#1f2933">Name: no-strcpy</text>
+
+  <line x1="224" y1="68" x2="256" y2="68" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#a30)"/>
+  <text x="240" y="58" text-anchor="middle" font-size="10" fill="#5a6b7a">登録</text>
+
+  <rect x="260" y="30" width="230" height="76" rx="8" fill="#1f2933"/>
+  <text x="375" y="54" text-anchor="middle" fill="#fff" font-size="12" font-weight="bold">② 内部でのチェック名</text>
+  <rect x="278" y="64" width="194" height="30" rx="5" fill="#e8b075"/>
+  <text x="375" y="84" text-anchor="middle" font-size="11" font-family="monospace" fill="#1f2933" font-weight="bold">custom-no-strcpy</text>
+
+  <line x1="490" y1="68" x2="522" y2="68" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#a30)"/>
+  <text x="506" y="58" text-anchor="middle" font-size="10" fill="#5a6b7a">参照</text>
+
+  <rect x="526" y="30" width="210" height="76" rx="8" fill="#b4661a"/>
+  <text x="631" y="54" text-anchor="middle" fill="#fff" font-size="12" font-weight="bold">③ 有効化するとき</text>
+  <rect x="544" y="64" width="174" height="30" rx="5" fill="#fff"/>
+  <text x="631" y="84" text-anchor="middle" font-size="10.5" font-family="monospace" fill="#1f2933">Checks: custom-no-strcpy</text>
+
+  <rect x="24" y="126" width="712" height="72" rx="8" fill="#f7e9e5" stroke="#a04a34" stroke-width="1.6"/>
+  <text x="46" y="150" font-size="12.5" font-weight="bold" fill="#a04a34">最も多い失敗：接頭辞の付け忘れ</text>
+  <text x="46" y="174" font-size="11.5" font-family="monospace" fill="#5a6b7a">Checks: '-*,no-strcpy'　　　　← 何にも一致しない。エラーも出ない（第6章）</text>
+  <text x="46" y="192" font-size="11.5" font-family="monospace" fill="#3d7a52">Checks: '-*,custom-no-strcpy'　← 正解</text>
+
+  <rect x="24" y="214" width="712" height="52" rx="8" fill="#eef5f0" stroke="#3d7a52" stroke-width="1.5"/>
+  <text x="46" y="238" font-size="12" font-weight="bold" fill="#3d7a52">まとめて有効にすることもできる</text>
+  <text x="46" y="258" font-size="11.5" font-family="monospace" fill="#1f2933">Checks: '-*,custom-*'　　自作チェックを全部有効にする</text>
+  </g>
+</svg>
+<figcaption><b>図30-1</b>　名前の流れ。<code>Name</code> に <code>custom-</code> を書く必要はない（自動で付く）が、<code>Checks</code> では必要。</figcaption>
+</figure>
+
+<h2>30.3 clang-query から移すときの変換</h2>
+
+<p>第28章のハンズオンで作ったクエリファイルは、こんな形でした。</p>
+
+<pre><code># queries/no-strcpy.txt
+set traversal IgnoreUnlessSpelledInSource
+set output diag
+let unsafeName hasAnyName("::strcpy", "::strcat", "::sprintf")
+m callExpr(callee(functionDecl(unsafeName)), isExpansionInMainFile()).bind("call")</code></pre>
+
+<p>このうち、設定ファイルに持っていけるのは <strong>最後の1行だけ</strong>です。</p>
+
+<figure>
+<svg viewBox="0 0 760 360" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="clang-query から .clang-tidy への変換">
+  <g font-family="sans-serif">
+
+  <rect x="24" y="16" width="712" height="32" rx="6" fill="#1f2933"/>
+  <text x="380" y="37" text-anchor="middle" fill="#fff" font-size="12.5" font-weight="bold">clang-query のクエリファイル → .clang-tidy の Query</text>
+
+  <g font-size="11">
+  <rect x="24" y="60" width="330" height="34" rx="5" fill="#f7e9e5" stroke="#a04a34"/>
+  <text x="40" y="82" font-family="monospace" fill="#1f2933">set traversal IgnoreUnlessSpelledInSource</text>
+  <text x="370" y="82" fill="#a04a34" font-size="16">✕</text>
+  <rect x="396" y="60" width="340" height="34" rx="5" fill="#eef5f0" stroke="#3d7a52"/>
+  <text x="412" y="82" fill="#1f2933">→ <tspan font-family="monospace">ignoringImplicit()</tspan> 等で式に埋め込む</text>
+
+  <rect x="24" y="102" width="330" height="34" rx="5" fill="#f7e9e5" stroke="#a04a34"/>
+  <text x="40" y="124" font-family="monospace" fill="#1f2933">set output diag</text>
+  <text x="370" y="124" fill="#a04a34" font-size="16">✕</text>
+  <rect x="396" y="102" width="340" height="34" rx="5" fill="#eef5f0" stroke="#3d7a52"/>
+  <text x="412" y="124" fill="#1f2933">→ 不要（Diagnostic が出力を決める）</text>
+
+  <rect x="24" y="144" width="330" height="34" rx="5" fill="#f7e9e5" stroke="#a04a34"/>
+  <text x="40" y="166" font-family="monospace" fill="#1f2933">let unsafeName hasAnyName(…)</text>
+  <text x="370" y="166" fill="#a04a34" font-size="16">✕</text>
+  <rect x="396" y="144" width="340" height="34" rx="5" fill="#eef5f0" stroke="#3d7a52"/>
+  <text x="412" y="166" fill="#1f2933">→ 展開して直接書く</text>
+
+  <rect x="24" y="186" width="330" height="34" rx="5" fill="#eef5f0" stroke="#3d7a52" stroke-width="1.8"/>
+  <text x="40" y="208" font-family="monospace" fill="#1f2933" font-weight="bold">m callExpr(…).bind("call")</text>
+  <text x="368" y="208" fill="#3d7a52" font-size="16">○</text>
+  <rect x="396" y="186" width="340" height="34" rx="5" fill="#3d7a52"/>
+  <text x="412" y="208" fill="#fff" font-weight="bold">→ Query に書く（<tspan font-family="monospace">match</tspan> と書き直す）</text>
+  </g>
+
+  <rect x="24" y="236" width="712" height="52" rx="8" fill="#fbf4ea" stroke="#b4661a" stroke-width="1.8"/>
+  <text x="46" y="260" font-size="12" font-weight="bold" fill="#b4661a">略記 <tspan font-family="monospace">m</tspan> ではなく <tspan font-family="monospace">match</tspan> と書く</text>
+  <text x="46" y="280" font-size="11.5" fill="#1f2933">公式の例も <tspan font-family="monospace">match</tspan> で始まっている。対話中は <tspan font-family="monospace">m</tspan> でよいが、設定ファイルでは正式名で書く</text>
+
+  <rect x="24" y="300" width="712" height="46" rx="8" fill="#eef4f9" stroke="#2f6f9f" stroke-width="1.5"/>
+  <text x="46" y="322" font-size="12" font-weight="bold" fill="#2f6f9f">移したあとが本番</text>
+  <text x="46" y="340" font-size="11.5" fill="#1f2933">clang-query で N 件だったものが、設定ファイル経由でも N 件出ることを<tspan font-weight="bold">必ず確認する</tspan></text>
+  </g>
+</svg>
+<figcaption><b>図30-2</b>　変換の対応。<strong>セッション設定は落ちる</strong>ので、走査モードは式に埋め込む必要がある。</figcaption>
+</figure>
+
+<h2>30.4 動く最小の例を書く</h2>
+
+<p>まずは確実に動くもので、仕組みを通します。<code>goto</code> の使用を検出するチェックです。</p>
+
+<pre><code>---
+Checks: '-*,custom-no-goto'
+
+CustomChecks:
+  - Name: no-goto
+    Query: |
+      match gotoStmt().bind("g")
+    Diagnostic:
+      - BindName: g
+        Message: "goto は使用しないでください"
+        Level: Warning
+...</code></pre>
+<p class="cap">リスト30-2　最初のカスタムチェック</p>
+
+<pre><code>// samples/ch30_goto.cpp
+void f(int n) {
+    for (int i = 0; i &lt; n; ++i) {
+        if (i == 5) goto done;
+    }
+done:
+    return;
+}</code></pre>
+
+<pre class="term"><code><span class="p">&gt;</span> clang-tidy --experimental-custom-checks ch30_goto.cpp -- -std=c++23
+<span class="e">ch30_goto.cpp:4:21: warning:</span> <span class="o">goto は使用しないでください [custom-no-goto]</span>
+<span class="o">        if (i == 5) goto done;</span>
+<span class="o">                    ^</span></code></pre>
+
+<p><strong>末尾の <code>[custom-no-goto]</code> に注目してください。</strong> 標準チェックの警告とまったく同じ形式です。ここから先、第2部で学んだことがすべて使えます。</p>
+
+<h2>30.5 YAML の書き方の要点</h2>
+
+<h3><code>|</code> で複数行のクエリを書く</h3>
+
+<p>クエリは長くなります。YAML のリテラルブロック（<code>|</code>）を使うと、改行を含めてそのまま書けます。</p>
+
+<pre><code>    Query: |
+      match callExpr(
+        callee(functionDecl(hasAnyName("::strcpy", "::strcat"))),
+        isExpansionInMainFile()
+      ).bind("call")</code></pre>
+
+<div class="warn">
+<span class="t">インデントに注意</span>
+<p><code>|</code> の次の行から、<strong>一段深いインデント</strong>が必要です。そしてタブは使えません（第7章）。クエリの中の改行やインデントは、そのまま文字列として渡されます。<code>clang-query</code> は改行を含む式を受け付けるので、これで問題ありません。</p>
+</div>
+
+<h3>メッセージの引用符</h3>
+
+<p>メッセージに日本語やコロン、括弧を含める場合は、ダブルクォートで囲むのが安全です。YAML ではコロンの後ろに空白があると、キーと値の区切りと解釈されてしまいます。</p>
+
+<pre><code>        Message: "strcpy は禁止です: SafeCopy() を使ってください"</code></pre>
+
+<h2>30.6 【ハンズオン】最初のチェックを動かす</h2>
+
+<div class="hands">
+<div class="hd">HANDS-ON 30-A　仕組みを通す</div>
+<div class="bd">
+<ol>
+  <li><strong>検証ファイルを作る。</strong> <code>samples\ch30_goto.cpp</code> を 30.4 節の内容で作ります。</li>
+
+  <li><strong>設定を書く。</strong> <code>samples\</code> ディレクトリに <code>.clang-tidy</code> を作り、リスト30-2 の内容を書きます。<strong>親ディレクトリの設定を引き継がないよう、ここでは独立した設定にします</strong>（第7章）。</li>
+
+  <li><strong>実行する。</strong>
+<pre><code>clang-tidy --experimental-custom-checks ch30_goto.cpp -- -std=c++23</code></pre>
+    警告が出れば成功です。<strong>ここが第6部の最初の関門です。</strong></li>
+
+  <li><strong>フラグを外してみる。</strong>
+<pre><code>clang-tidy ch30_goto.cpp -- -std=c++23</code></pre>
+    警告が出ないことを確認します。<strong>この挙動を体で覚えてください。</strong> 「設定は正しいのに動かない」の第一容疑者になります。</li>
+
+  <li><strong>チェック名を確認する。</strong>
+<pre><code>clang-tidy --experimental-custom-checks --list-checks ch30_goto.cpp -- -std=c++23</code></pre>
+    一覧に <code>custom-no-goto</code> が含まれることを確認します。</li>
+
+  <li><strong>接頭辞を間違えてみる。</strong> <code>Checks</code> を <code>'-*,no-goto'</code> に変えて実行し、<strong>エラーにならず、単に警告が出なくなる</strong>ことを確認します（図30-1）。確認したら戻します。</li>
+
+  <li><strong>標準チェックと同じ扱いであることを確かめる。</strong>
+    <ul>
+      <li><code>goto done;</code> の行末に <code>// NOLINT(custom-no-goto)</code> を付け、警告が消えることを確認（第9章）</li>
+      <li><code>WarningsAsErrors: 'custom-no-goto'</code> を設定に足し、警告がエラーになることを確認（第22章）</li>
+    </ul>
+    <strong>自作チェックが、標準チェックとまったく同じ仕組みに載っていることの実証です。</strong></li>
+</ol>
+</div>
+</div>
+
+<div class="hands">
+<div class="hd">HANDS-ON 30-B　第28章のクエリを移す</div>
+<div class="bd">
+<ol>
+  <li><strong>元のクエリを確認する。</strong> <code>queries\no-strcpy.txt</code> を開き、<code>clang-query</code> で実行して<strong>件数を記録</strong>します。
+<pre><code>clang-query ch28_rules.cpp -- -std=c++23</code></pre>
+<pre><code>file queries/no-strcpy.txt</code></pre>
+  </li>
+
+  <li><strong>変換する。</strong> 図30-2 の表に従って、設定ファイルの形に直します。
+    <ul>
+      <li><code>set</code> 行を削除</li>
+      <li><code>let</code> を展開</li>
+      <li><code>m</code> を <code>match</code> に</li>
+      <li>走査モードに依存していた部分を <code>ignoringImplicit()</code> などに置き換え（このクエリでは不要のはず）</li>
+    </ul>
+  </li>
+
+  <li><strong>設定ファイルに書く。</strong>
+<pre><code>---
+Checks: '-*,custom-*'
+
+CustomChecks:
+  - Name: no-goto
+    Query: |
+      match gotoStmt().bind("g")
+    Diagnostic:
+      - BindName: g
+        Message: "goto は使用しないでください"
+        Level: Warning
+
+  - Name: no-unsafe-string-api
+    Query: |
+      match callExpr(
+        callee(functionDecl(hasAnyName("::strcpy", "::strcat", "::sprintf"))),
+        isExpansionInMainFile()
+      ).bind("call")
+    Diagnostic:
+      - BindName: call
+        Message: "境界チェックのない文字列 API は使用しないでください"
+        Level: Warning
+...</code></pre>
+    <strong><code>CustomChecks</code> はリストなので、複数のチェックを並べられます。</strong></li>
+
+  <li><strong>件数を突き合わせる。</strong>
+<pre><code>clang-tidy --experimental-custom-checks ch28_rules.cpp -- -std=c++23</code></pre>
+    <strong>手順1で記録した件数と一致することを確認してください。</strong> 一致しなければ、変換のどこかで意味が変わっています。第36章のデバッグ手順に進む前に、まず <code>clang-query</code> に戻って比較します。</li>
+
+  <li><strong>検出されるべきでないコードを確認する。</strong> <code>ch28_rules.cpp</code> の <code>strncpy</code> の行に警告が出ていないことを確認します。<strong>「出るべきものが出る」と「出るべきでないものが出ない」の両方を確認するのが鉄則です。</strong></li>
+
+  <li><strong>ヘッダを対象外にしていることを確認する。</strong> <code>isExpansionInMainFile()</code> を一時的に外して実行し、件数がどう変わるかを見ます。標準ヘッダ内の宣言に反応していないかを確認してください。</li>
+
+  <li><strong>回帰テストの土台を作る。</strong> 手順4・5 の確認内容を、<code>tests\custom-checks\README.md</code> に書き留めます。
+<pre><code># カスタムチェックの期待動作
+
+| チェック | 対象ファイル | 期待件数 | 検出されるべき行 | 検出されてはいけない行 |
+|---|---|---|---|---|
+| custom-no-goto | ch30_goto.cpp | 1 | goto done; | ─ |
+| custom-no-unsafe-string-api | ch28_rules.cpp | 1 | strcpy(dst, src); | strncpy(...) |</code></pre>
+    <strong>第37章で、この表を自動検証する仕組みを作ります。</strong></li>
+</ol>
+</div>
+</div>
+
+<div class="summary">
+<h2>この章のまとめ</h2>
+<ul>
+  <li><code>CustomChecks</code> はリスト。各要素が <code>Name</code> / <code>Query</code> / <code>Diagnostic</code> を持つ。</li>
+  <li><strong><code>Name: no-goto</code> と書くと、チェック名は <code>custom-no-goto</code> になる。</strong> <code>Checks</code> では接頭辞込みで書く。付け忘れてもエラーは出ない。</li>
+  <li>クエリは <code>match</code> キーワードから始まる。対話中の略記 <code>m</code> ではなく正式名で書く。</li>
+  <li><strong><code>set traversal</code> / <code>set output</code> / <code>let</code> は設定ファイルに持っていけない。</strong> 走査モードは <code>ignoringImplicit()</code> 等で式に埋め込み、<code>let</code> は展開する。</li>
+  <li>YAML のリテラルブロック <code>|</code> で複数行のクエリを書く。インデントとタブに注意。</li>
+  <li>登録されたチェックは<strong>標準チェックと完全に同じ扱い</strong>。<code>NOLINT</code> も <code>WarningsAsErrors</code> も効く。</li>
+  <li>移したら<strong>必ず件数を突き合わせる</strong>。「出るべきものが出る」と「出るべきでないものが出ない」の両方を確認する。</li>
+</ul>
+</div>
+
+<p class="next"><strong>次章：</strong> 第31章「フィールドを正確に理解する」では、<code>Name</code> / <code>Query</code> / <code>Diagnostic</code> の各フィールドの意味と制約を、一つずつ正確に押さえます。特に <code>Warning</code> と <code>Note</code> の使い分けは、診断の質を大きく左右します。</p>
+
+</div>
+</body>
+</html>

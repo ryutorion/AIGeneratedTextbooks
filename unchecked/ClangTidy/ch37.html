@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第37章 誤検出とどう付き合うか ─ Clang-Tidy入門</title>
+<style>
+  :root{
+    --ink:#1f2933; --sub:#5a6b7a; --line:#d8dee4; --bg:#ffffff;
+    --code-bg:#f6f8fa; --code-line:#e2e8ee;
+    --accent:#2f6f9f; --accent-bg:#eef4f9;
+    --warn:#b4661a; --warn-bg:#fbf4ea;
+    --ok:#3d7a52; --ok-bg:#eef5f0;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0; background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Noto Sans JP","Meiryo",sans-serif;
+    font-size:16px; line-height:1.95; font-feature-settings:"palt" 1;}
+  .page{max-width:47rem; margin:0 auto; padding:3.5rem 1.6rem 6rem}
+  .chap-no{font-size:.8rem; letter-spacing:.22em; color:var(--accent); font-weight:700; margin:0 0 .5rem}
+  h1{font-size:1.85rem; line-height:1.5; margin:0 0 .6rem; letter-spacing:.01em}
+  .lede{color:var(--sub); font-size:1rem; margin:0 0 2.2rem; padding-bottom:1.6rem; border-bottom:2px solid var(--ink)}
+  h2{font-size:1.28rem; margin:3rem 0 1rem; padding-left:.7rem; border-left:4px solid var(--accent); line-height:1.6}
+  h3{font-size:1.05rem; margin:2.2rem 0 .7rem}
+  h3::before{content:"◆ "; color:var(--accent); font-size:.8em}
+  p{margin:0 0 1.1rem}
+  ul,ol{margin:0 0 1.2rem; padding-left:1.6rem}
+  li{margin:.35rem 0}
+  code{font-family:"Cascadia Mono","Consolas","SFMono-Regular",monospace; font-size:.9em;
+       background:var(--code-bg); border:1px solid var(--code-line); border-radius:4px; padding:.08em .35em}
+  pre{background:var(--code-bg); border:1px solid var(--code-line); border-radius:8px;
+      padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.7}
+  pre code{background:none; border:none; padding:0; font-size:.86rem}
+  pre.term{background:#1f2933; border-color:#1f2933; color:#e6edf3}
+  pre.term code{color:#e6edf3}
+  pre.term .p{color:#7fb2d6}
+  pre.term .o{color:#9fb3c0}
+  pre.term .g{color:#a3d9a5}
+  pre.term .e{color:#e08a74}
+  .cap{font-size:.82rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+  figure{margin:2rem 0 2.2rem}
+  figure svg{display:block; width:100%; height:auto; border:1px solid var(--line); border-radius:8px; background:#fff}
+  figcaption{font-size:.85rem; color:var(--sub); margin-top:.6rem}
+  figcaption b{color:var(--ink)}
+  .box{border-radius:8px; padding:1rem 1.2rem; margin:1.6rem 0; font-size:.94rem}
+  .box p:last-child{margin-bottom:0}
+  .box .t{font-weight:700; display:block; margin-bottom:.35rem; font-size:.88rem; letter-spacing:.04em}
+  .note{background:var(--accent-bg); border-left:4px solid var(--accent)} .note .t{color:var(--accent)}
+  .warn{background:var(--warn-bg); border-left:4px solid var(--warn)} .warn .t{color:var(--warn)}
+  .tip{background:var(--ok-bg); border-left:4px solid var(--ok)} .tip .t{color:var(--ok)}
+  .hands{border:1px solid var(--line); border-radius:10px; margin:2rem 0; overflow:hidden}
+  .hands>.hd{background:var(--ink); color:#fff; padding:.55rem 1.1rem; font-size:.85rem; letter-spacing:.1em; font-weight:700}
+  .hands>.bd{padding:1.3rem 1.3rem .4rem}
+  .hands ol{counter-reset:step; list-style:none; padding-left:0}
+  .hands ol>li{counter-increment:step; position:relative; padding-left:2.4rem; margin:0 0 1.2rem}
+  .hands ol>li::before{content:counter(step); position:absolute; left:0; top:.25rem;
+    width:1.7rem; height:1.7rem; border-radius:50%; background:var(--accent); color:#fff;
+    font-size:.82rem; font-weight:700; display:flex; align-items:center; justify-content:center; line-height:1}
+  table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+  th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+  th{background:var(--code-bg); font-weight:700}
+  .summary{border:2px solid var(--ink); border-radius:10px; padding:1.3rem 1.5rem; margin:3rem 0 1rem}
+  .summary h2{margin:0 0 .8rem; border:none; padding:0; font-size:1.1rem}
+  .summary ul{margin-bottom:0}
+  .next{color:var(--sub); font-size:.94rem; border-top:1px solid var(--line); padding-top:1.2rem; margin-top:2.5rem}
+  @media (max-width:600px){ body{font-size:15px} .page{padding:2.2rem 1.1rem 4rem} h1{font-size:1.5rem} }
+</style>
+</head>
+<body>
+<div class="page">
+
+<p class="chap-no">第 37 章</p>
+<h1>誤検出とどう付き合うか</h1>
+<p class="lede">動くようになった後の話です。自作チェックの偽陽性は、標準チェックのそれとは性質が違います。<strong>直せるのが自分たちしかいない。</strong> そして実験的機能である以上、<strong>ある日突然、挙動が変わることもある。</strong> 放置すれば「うちの静的解析はうるさいだけ」という評判が定着します。そうさせない仕組みを作ります。</p>
+
+<h2>37.1 責任の所在が違う</h2>
+
+<figure>
+<svg viewBox="0 0 760 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="標準チェックと自作チェックの偽陽性の違い">
+  <g font-family="sans-serif">
+
+  <rect x="24" y="20" width="350" height="260" rx="10" fill="#eef4f9" stroke="#2f6f9f" stroke-width="1.6"/>
+  <text x="199" y="46" text-anchor="middle" font-size="13" font-weight="bold" fill="#2f6f9f">標準チェックの偽陽性</text>
+  <g font-size="11.5" fill="#1f2933">
+  <text x="44" y="76">・世界中のユーザーが使っている</text>
+  <text x="44" y="100">・公式ドキュメントに既知の制限がある</text>
+  <text x="44" y="124">・検索すれば同じ悩みが出てくる</text>
+  <text x="44" y="148">・バージョンが上がれば改善されうる</text>
+  <text x="44" y="172">・最後は「そのチェックを外す」で済む</text>
+  </g>
+  <rect x="44" y="192" width="310" height="70" rx="6" fill="#fff" stroke="#c5d6e4"/>
+  <text x="199" y="216" text-anchor="middle" font-size="11.5" fill="#2f6f9f" font-weight="bold">判断の材料が外にある</text>
+  <text x="199" y="240" text-anchor="middle" font-size="11" fill="#5a6b7a">「このチェックは誤検出が多いらしい」</text>
+
+  <rect x="386" y="20" width="350" height="260" rx="10" fill="#fbf4ea" stroke="#b4661a" stroke-width="2.2"/>
+  <text x="561" y="46" text-anchor="middle" font-size="13" font-weight="bold" fill="#b4661a">自作チェックの偽陽性</text>
+  <g font-size="11.5" fill="#1f2933">
+  <text x="406" y="76">・使っているのは自分たちだけ</text>
+  <text x="406" y="100">・ドキュメントは自分たちが書くしかない</text>
+  <text x="406" y="124">・検索しても何も出てこない</text>
+  <text x="406" y="148">・改善するのも自分たち</text>
+  <text x="406" y="172">・外すと規約が守られなくなる</text>
+  </g>
+  <rect x="406" y="192" width="310" height="70" rx="6" fill="#fff" stroke="#e6d5bd"/>
+  <text x="561" y="216" text-anchor="middle" font-size="11.5" fill="#b4661a" font-weight="bold">判断の材料を自分たちで作る</text>
+  <text x="561" y="240" text-anchor="middle" font-size="11" fill="#5a6b7a">→ 検証ファイルと件数の記録がそれ</text>
+  </g>
+</svg>
+<figcaption><b>図37-1</b>　偽陽性の性質の違い。<strong>自作チェックは「作って終わり」にできない。</strong></figcaption>
+</figure>
+
+<h2>37.2 偽陽性を減らす4つの手段</h2>
+
+<table>
+<tr><th>手段</th><th>やること</th><th>いつ使うか</th></tr>
+<tr><td><strong>① クエリを絞る</strong></td><td><code>unless(...)</code> で除外条件を足す</td><td>誤検出に共通の構造があるとき</td></tr>
+<tr><td><strong>② 対象範囲を狭める</strong></td><td>ディレクトリ単位の設定で除外（第7章）</td><td>特定の場所にだけ誤検出が集中するとき</td></tr>
+<tr><td><strong>③ 例外の層を作る</strong></td><td>「ここだけは許す」クラス・名前空間を設け、クエリで除外</td><td>設計として例外を認めるとき（第33章）</td></tr>
+<tr><td><strong>④ <code>NOLINT</code> を許す</strong></td><td>個別に抑制させる（第9章）</td><td>①〜③で表現できない個別事情のとき</td></tr>
+</table>
+
+<div class="warn">
+<span class="t">④に逃げる前に①〜③を検討する</span>
+<p><code>NOLINT</code> が増えているなら、それは<strong>ルールが実態に合っていないサイン</strong>です。第9章で「抑制の件数を棚卸しする」と書きました。自作チェックについては、さらに厳しく見てください。<strong>自分たちが作ったルールなのに <code>NOLINT</code> だらけ、という状態は設計の失敗です。</strong></p>
+</div>
+
+<h2>37.3 回帰テストを作る</h2>
+
+<p>第29章で「実験的機能なのでクエリの記述が変わりうる」と述べました。そして第30章から、期待動作を <code>README.md</code> の表に書き溜めてきました。<strong>それを機械が検証する形にします。</strong></p>
+
+<figure>
+<svg viewBox="0 0 760 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="回帰テストの仕組み">
+  <defs>
+    <marker id="a37" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5a6b7a"/>
+    </marker>
+  </defs>
+  <g font-family="sans-serif">
+
+  <rect x="24" y="24" width="200" height="90" rx="8" fill="#1f2933"/>
+  <text x="124" y="50" text-anchor="middle" fill="#fff" font-size="12.5" font-weight="bold">検証用ソース</text>
+  <text x="124" y="72" text-anchor="middle" fill="#b8c4cd" font-size="10.5">期待する警告を</text>
+  <text x="124" y="88" text-anchor="middle" fill="#b8c4cd" font-size="10.5">コメントで書いておく</text>
+  <text x="124" y="106" text-anchor="middle" fill="#e8b075" font-size="10" font-family="monospace">// EXPECT: custom-no-goto</text>
+
+  <line x1="224" y1="69" x2="256" y2="69" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#a37)"/>
+
+  <rect x="260" y="24" width="200" height="90" rx="8" fill="#b4661a"/>
+  <text x="360" y="50" text-anchor="middle" fill="#fff" font-size="12.5" font-weight="bold">テストスクリプト</text>
+  <text x="360" y="72" text-anchor="middle" fill="#fde9d0" font-size="10.5">clang-tidy を実行し</text>
+  <text x="360" y="88" text-anchor="middle" fill="#fde9d0" font-size="10.5">実際の警告を収集</text>
+  <text x="360" y="106" text-anchor="middle" fill="#fde9d0" font-size="10.5">コメントと突き合わせる</text>
+
+  <line x1="460" y1="69" x2="492" y2="69" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#a37)"/>
+
+  <rect x="496" y="24" width="240" height="90" rx="8" fill="#3d7a52"/>
+  <text x="616" y="50" text-anchor="middle" fill="#fff" font-size="12.5" font-weight="bold">CI で毎回実行</text>
+  <text x="616" y="72" text-anchor="middle" fill="#d5e6da" font-size="10.5">・検出されるべきものが出るか</text>
+  <text x="616" y="88" text-anchor="middle" fill="#d5e6da" font-size="10.5">・出るべきでないものが出ないか</text>
+  <text x="616" y="106" text-anchor="middle" fill="#d5e6da" font-size="10.5">どちらか崩れたら失敗</text>
+
+  <rect x="24" y="136" width="712" height="76" rx="10" fill="#fbf4ea" stroke="#b4661a" stroke-width="1.8"/>
+  <text x="46" y="160" font-size="12.5" font-weight="bold" fill="#b4661a">これで検出できること</text>
+  <g font-size="11.5" fill="#1f2933">
+  <text x="46" y="184">・LLVM を更新したら、クエリの解釈が変わって動かなくなった</text>
+  <text x="46" y="204">・クエリを直したら、別のケースが検出されなくなった（デグレ）</text>
+  </g>
+
+  <rect x="24" y="224" width="712" height="60" rx="10" fill="#1f2933"/>
+  <text x="380" y="248" text-anchor="middle" fill="#fff" font-size="12" font-weight="bold">実験的機能を実務で使うための保険</text>
+  <text x="380" y="268" text-anchor="middle" fill="#b8c4cd" font-size="11">「動かなくなったことに気づける」だけで、リスクは大きく下がる</text>
+  </g>
+</svg>
+<figcaption><b>図37-2</b>　回帰テストの仕組み。<strong>第29章で予告した「実験的機能への備え」の実装です。</strong></figcaption>
+</figure>
+
+<h3>検証用ソースに期待を書く</h3>
+
+<pre><code>// tests/custom-checks/expect.cpp
+#include &lt;cstring&gt;
+
+void bad(char* d, const char* s) {
+    strcpy(d, s);                  // EXPECT: custom-no-unsafe-string-copy
+}
+
+void good(char* d, const char* s, size_t n) {
+    strncpy(d, s, n);              // NO-WARN
+}
+
+void alloc() {
+    char* buf = new char[16];      // EXPECT: custom-no-raw-owning-pointer
+    delete buf;                    // EXPECT: custom-array-delete-mismatch
+}</code></pre>
+
+<h3>突き合わせるスクリプト</h3>
+
+<pre><code># tests/custom-checks/run_tests.py
+import re, subprocess, sys, pathlib
+
+SRC = pathlib.Path(__file__).parent / "expect.cpp"
+CMD = ["clang-tidy", "--experimental-custom-checks", str(SRC), "--", "-std=c++23"]
+
+# 1. 期待を読む： 行番号 → 期待するチェック名の集合
+expected = {}
+for i, line in enumerate(SRC.read_text(encoding="utf-8").splitlines(), start=1):
+    m = re.search(r"//\s*EXPECT:\s*(\S+)", line)
+    if m:
+        expected.setdefault(i, set()).add(m.group(1))
+
+# 2. 実際の警告を読む： 行番号 → 出たチェック名の集合
+out = subprocess.run(CMD, capture_output=True, text=True).stdout
+actual = {}
+for m in re.finditer(r":(\d+):\d+:\s+warning:.*\[([\w\-\.]+)\]", out):
+    actual.setdefault(int(m.group(1)), set()).add(m.group(2))
+
+# 3. 突き合わせる
+ok = True
+for line in sorted(set(expected) | set(actual)):
+    exp = expected.get(line, set())
+    act = {c for c in actual.get(line, set()) if c.startswith("custom-")}
+    if exp - act:
+        print(f"NG line {line}: 検出されなかった {sorted(exp - act)}")
+        ok = False
+    if act - exp:
+        print(f"NG line {line}: 予期しない検出 {sorted(act - exp)}")
+        ok = False
+
+print("PASS" if ok else "FAIL")
+sys.exit(0 if ok else 1)</code></pre>
+
+<pre class="term"><code><span class="p">&gt;</span> python tests\custom-checks\run_tests.py
+<span class="g">PASS</span></code></pre>
+
+<div class="tip">
+<span class="t">100 行に満たないスクリプトの価値</span>
+<p>このスクリプトが検出するのは、<strong>「昨日まで動いていたものが動かなくなった」</strong>です。実験的機能を実務で使う以上、これは必須の保険です。第40章で CI に組み込みます。</p>
+</div>
+
+<h2>37.4 件数を監視する</h2>
+
+<p>回帰テストは「期待した箇所で警告が出るか」を見ます。もう一つ、<strong>実プロジェクト全体での件数</strong>も記録してください。</p>
+
+<pre class="term"><code><span class="p">&gt;</span> clang-tidy --experimental-custom-checks --checks="-*,custom-*" ^
+    (対象ファイル群) -- -std=c++23 &gt; custom.log 2&gt;&amp;1
+<span class="p">&gt;</span> findstr /c:"[custom-" custom.log | find /c /v ""</code></pre>
+
+<table>
+<tr><th>件数の変化</th><th>疑うこと</th></tr>
+<tr><td>急に増えた</td><td>クエリを緩めすぎた／コードベースに新しいパターンが入った</td></tr>
+<tr><td>急に減った</td><td><strong>クエリが動かなくなった</strong>（LLVM 更新、YAML の破損）</td></tr>
+<tr><td>じわじわ増える</td><td>ルールが守られていない。周知か Tier の見直しが必要</td></tr>
+<tr><td>ゼロが続く</td><td>役目を終えた。引退を検討（37.6 節）</td></tr>
+</table>
+
+<h2>37.5 <code>NOLINT</code> の許容ライン</h2>
+
+<p>自作チェックに対する <code>NOLINT</code> は、<strong>ルールへの異議申し立て</strong>として扱ってください。</p>
+
+<pre><code>// この関数は Windows API のコールバックで、シグネチャを変えられない。
+// バッファ長は呼び出し元が MAX_PATH で保証している（仕様書 3.2 節）。
+// NOLINTNEXTLINE(custom-no-unsafe-string-copy)
+strcpy(dst, src);</code></pre>
+
+<div class="note">
+<span class="t">3件を超えたら設計を見直す</span>
+<p>同じチェックに対する <code>NOLINT</code> が3件を超えたら、<strong>その3件の理由を並べて読んでください。</strong> 共通の構造があるなら、クエリで除外できるはずです（手段①）。共通点がないなら、ルール自体が広すぎます。</p>
+</div>
+
+<h2>37.6 チェックを引退させる</h2>
+
+<figure>
+<svg viewBox="0 0 760 260" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="カスタムチェックのライフサイクル">
+  <defs>
+    <marker id="b37" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5a6b7a"/>
+    </marker>
+  </defs>
+  <g font-family="sans-serif">
+
+  <rect x="24" y="40" width="150" height="60" rx="8" fill="#2f6f9f"/>
+  <text x="99" y="66" text-anchor="middle" fill="#fff" font-size="12" font-weight="bold">導入</text>
+  <text x="99" y="86" text-anchor="middle" fill="#d6e6f2" font-size="10.5">Tier 2（差分のみ）</text>
+  <line x1="174" y1="70" x2="200" y2="70" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#b37)"/>
+
+  <rect x="204" y="40" width="150" height="60" rx="8" fill="#b4661a"/>
+  <text x="279" y="66" text-anchor="middle" fill="#fff" font-size="12" font-weight="bold">定着</text>
+  <text x="279" y="86" text-anchor="middle" fill="#fde9d0" font-size="10.5">Tier 1 → Tier 0</text>
+  <line x1="354" y1="70" x2="380" y2="70" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#b37)"/>
+
+  <rect x="384" y="40" width="150" height="60" rx="8" fill="#3d7a52"/>
+  <text x="459" y="66" text-anchor="middle" fill="#fff" font-size="12" font-weight="bold">役目終了</text>
+  <text x="459" y="86" text-anchor="middle" fill="#d5e6da" font-size="10.5">件数が長期間ゼロ</text>
+  <line x1="534" y1="70" x2="560" y2="70" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#b37)"/>
+
+  <rect x="564" y="40" width="172" height="60" rx="8" fill="#5a6b7a"/>
+  <text x="650" y="66" text-anchor="middle" fill="#fff" font-size="12" font-weight="bold">引退</text>
+  <text x="650" y="86" text-anchor="middle" fill="#cfd8de" font-size="10.5">設定から削除</text>
+
+  <rect x="24" y="124" width="712" height="120" rx="10" fill="#f4f6f8" stroke="#d8dee4"/>
+  <text x="46" y="150" font-size="12.5" font-weight="bold" fill="#1f2933">引退させる理由</text>
+  <g font-size="11.5" fill="#1f2933">
+  <text x="46" y="176">・<tspan font-weight="bold">解析時間を消費する</tspan>　── クエリは全ファイルに対して毎回実行される（第27章）</text>
+  <text x="46" y="200">・<tspan font-weight="bold">保守対象が増える</tspan>　── LLVM 更新のたびに動作確認が必要</text>
+  <text x="46" y="224">・<tspan font-weight="bold">「なぜあるのか」が失われる</tspan>　── 理由を知る人がいなくなると、誰も触れなくなる</text>
+  </g>
+  </g>
+</svg>
+<figcaption><b>図37-3</b>　チェックのライフサイクル。<strong>増やすことより、適切に減らすことのほうが難しい。</strong></figcaption>
+</figure>
+
+<p>引退させるときは、削除した理由を <code>docs\clang-tidy-decisions.md</code> に残してください。<strong>「なぜこのチェックが不要になったか」は、将来また同じルールを作ろうとしたときに役立ちます。</strong></p>
+
+<h2>37.7 【ハンズオン】保守の仕組みを作る</h2>
+
+<div class="hands">
+<div class="hd">HANDS-ON 37　回帰テストと監視を整える</div>
+<div class="bd">
+<ol>
+  <li><strong>検証用ソースを整理する。</strong> これまで作った <code>tests\custom-checks\*.cpp</code> を統合し、<code>expect.cpp</code> にまとめます。<strong>各行に <code>// EXPECT:</code> または <code>// NO-WARN</code> を書いてください。</strong></li>
+
+  <li><strong>スクリプトを置く。</strong> 37.3 節の <code>run_tests.py</code> を <code>tests\custom-checks\</code> に作り、実行します。
+<pre><code>python tests\custom-checks\run_tests.py</code></pre>
+    <code>PASS</code> になるまで、期待とクエリの両方を調整します。</li>
+
+  <li><strong>わざと壊して検出させる。</strong> <code>.clang-tidy</code> のクエリを1つ壊し（第36章の症状④）、スクリプトが <code>FAIL</code> を返すことを確認します。<strong>これが「動かなくなったことに気づける」ということです。</strong></li>
+
+  <li><strong>予期しない検出も落ちることを確認する。</strong> <code>NO-WARN</code> と書いた行が検出されるようにクエリを緩め、スクリプトが <code>FAIL</code> になることを確認します。<strong>偽陽性の混入も検出できます。</strong></li>
+
+  <li><strong>件数のベースラインを取る。</strong> <code>TidyLab</code> 全体に対してカスタムチェックのみを実行し、件数を記録します。
+<pre><code>python "C:\Program Files\LLVM\bin\run-clang-tidy" -p out\build\ninja &gt; custom-baseline.log 2&gt;&amp;1</code></pre>
+    <strong>ただし <code>run-clang-tidy</code> から <code>--experimental-custom-checks</code> を渡す方法を確認してください。</strong> 渡せない場合は、対象ファイルを列挙して <code>clang-tidy</code> を直接呼ぶスクリプトを書きます（第29章の経路1）。</li>
+
+  <li><strong>偽陽性を1つ作って対処する。</strong> <code>expect.cpp</code> に、<strong>ルールの意図には反しないが検出されてしまう</strong>コードを追加します。たとえば、
+<pre><code>namespace compat {
+    // 外部ライブラリとの互換層。ここでは strcpy を許す
+    void bridge(char* d, const char* s) { strcpy(d, s); }
+}</code></pre>
+    これに対して、手段①〜④のどれで対処するかを検討し、実装します。<strong>①（クエリで <code>compat</code> 名前空間を除外）が第一候補のはずです。</strong></li>
+
+  <li><strong><code>NOLINT</code> の運用ルールを決める。</strong> 37.5 節を参考に、自作チェックに対する <code>NOLINT</code> のルールを <code>docs\</code> に書きます。
+<pre><code>## 自作チェックへの NOLINT
+- 理由を必ずコメントで書く（外部要因・仕様書の参照先を含める）
+- チェック名を括弧で明示する
+- 同一チェックに 3 件を超えたら、ルールの見直しを提起する</code></pre>
+  </li>
+
+  <li><strong>監視の手順を決める。</strong> 件数の記録をいつ・誰が取るかを決めます。<strong>LLVM を更新したときは必ず取る</strong>ことを、第22章の図22-3 の手順に追記してください。</li>
+
+  <li><strong>引退の条件を書く。</strong> 現在あるカスタムチェックそれぞれについて、「いつ削除するか」を判断記録に追記します。条件が書けないチェックは、<strong>そもそも目的が曖昧な可能性があります。</strong></li>
+</ol>
+</div>
+</div>
+
+<div class="summary">
+<h2>この章のまとめ</h2>
+<ul>
+  <li>自作チェックの偽陽性は<strong>直せるのが自分たちだけ</strong>。判断材料も自分たちで作る必要がある。</li>
+  <li>減らす手段は4つ。<strong>①クエリを絞る ②対象範囲を狭める ③例外の層を作る ④<code>NOLINT</code> を許す。</strong> ④は最後。</li>
+  <li><strong>回帰テストを作る。</strong> 検証用ソースに <code>// EXPECT:</code> を書き、スクリプトで突き合わせる。100 行に満たないコードで、実験的機能への保険になる。</li>
+  <li>テストは<strong>「検出されるべきものが出る」と「出るべきでないものが出ない」の両方</strong>を見る。</li>
+  <li>実プロジェクト全体での件数も記録する。<strong>急減はクエリが壊れたサイン。</strong></li>
+  <li>自作チェックへの <code>NOLINT</code> は<strong>ルールへの異議申し立て</strong>。3件を超えたら設計を見直す。</li>
+  <li><strong>チェックは引退させる。</strong> 解析時間・保守コスト・理由の風化がその根拠。削除理由も記録に残す。</li>
+</ul>
+</div>
+
+<p class="next"><strong>次章：</strong> 第38章「カスタムチェックを配布する」で第6部が完結します。作ったチェックを、チーム全体・複数プロジェクトに行き渡らせる方法を扱います。</p>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第24章 clang-query を起動する ─ Clang-Tidy入門</title>
+<style>
+  :root{
+    --ink:#1f2933; --sub:#5a6b7a; --line:#d8dee4; --bg:#ffffff;
+    --code-bg:#f6f8fa; --code-line:#e2e8ee;
+    --accent:#2f6f9f; --accent-bg:#eef4f9;
+    --warn:#b4661a; --warn-bg:#fbf4ea;
+    --ok:#3d7a52; --ok-bg:#eef5f0;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0; background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Noto Sans JP","Meiryo",sans-serif;
+    font-size:16px; line-height:1.95; font-feature-settings:"palt" 1;}
+  .page{max-width:47rem; margin:0 auto; padding:3.5rem 1.6rem 6rem}
+  .chap-no{font-size:.8rem; letter-spacing:.22em; color:var(--accent); font-weight:700; margin:0 0 .5rem}
+  h1{font-size:1.85rem; line-height:1.5; margin:0 0 .6rem; letter-spacing:.01em}
+  .lede{color:var(--sub); font-size:1rem; margin:0 0 2.2rem; padding-bottom:1.6rem; border-bottom:2px solid var(--ink)}
+  h2{font-size:1.28rem; margin:3rem 0 1rem; padding-left:.7rem; border-left:4px solid var(--accent); line-height:1.6}
+  h3{font-size:1.05rem; margin:2.2rem 0 .7rem}
+  h3::before{content:"◆ "; color:var(--accent); font-size:.8em}
+  p{margin:0 0 1.1rem}
+  ul,ol{margin:0 0 1.2rem; padding-left:1.6rem}
+  li{margin:.35rem 0}
+  code{font-family:"Cascadia Mono","Consolas","SFMono-Regular",monospace; font-size:.9em;
+       background:var(--code-bg); border:1px solid var(--code-line); border-radius:4px; padding:.08em .35em}
+  pre{background:var(--code-bg); border:1px solid var(--code-line); border-radius:8px;
+      padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.7}
+  pre code{background:none; border:none; padding:0; font-size:.86rem}
+  pre.term{background:#1f2933; border-color:#1f2933; color:#e6edf3}
+  pre.term code{color:#e6edf3}
+  pre.term .p{color:#7fb2d6}
+  pre.term .o{color:#9fb3c0}
+  pre.term .k{color:#a3d9a5}
+  pre.term .y{color:#e8b075}
+  pre.term .e{color:#e08a74}
+  .cap{font-size:.82rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+  figure{margin:2rem 0 2.2rem}
+  figure svg{display:block; width:100%; height:auto; border:1px solid var(--line); border-radius:8px; background:#fff}
+  figcaption{font-size:.85rem; color:var(--sub); margin-top:.6rem}
+  figcaption b{color:var(--ink)}
+  .box{border-radius:8px; padding:1rem 1.2rem; margin:1.6rem 0; font-size:.94rem}
+  .box p:last-child{margin-bottom:0}
+  .box .t{font-weight:700; display:block; margin-bottom:.35rem; font-size:.88rem; letter-spacing:.04em}
+  .note{background:var(--accent-bg); border-left:4px solid var(--accent)} .note .t{color:var(--accent)}
+  .warn{background:var(--warn-bg); border-left:4px solid var(--warn)} .warn .t{color:var(--warn)}
+  .tip{background:var(--ok-bg); border-left:4px solid var(--ok)} .tip .t{color:var(--ok)}
+  .hands{border:1px solid var(--line); border-radius:10px; margin:2rem 0; overflow:hidden}
+  .hands>.hd{background:var(--ink); color:#fff; padding:.55rem 1.1rem; font-size:.85rem; letter-spacing:.1em; font-weight:700}
+  .hands>.bd{padding:1.3rem 1.3rem .4rem}
+  .hands ol{counter-reset:step; list-style:none; padding-left:0}
+  .hands ol>li{counter-increment:step; position:relative; padding-left:2.4rem; margin:0 0 1.2rem}
+  .hands ol>li::before{content:counter(step); position:absolute; left:0; top:.25rem;
+    width:1.7rem; height:1.7rem; border-radius:50%; background:var(--accent); color:#fff;
+    font-size:.82rem; font-weight:700; display:flex; align-items:center; justify-content:center; line-height:1}
+  table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+  th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+  th{background:var(--code-bg); font-weight:700}
+  .summary{border:2px solid var(--ink); border-radius:10px; padding:1.3rem 1.5rem; margin:3rem 0 1rem}
+  .summary h2{margin:0 0 .8rem; border:none; padding:0; font-size:1.1rem}
+  .summary ul{margin-bottom:0}
+  .next{color:var(--sub); font-size:.94rem; border-top:1px solid var(--line); padding-top:1.2rem; margin-top:2.5rem}
+  @media (max-width:600px){ body{font-size:15px} .page{padding:2.2rem 1.1rem 4rem} h1{font-size:1.5rem} }
+</style>
+</head>
+<body>
+<div class="page">
+
+<p class="chap-no">第 24 章</p>
+<h1><code>clang-query</code> を起動する</h1>
+<p class="lede">本書で最も長く付き合うことになる道具です。AST に対して問い合わせを打ち、結果を即座に見て、条件を変えてまた打つ。この反復が、独自チェックを書く作業の実体です。<strong>いきなり <code>.clang-tidy</code> にクエリを書くのは悪手</strong>で、必ずここで確定させてから移します。</p>
+
+<h2>24.1 位置づけ</h2>
+
+<figure>
+<svg viewBox="0 0 760 260" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="clang-query を使った試作サイクル">
+  <defs>
+    <marker id="a24" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#b4661a"/>
+    </marker>
+    <marker id="b24" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#3d7a52"/>
+    </marker>
+  </defs>
+  <g font-family="sans-serif">
+
+  <rect x="60" y="30" width="420" height="180" rx="12" fill="#fbf4ea" stroke="#b4661a" stroke-width="2"/>
+  <text x="270" y="56" text-anchor="middle" font-size="13" font-weight="bold" fill="#b4661a">clang-query の中で回すループ（秒単位）</text>
+
+  <rect x="90" y="74" width="150" height="42" rx="8" fill="#fff" stroke="#e6d5bd"/>
+  <text x="165" y="100" text-anchor="middle" font-size="11.5" fill="#1f2933">クエリを打つ</text>
+
+  <path d="M240,95 L296,95" fill="none" stroke="#b4661a" stroke-width="1.6" marker-end="url(#a24)"/>
+
+  <rect x="300" y="74" width="150" height="42" rx="8" fill="#fff" stroke="#e6d5bd"/>
+  <text x="375" y="100" text-anchor="middle" font-size="11.5" fill="#1f2933">結果を見る</text>
+
+  <path d="M375,116 L375,142 L165,142 L165,120" fill="none" stroke="#b4661a" stroke-width="1.6" marker-end="url(#a24)"/>
+  <text x="270" y="160" text-anchor="middle" font-size="11" fill="#b4661a">多すぎる／少なすぎる → 条件を直す</text>
+
+  <rect x="90" y="168" width="360" height="30" rx="6" fill="#fff" stroke="#e6d5bd"/>
+  <text x="270" y="188" text-anchor="middle" font-size="11" fill="#5a6b7a">ビルド不要・再コンパイル不要・その場で結果</text>
+
+  <path d="M480,120 L556,120" fill="none" stroke="#3d7a52" stroke-width="2" marker-end="url(#b24)"/>
+  <text x="518" y="110" text-anchor="middle" font-size="10.5" fill="#3d7a52" font-weight="bold">確定したら</text>
+
+  <rect x="560" y="76" width="176" height="88" rx="10" fill="#3d7a52"/>
+  <text x="648" y="104" text-anchor="middle" fill="#fff" font-size="12.5" font-weight="bold">.clang-tidy の</text>
+  <text x="648" y="124" text-anchor="middle" fill="#fff" font-size="12.5" font-weight="bold">CustomChecks へ</text>
+  <text x="648" y="146" text-anchor="middle" fill="#d5e6da" font-size="10.5">第30章</text>
+
+  <rect x="24" y="228" width="712" height="1" fill="#d8dee4"/>
+  <text x="380" y="252" text-anchor="middle" font-size="11.5" fill="#5a6b7a">設定ファイルに直接書いて試すと、1 回の確認にビルドが必要になり、反復が止まる</text>
+  </g>
+</svg>
+<figcaption><b>図24-1</b>　試作サイクル。clang-query の価値は「反復が速いこと」そのもの。</figcaption>
+</figure>
+
+<h2>24.2 起動する</h2>
+
+<p>起動の形は <code>clang-tidy</code> と同じ2通りです（第12章の図12-1）。</p>
+
+<pre class="term"><code><span class="o">// 形態A：その場で引数を渡す</span>
+<span class="p">&gt;</span> clang-query tiny.cpp -- -std=c++23
+
+<span class="o">// 形態B：コンパイルデータベースを使う</span>
+<span class="p">&gt;</span> clang-query config_loader.cpp -p out\build\ninja</code></pre>
+
+<p>起動するとプロンプトが出ます。</p>
+
+<pre class="term"><code><span class="k">clang-query&gt;</span> </code></pre>
+
+<div class="tip">
+<span class="t">対話に入らず1発で結果がほしいとき</span>
+<p><code>-c</code> でコマンドを直接渡せます。同じクエリを繰り返し確認するときや、スクリプトから呼ぶときに便利です。</p>
+<pre style="margin-top:.6rem"><code>clang-query -c "match functionDecl()" tiny.cpp -- -std=c++23</code></pre>
+<p style="margin-top:.5rem">利用できるオプションは <code>clang-query --help</code> で確認してください。</p>
+</div>
+
+<h2>24.3 コマンド体系</h2>
+
+<figure>
+<svg viewBox="0 0 760 420" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="clang-query のコマンド体系">
+  <g font-family="sans-serif">
+
+  <rect x="24" y="16" width="712" height="34" rx="8" fill="#1f2933"/>
+  <text x="380" y="39" text-anchor="middle" fill="#fff" font-size="13" font-weight="bold">clang-query のコマンドは3つの系統しかない</text>
+
+  <!-- 1 -->
+  <rect x="24" y="62" width="228" height="180" rx="10" fill="#fbf4ea" stroke="#b4661a" stroke-width="2"/>
+  <text x="138" y="88" text-anchor="middle" font-size="13" font-weight="bold" fill="#b4661a">① 問い合わせる</text>
+  <rect x="42" y="100" width="192" height="30" rx="5" fill="#b4661a"/>
+  <text x="138" y="120" text-anchor="middle" font-size="12" font-family="monospace" fill="#fff" font-weight="bold">match &lt;matcher&gt;</text>
+  <text x="138" y="148" text-anchor="middle" font-size="11" fill="#1f2933">略記は <tspan font-family="monospace" font-weight="bold">m</tspan></text>
+  <text x="138" y="172" text-anchor="middle" font-size="11" fill="#5a6b7a">これが本体。ほかは</text>
+  <text x="138" y="190" text-anchor="middle" font-size="11" fill="#5a6b7a">すべて補助</text>
+  <rect x="42" y="204" width="192" height="26" rx="5" fill="#fff" stroke="#e6d5bd"/>
+  <text x="138" y="222" text-anchor="middle" font-size="10.5" font-family="monospace" fill="#1f2933">m callExpr()</text>
+
+  <!-- 2 -->
+  <rect x="266" y="62" width="228" height="180" rx="10" fill="#eef4f9" stroke="#2f6f9f" stroke-width="1.8"/>
+  <text x="380" y="88" text-anchor="middle" font-size="13" font-weight="bold" fill="#2f6f9f">② 設定を変える</text>
+  <g font-size="11" font-family="monospace" fill="#1f2933">
+  <text x="284" y="112">set output &lt;mode&gt;</text>
+  <text x="284" y="134">set traversal &lt;mode&gt;</text>
+  <text x="284" y="156">set bind-root true|false</text>
+  <text x="284" y="178">set print-matcher true|false</text>
+  <text x="284" y="200">set enable-profile true|false</text>
+  <text x="284" y="222">enable/disable output &lt;mode&gt;</text>
+  </g>
+
+  <!-- 3 -->
+  <rect x="508" y="62" width="228" height="180" rx="10" fill="#eef5f0" stroke="#3d7a52" stroke-width="1.8"/>
+  <text x="622" y="88" text-anchor="middle" font-size="13" font-weight="bold" fill="#3d7a52">③ 名前と入出力</text>
+  <g font-size="11" font-family="monospace" fill="#1f2933">
+  <text x="526" y="112">let &lt;name&gt; &lt;matcher&gt;</text>
+  <text x="526" y="134">unlet &lt;name&gt;</text>
+  <text x="526" y="156">file &lt;path&gt;</text>
+  <text x="526" y="178">help</text>
+  <text x="526" y="200">quit</text>
+  <text x="526" y="222"># コメント</text>
+  </g>
+
+  <rect x="24" y="256" width="712" height="76" rx="10" fill="#f4f6f8" stroke="#d8dee4"/>
+  <text x="46" y="280" font-size="12" font-weight="bold" fill="#1f2933">略記が使える</text>
+  <text x="46" y="302" font-size="11.5" font-family="monospace" fill="#5a6b7a">match → m　　let → l　　file → f　　quit → q　　help → h</text>
+  <text x="46" y="322" font-size="11.5" fill="#5a6b7a">対話中は <tspan font-weight="bold">m</tspan> と打つ機会が圧倒的に多い</text>
+
+  <rect x="24" y="346" width="712" height="62" rx="10" fill="#fbf4ea" stroke="#b4661a" stroke-width="1.6"/>
+  <text x="46" y="370" font-size="12" font-weight="bold" fill="#b4661a">set output の値：diag / print / detailed-ast / dump</text>
+  <text x="46" y="392" font-size="12" font-weight="bold" fill="#b4661a">set traversal の値：AsIs / IgnoreUnlessSpelledInSource</text>
+  </g>
+</svg>
+<figcaption><b>図24-2</b>　コマンド体系。覚えるべきは <code>m</code>、<code>set output</code>、<code>set traversal</code>、<code>let</code> の4つだけ。</figcaption>
+</figure>
+
+<h2>24.4 最初の問い合わせ</h2>
+
+<p>第23章の <code>tiny.cpp</code> を読み込んで、関数宣言を探します。</p>
+
+<pre class="term"><code><span class="p">&gt;</span> clang-query tiny.cpp -- -std=c++23
+<span class="k">clang-query&gt;</span> <span class="y">m functionDecl()</span>
+
+<span class="o">Match #1:</span>
+<span class="o">tiny.cpp:2:1: note: "root" binds here</span>
+<span class="o">int add(int a, int b) {</span>
+<span class="o">^~~~~~~~~~~~~~~~~~~~~~~</span>
+<span class="o">1 match.</span></code></pre>
+
+<p>末尾の <code>1 match.</code> が最重要です。<strong>クエリを書くときは、まず件数を見ます。</strong> 意図した数と合っているかどうかが、条件の正しさを判断する材料になります。</p>
+
+<h3>名前で絞る</h3>
+
+<pre class="term"><code><span class="k">clang-query&gt;</span> <span class="y">m functionDecl(hasName("add"))</span>
+<span class="o">…</span>
+<span class="o">1 match.</span>
+
+<span class="k">clang-query&gt;</span> <span class="y">m functionDecl(hasName("subtract"))</span>
+<span class="o">0 matches.</span></code></pre>
+
+<h2>24.5 出力モードを使い分ける</h2>
+
+<p><code>set output</code> で結果の見せ方を変えられます。用途がはっきり分かれています。</p>
+
+<figure>
+<svg viewBox="0 0 760 420" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="clang-query の4つの出力モード">
+  <g font-family="sans-serif">
+
+  <rect x="24" y="16" width="712" height="30" rx="6" fill="#1f2933"/>
+  <text x="380" y="37" text-anchor="middle" fill="#fff" font-size="12.5" font-weight="bold">同じマッチを4通りに表示できる</text>
+
+  <rect x="24" y="58" width="350" height="164" rx="10" fill="#eef4f9" stroke="#2f6f9f" stroke-width="1.8"/>
+  <text x="44" y="82" font-size="12.5" font-weight="bold" fill="#2f6f9f">diag（既定）── ソース上の位置</text>
+  <rect x="42" y="92" width="314" height="70" rx="5" fill="#1f2933"/>
+  <text x="54" y="112" font-size="10" font-family="monospace" fill="#9fb3c0">tiny.cpp:2:1: note: "root" binds here</text>
+  <text x="54" y="130" font-size="10" font-family="monospace" fill="#e6edf3">int add(int a, int b) {</text>
+  <text x="54" y="146" font-size="10" font-family="monospace" fill="#e8b075">^~~~~~~~~~~~~~~~~~~~~~~</text>
+  <text x="44" y="182" font-size="11" fill="#1f2933">用途：<tspan font-weight="bold">どこにマッチしたか</tspan>を知る</text>
+  <text x="44" y="202" font-size="11" fill="#5a6b7a">日常はこれ。件数の確認もこれで足りる</text>
+
+  <rect x="386" y="58" width="350" height="164" rx="10" fill="#fbf4ea" stroke="#b4661a" stroke-width="1.8"/>
+  <text x="406" y="82" font-size="12.5" font-weight="bold" fill="#b4661a">print ── ソースコードとして表示</text>
+  <rect x="404" y="92" width="314" height="70" rx="5" fill="#1f2933"/>
+  <text x="416" y="118" font-size="10" font-family="monospace" fill="#e6edf3">int add(int a, int b) {</text>
+  <text x="416" y="134" font-size="10" font-family="monospace" fill="#e6edf3">    return a + b;</text>
+  <text x="416" y="150" font-size="10" font-family="monospace" fill="#e6edf3">}</text>
+  <text x="406" y="182" font-size="11" fill="#1f2933">用途：<tspan font-weight="bold">何にマッチしたか</tspan>を読む</text>
+  <text x="406" y="202" font-size="11" fill="#5a6b7a">式の一部にマッチしたとき特に有用</text>
+
+  <rect x="24" y="234" width="350" height="170" rx="10" fill="#eef5f0" stroke="#3d7a52" stroke-width="1.8"/>
+  <text x="44" y="258" font-size="12.5" font-weight="bold" fill="#3d7a52">dump / detailed-ast ── AST を出す</text>
+  <rect x="42" y="268" width="314" height="76" rx="5" fill="#1f2933"/>
+  <text x="54" y="288" font-size="9.5" font-family="monospace" fill="#a3d9a5">FunctionDecl 0x... &lt;tiny.cpp:2:1, line:4:1&gt;</text>
+  <text x="54" y="304" font-size="9.5" font-family="monospace" fill="#e6edf3">|-ParmVarDecl 0x... 'int'</text>
+  <text x="54" y="320" font-size="9.5" font-family="monospace" fill="#e6edf3">|-ParmVarDecl 0x... 'int'</text>
+  <text x="54" y="336" font-size="9.5" font-family="monospace" fill="#e6edf3">`-CompoundStmt 0x...</text>
+  <text x="44" y="364" font-size="11" fill="#1f2933">用途：<tspan font-weight="bold">次にどこへ潜るか</tspan>を調べる</text>
+  <text x="44" y="384" font-size="11" fill="#a04a34" font-weight="bold">クエリを深くするときの主力</text>
+
+  <rect x="386" y="234" width="350" height="170" rx="10" fill="#f4f6f8" stroke="#5a6b7a" stroke-width="1.6"/>
+  <text x="406" y="258" font-size="12.5" font-weight="bold" fill="#5a6b7a">組み合わせる</text>
+  <rect x="404" y="268" width="314" height="52" rx="5" fill="#1f2933"/>
+  <text x="416" y="288" font-size="10" font-family="monospace" fill="#a3d9a5">set output diag</text>
+  <text x="416" y="306" font-size="10" font-family="monospace" fill="#a3d9a5">enable output dump</text>
+  <text x="406" y="340" font-size="11" fill="#1f2933"><tspan font-family="monospace">set</tspan> は<tspan font-weight="bold">置き換え</tspan>、</text>
+  <text x="406" y="360" font-size="11" fill="#1f2933"><tspan font-family="monospace">enable</tspan> は<tspan font-weight="bold">追加</tspan></text>
+  <text x="406" y="384" font-size="11" fill="#5a6b7a">位置と木の両方を同時に見たいときに使う</text>
+  </g>
+</svg>
+<figcaption><b>図24-3</b>　4つの出力モード。<code>dump</code> は「マッチしたノードの下に何があるか」を調べる用途で、クエリを深くしていくときに欠かせない。</figcaption>
+</figure>
+
+<pre class="term"><code><span class="k">clang-query&gt;</span> <span class="y">set output dump</span>
+<span class="k">clang-query&gt;</span> <span class="y">m functionDecl(hasName("add"))</span>
+<span class="o">…（マッチしたノードの部分木だけが出る）</span></code></pre>
+
+<div class="tip">
+<span class="t">これが <code>-ast-dump</code> より便利な理由</span>
+<p>第23章の <code>-ast-dump</code> は翻訳単位を丸ごと出しました。<code>set output dump</code> は <strong>マッチしたノードの部分木だけ</strong>を出します。「この <code>CallExpr</code> の下がどうなっているか知りたい」というとき、まさに必要な部分だけが得られます。</p>
+</div>
+
+<h2>24.6 間違えたときの挙動</h2>
+
+<p>存在しない Matcher 名を打つと、その場で教えてくれます。<strong>これが clang-query で試作すべき最大の理由です。</strong></p>
+
+<pre class="term"><code><span class="k">clang-query&gt;</span> <span class="y">m functionDeclaration()</span>
+<span class="e">1:1: Error parsing matcher. Matcher not found: functionDeclaration</span></code></pre>
+
+<p>引数の型が合っていない場合も指摘されます。</p>
+
+<pre class="term"><code><span class="k">clang-query&gt;</span> <span class="y">m functionDecl(hasName(42))</span>
+<span class="e">1:14: Incorrect type for arg 1. (Expected = String) != (Actual = Unsigned)</span></code></pre>
+
+<div class="warn">
+<span class="t">同じ間違いを <code>.clang-tidy</code> に書くと？</span>
+<p>第6部で扱いますが、設定ファイルに書いたクエリが誤っている場合、気づきにくい形で失敗することがあります。<strong>クエリは必ず clang-query で通してから設定ファイルに移してください。</strong> これは本書全体を通しての鉄則です。</p>
+</div>
+
+<h3>Matcher 名を調べる</h3>
+
+<p>正しい名前を思い出せないときの調べ方は3つあります。</p>
+
+<ol>
+  <li><strong>AST から推測する</strong>：第23章の規則で、ノード名を小文字始まりにする。</li>
+  <li><strong>補完を使う</strong>：入力途中で <kbd>Tab</kbd> を押すと候補が出る環境があります。</li>
+  <li><strong>公式リファレンスを引く</strong>：AST Matcher Reference（第28章 28.8 節で引き方を扱います）。</li>
+</ol>
+
+<h2>24.7 クエリをファイルにする</h2>
+
+<p>試行錯誤の結果は消えてしまいます。<code>file</code> コマンドで、クエリの並びをファイルから実行できます。</p>
+
+<pre><code># queries/no-strcpy.txt
+# 禁止 API の検出クエリ（第32章で .clang-tidy に移す）
+set output diag
+set traversal IgnoreUnlessSpelledInSource
+m callExpr(callee(functionDecl(hasName("::strcpy"))))</code></pre>
+
+<pre class="term"><code><span class="k">clang-query&gt;</span> <span class="y">file queries/no-strcpy.txt</span></code></pre>
+
+<p><code>#</code> で始まる行はコメントです。<strong>クエリには必ずコメントで「何を検出したいか」を日本語で書いてください。</strong> 3日後の自分が読めなくなります。</p>
+
+<h2>24.8 【ハンズオン】対話に慣れる</h2>
+
+<div class="hands">
+<div class="hd">HANDS-ON 24　clang-query を手に馴染ませる</div>
+<div class="bd">
+<ol>
+  <li><strong>起動する。</strong>
+<pre><code>clang-query tiny.cpp -- -std=c++23</code></pre>
+    プロンプトが出たら <code>help</code> と打ち、使えるコマンドを一覧します。</li>
+
+  <li><strong>件数を数える練習。</strong> 次を順に打ち、件数の変化を記録します。
+<pre><code>m functionDecl()
+m functionDecl(hasName("add"))
+m parmVarDecl()
+m declRefExpr()
+m binaryOperator()
+m stmt()
+m expr()</code></pre>
+    <strong><code>stmt()</code> と <code>expr()</code> の件数が大きいことを確認してください。</strong> 広すぎる Matcher から始めて絞っていく、という感覚を掴みます。</li>
+
+  <li><strong>出力モードを切り替える。</strong>
+<pre><code>set output print
+m functionDecl(hasName("add"))
+
+set output dump
+m functionDecl(hasName("add"))
+
+set output diag
+m functionDecl(hasName("add"))</code></pre>
+    それぞれの見え方の違いを確認します。</li>
+
+  <li><strong>組み合わせる。</strong>
+<pre><code>set output diag
+enable output dump
+m returnStmt()</code></pre>
+    位置と部分木が両方出ることを確認します。確認したら <code>disable output dump</code> で戻します。</li>
+
+  <li><strong>わざと間違える。</strong>
+<pre><code>m funcDecl()
+m functionDecl(hasNam("add"))
+m functionDecl(hasName(add))</code></pre>
+    それぞれ異なるエラーメッセージが出ることを確認します。<strong>エラーの読み方に慣れておくと、後の作業が速くなります。</strong></li>
+
+  <li><strong>題材コードに切り替える。</strong>
+<pre><code>quit</code></pre>
+    でいったん抜け、今度は実際のコードを読み込みます。
+<pre><code>clang-query config_loader.cpp -p out\build\ninja</code></pre>
+    コンパイルデータベースがない場合は <code>-- -std=c++23</code> 方式で、必要なら <code>-I</code> を足してください（第12章）。</li>
+
+  <li><strong>実コードで探す。</strong>
+<pre><code>m functionDecl()
+m cxxMethodDecl()
+m cxxMethodDecl(hasName("load"))
+m callExpr()</code></pre>
+    件数が一気に増えることを確認します。<strong>ヘッダの中身まで含まれるためです。</strong> 絞り込みの必要性が実感できるはずです。</li>
+
+  <li><strong>目標のクエリに一歩近づく。</strong>
+<pre><code>m callExpr(callee(functionDecl(hasName("strcpy"))))</code></pre>
+    <code>set output print</code> にして、何にマッチしたかを確認してください。<strong>これが第32章で作るカスタムチェックの原型です。</strong></li>
+
+  <li><strong>ファイルに保存する。</strong> <code>queries\</code> ディレクトリを作り、24.7 節の形式でこのクエリを保存します。<code>file</code> コマンドで実行できることを確認します。</li>
+</ol>
+</div>
+</div>
+
+<div class="summary">
+<h2>この章のまとめ</h2>
+<ul>
+  <li><code>clang-query &lt;file&gt; -- &lt;args&gt;</code> または <code>-p &lt;build dir&gt;</code> で起動する。<code>clang-tidy</code> と同じ2形態。</li>
+  <li>コマンドは3系統。<strong>①問い合わせ（<code>match</code> / <code>m</code>）②設定（<code>set</code> / <code>enable</code> / <code>disable</code>）③名前と入出力（<code>let</code> / <code>unlet</code> / <code>file</code> / <code>help</code> / <code>quit</code>）</strong>。</li>
+  <li>出力モードは <code>diag</code>（位置）／<code>print</code>（ソース）／<code>dump</code>・<code>detailed-ast</code>（AST）。<code>set</code> は置き換え、<code>enable</code> は追加。</li>
+  <li><strong>クエリを書くときは、まず件数（<code>N matches.</code>）を見る。</strong></li>
+  <li>存在しない Matcher 名や型の誤りは、その場でエラーとして教えてくれる。<strong>これが設定ファイルに直接書いてはいけない理由。</strong></li>
+  <li><code>file</code> コマンドでクエリをスクリプト化できる。<code>#</code> でコメントを書き、意図を残す。</li>
+</ul>
+</div>
+
+<p class="next"><strong>次章：</strong> 第25章「Matcher の三分類」では、<code>callExpr(callee(functionDecl(hasName("strcpy"))))</code> のような式が、なぜこの形になるのかを構造から理解します。三種類の Matcher の役割が分かれば、クエリは自分で組み立てられるようになります。</p>
+
+</div>
+</body>
+</html>

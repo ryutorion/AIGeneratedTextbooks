@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第17章 clang-analyzer-* ── パス感度のある解析 ─ Clang-Tidy入門</title>
+<style>
+  :root{
+    --ink:#1f2933; --sub:#5a6b7a; --line:#d8dee4; --bg:#ffffff;
+    --code-bg:#f6f8fa; --code-line:#e2e8ee;
+    --accent:#2f6f9f; --accent-bg:#eef4f9;
+    --warn:#b4661a; --warn-bg:#fbf4ea;
+    --ok:#3d7a52; --ok-bg:#eef5f0;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0; background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Noto Sans JP","Meiryo",sans-serif;
+    font-size:16px; line-height:1.95; font-feature-settings:"palt" 1;}
+  .page{max-width:47rem; margin:0 auto; padding:3.5rem 1.6rem 6rem}
+  .chap-no{font-size:.8rem; letter-spacing:.22em; color:var(--accent); font-weight:700; margin:0 0 .5rem}
+  h1{font-size:1.85rem; line-height:1.5; margin:0 0 .6rem; letter-spacing:.01em}
+  .lede{color:var(--sub); font-size:1rem; margin:0 0 2.2rem; padding-bottom:1.6rem; border-bottom:2px solid var(--ink)}
+  h2{font-size:1.28rem; margin:3rem 0 1rem; padding-left:.7rem; border-left:4px solid var(--accent); line-height:1.6}
+  h3{font-size:1.05rem; margin:2.2rem 0 .7rem}
+  h3::before{content:"◆ "; color:var(--accent); font-size:.8em}
+  p{margin:0 0 1.1rem}
+  ul,ol{margin:0 0 1.2rem; padding-left:1.6rem}
+  li{margin:.35rem 0}
+  code{font-family:"Cascadia Mono","Consolas","SFMono-Regular",monospace; font-size:.9em;
+       background:var(--code-bg); border:1px solid var(--code-line); border-radius:4px; padding:.08em .35em}
+  pre{background:var(--code-bg); border:1px solid var(--code-line); border-radius:8px;
+      padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.7}
+  pre code{background:none; border:none; padding:0; font-size:.86rem}
+  pre.term{background:#1f2933; border-color:#1f2933; color:#e6edf3}
+  pre.term code{color:#e6edf3}
+  pre.term .p{color:#7fb2d6}
+  pre.term .o{color:#9fb3c0}
+  pre.term .w{color:#e8b075}
+  pre.term .n{color:#8fb8d0}
+  .cap{font-size:.82rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+  figure{margin:2rem 0 2.2rem}
+  figure svg{display:block; width:100%; height:auto; border:1px solid var(--line); border-radius:8px; background:#fff}
+  figcaption{font-size:.85rem; color:var(--sub); margin-top:.6rem}
+  figcaption b{color:var(--ink)}
+  .box{border-radius:8px; padding:1rem 1.2rem; margin:1.6rem 0; font-size:.94rem}
+  .box p:last-child{margin-bottom:0}
+  .box .t{font-weight:700; display:block; margin-bottom:.35rem; font-size:.88rem; letter-spacing:.04em}
+  .note{background:var(--accent-bg); border-left:4px solid var(--accent)} .note .t{color:var(--accent)}
+  .warn{background:var(--warn-bg); border-left:4px solid var(--warn)} .warn .t{color:var(--warn)}
+  .tip{background:var(--ok-bg); border-left:4px solid var(--ok)} .tip .t{color:var(--ok)}
+  .hands{border:1px solid var(--line); border-radius:10px; margin:2rem 0; overflow:hidden}
+  .hands>.hd{background:var(--ink); color:#fff; padding:.55rem 1.1rem; font-size:.85rem; letter-spacing:.1em; font-weight:700}
+  .hands>.bd{padding:1.3rem 1.3rem .4rem}
+  .hands ol{counter-reset:step; list-style:none; padding-left:0}
+  .hands ol>li{counter-increment:step; position:relative; padding-left:2.4rem; margin:0 0 1.2rem}
+  .hands ol>li::before{content:counter(step); position:absolute; left:0; top:.25rem;
+    width:1.7rem; height:1.7rem; border-radius:50%; background:var(--accent); color:#fff;
+    font-size:.82rem; font-weight:700; display:flex; align-items:center; justify-content:center; line-height:1}
+  table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+  th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+  th{background:var(--code-bg); font-weight:700}
+  .summary{border:2px solid var(--ink); border-radius:10px; padding:1.3rem 1.5rem; margin:3rem 0 1rem}
+  .summary h2{margin:0 0 .8rem; border:none; padding:0; font-size:1.1rem}
+  .summary ul{margin-bottom:0}
+  .next{color:var(--sub); font-size:.94rem; border-top:1px solid var(--line); padding-top:1.2rem; margin-top:2.5rem}
+  @media (max-width:600px){ body{font-size:15px} .page{padding:2.2rem 1.1rem 4rem} h1{font-size:1.5rem} }
+</style>
+</head>
+<body>
+<div class="page">
+
+<p class="chap-no">第 17 章</p>
+<h1><code>clang-analyzer-*</code> ── パス感度のある解析</h1>
+<p class="lede">前章までのチェックは、コードの「形」を見ていました。このモジュールだけは違います。プログラムの実行経路を仮想的にたどり、変数がどんな値を取りうるかを追跡します。だから「この分岐を通ったときだけ NULL になる」を見つけられます。強力な代わりに、遅く、見逃しがあり、偽陽性の性質も違います。それらすべてが同じ原理から来ていることを理解します。</p>
+
+<h2>17.1 「形」ではなく「経路」を見る</h2>
+
+<figure>
+<svg viewBox="0 0 760 400" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="AST照合とパス探索の違い">
+  <defs>
+    <marker id="a17" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5a6b7a"/>
+    </marker>
+  </defs>
+  <g font-family="sans-serif">
+
+  <rect x="24" y="16" width="712" height="88" rx="8" fill="#1f2933"/>
+  <text x="44" y="40" font-size="12" font-family="monospace" fill="#9fb3c0">int f(int a) {</text>
+  <text x="60" y="58" font-size="12" font-family="monospace" fill="#e6edf3">    int d = 0;</text>
+  <text x="60" y="76" font-size="12" font-family="monospace" fill="#e6edf3">    if (a &gt; 10) d = a;</text>
+  <text x="60" y="94" font-size="12" font-family="monospace" fill="#e8b075">    return 100 / d;</text>
+
+  <line x1="220" y1="110" x2="220" y2="128" stroke="#5a6b7a" stroke-width="1.4" marker-end="url(#a17)"/>
+  <line x1="540" y1="110" x2="540" y2="128" stroke="#5a6b7a" stroke-width="1.4" marker-end="url(#a17)"/>
+
+  <!-- left: AST -->
+  <rect x="24" y="132" width="360" height="248" rx="10" fill="#eef4f9" stroke="#2f6f9f" stroke-width="1.6"/>
+  <text x="204" y="158" text-anchor="middle" font-size="13" font-weight="bold" fill="#2f6f9f">AST 照合（bugprone- など）</text>
+  <text x="204" y="178" text-anchor="middle" font-size="11" fill="#5a6b7a">木の形だけを見る</text>
+
+  <g font-size="11" font-family="monospace" fill="#1f2933">
+  <text x="48" y="204">BinaryOperator '/'</text>
+  <text x="66" y="222">├─ IntegerLiteral 100</text>
+  <text x="66" y="240">└─ DeclRefExpr d</text>
+  </g>
+
+  <rect x="48" y="256" width="312" height="106" rx="6" fill="#fff" stroke="#c5d6e4"/>
+  <text x="204" y="278" text-anchor="middle" font-size="11.5" fill="#1f2933" font-weight="bold">分かること</text>
+  <text x="64" y="298" font-size="11" fill="#1f2933">「変数で除算している」</text>
+  <text x="204" y="322" text-anchor="middle" font-size="11.5" fill="#a04a34" font-weight="bold">分からないこと</text>
+  <text x="64" y="342" font-size="11" fill="#a04a34">「d が 0 になりうるか」</text>
+  <text x="64" y="358" font-size="11" fill="#5a6b7a">→ 全部の除算を警告するしかない</text>
+
+  <!-- right: path -->
+  <rect x="396" y="132" width="340" height="248" rx="10" fill="#fbf4ea" stroke="#b4661a" stroke-width="2"/>
+  <text x="566" y="158" text-anchor="middle" font-size="13" font-weight="bold" fill="#b4661a">パス探索（clang-analyzer-）</text>
+  <text x="566" y="178" text-anchor="middle" font-size="11" fill="#5a6b7a">経路ごとに変数の状態を追う</text>
+
+  <rect x="420" y="190" width="292" height="24" rx="4" fill="#fff" stroke="#e6d5bd"/>
+  <text x="566" y="207" text-anchor="middle" font-size="10.5" font-family="monospace" fill="#1f2933">d = 0  （両方の経路に共通）</text>
+
+  <line x1="566" y1="214" x2="566" y2="226" stroke="#5a6b7a" stroke-width="1.3"/>
+  <line x1="480" y1="226" x2="652" y2="226" stroke="#5a6b7a" stroke-width="1.3"/>
+  <line x1="480" y1="226" x2="480" y2="238" stroke="#5a6b7a" stroke-width="1.3" marker-end="url(#a17)"/>
+  <line x1="652" y1="226" x2="652" y2="238" stroke="#5a6b7a" stroke-width="1.3" marker-end="url(#a17)"/>
+
+  <rect x="416" y="242" width="128" height="66" rx="6" fill="#eef5f0" stroke="#3d7a52"/>
+  <text x="480" y="262" text-anchor="middle" font-size="10.5" font-family="monospace" fill="#1f2933">a &gt; 10 が真</text>
+  <text x="480" y="280" text-anchor="middle" font-size="10.5" font-family="monospace" fill="#1f2933">d = a (&gt; 10)</text>
+  <text x="480" y="299" text-anchor="middle" font-size="10.5" fill="#3d7a52" font-weight="bold">安全</text>
+
+  <rect x="588" y="242" width="128" height="66" rx="6" fill="#f7e9e5" stroke="#a04a34" stroke-width="1.6"/>
+  <text x="652" y="262" text-anchor="middle" font-size="10.5" font-family="monospace" fill="#1f2933">a &gt; 10 が偽</text>
+  <text x="652" y="280" text-anchor="middle" font-size="10.5" font-family="monospace" fill="#1f2933">d は 0 のまま</text>
+  <text x="652" y="299" text-anchor="middle" font-size="10.5" fill="#a04a34" font-weight="bold">0 除算</text>
+
+  <rect x="416" y="320" width="300" height="42" rx="6" fill="#b4661a"/>
+  <text x="566" y="340" text-anchor="middle" fill="#fff" font-size="11.5" font-weight="bold">「a ≦ 10 の経路で 0 除算」と特定できる</text>
+  <text x="566" y="356" text-anchor="middle" fill="#fde9d0" font-size="10.5">安全な経路では警告しない</text>
+  </g>
+</svg>
+<figcaption><b>図17-1</b>　同じコードに対する二つの見方。パス探索は「どの条件で問題が起きるか」まで言えるので、偽陽性が少なく、指摘が具体的になる。</figcaption>
+</figure>
+
+<p>このモジュールの実体は <strong>Clang Static Analyzer</strong> という独立した解析エンジンです。Clang-Tidy はそれを呼び出し、結果を <code>clang-analyzer-</code> という名前で報告しています。<code>--list-checks</code> で見えるドットを含む名前は、Static Analyzer 側の <strong>チェッカー</strong>の名前がそのまま出ているものです。</p>
+
+<h2>17.2 パッケージ構成</h2>
+
+<table>
+<tr><th>パッケージ</th><th>扱う領域</th><th>代表的なチェッカー</th></tr>
+<tr><td><code>core.</code></td><td>言語共通の未定義動作</td><td><code>core.NullDereference</code>, <code>core.DivideZero</code>, <code>core.CallAndMessage</code>, <code>core.uninitialized.*</code></td></tr>
+<tr><td><code>cplusplus.</code></td><td>C++ 特有の資源管理</td><td><code>cplusplus.NewDelete</code>, <code>cplusplus.NewDeleteLeaks</code>, <code>cplusplus.InnerPointer</code></td></tr>
+<tr><td><code>unix.</code></td><td>C 標準ライブラリ・POSIX API</td><td><code>unix.Malloc</code>, <code>unix.MismatchedDeallocator</code>, <code>unix.cstring.*</code></td></tr>
+<tr><td><code>deadcode.</code></td><td>到達しない・使われないコード</td><td><code>deadcode.DeadStores</code></td></tr>
+<tr><td><code>security.</code></td><td>安全性</td><td><code>security.insecureAPI.*</code></td></tr>
+<tr><td><code>optin.</code></td><td>既定では無効。明示的に有効化する</td><td><code>optin.cplusplus.VirtualCall</code> など</td></tr>
+</table>
+
+<div class="warn">
+<span class="t">使える チェッカーは環境によって違う</span>
+<p>ターゲットプラットフォームやバージョンによって、有効になるチェッカーは変わります。<code>unix.</code> パッケージ名も、Windows で全部使えるとは限りません。<strong>推測せず、自分の環境で列挙してください。</strong></p>
+<pre style="margin-top:.6rem"><code>clang-tidy --checks=clang-analyzer-* --list-checks</code></pre>
+</div>
+
+<h2>17.3 診断は「物語」として読む</h2>
+
+<p>フロー解析の診断は、警告1行では終わりません。<strong>問題に至る経路が <code>note:</code> の連鎖として示されます。</strong> これを読まないと、なぜ警告されたのか理解できません。</p>
+
+<figure>
+<svg viewBox="0 0 760 340" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="note の連鎖が経路を示す">
+  <g font-family="sans-serif">
+
+  <rect x="24" y="20" width="712" height="164" rx="8" fill="#1f2933"/>
+  <text x="44" y="46" font-size="11.5" font-family="monospace" fill="#e08a74">ch17_path.cpp:9:12: warning: Dereference of null pointer [clang-analyzer-core.NullDereference]</text>
+  <text x="44" y="70" font-size="11.5" font-family="monospace" fill="#e6edf3">    9 |     return *p;</text>
+
+  <text x="44" y="100" font-size="11.5" font-family="monospace" fill="#8fb8d0">ch17_path.cpp:8:15: note: Calling 'make'</text>
+  <text x="44" y="120" font-size="11.5" font-family="monospace" fill="#8fb8d0">ch17_path.cpp:3:9: note: Assuming 'ok' is false</text>
+  <text x="44" y="140" font-size="11.5" font-family="monospace" fill="#8fb8d0">ch17_path.cpp:3:5: note: Taking true branch</text>
+  <text x="44" y="160" font-size="11.5" font-family="monospace" fill="#8fb8d0">ch17_path.cpp:4:9: note: Returning null pointer</text>
+  <text x="44" y="180" font-size="11.5" font-family="monospace" fill="#8fb8d0">ch17_path.cpp:9:12: note: Dereference of null pointer</text>
+
+  <text x="30" y="212" font-size="12.5" font-weight="bold" fill="#5a6b7a" letter-spacing="1.5">note の三つの型</text>
+
+  <rect x="24" y="226" width="228" height="98" rx="8" fill="#eef4f9" stroke="#2f6f9f"/>
+  <text x="138" y="248" text-anchor="middle" font-size="12" font-weight="bold" fill="#2f6f9f">Assuming …</text>
+  <text x="42" y="270" font-size="11" fill="#1f2933">解析器が置いた仮定</text>
+  <text x="42" y="290" font-size="11" fill="#a04a34" font-weight="bold">最重要。ここが</text>
+  <text x="42" y="308" font-size="11" fill="#a04a34" font-weight="bold">現実にありえないなら偽陽性</text>
+
+  <rect x="266" y="226" width="228" height="98" rx="8" fill="#fbf4ea" stroke="#b4661a"/>
+  <text x="380" y="248" text-anchor="middle" font-size="12" font-weight="bold" fill="#b4661a">Taking … branch / Calling …</text>
+  <text x="284" y="270" font-size="11" fill="#1f2933">たどった経路</text>
+  <text x="284" y="290" font-size="11" fill="#5a6b7a">関数をまたいで追跡</text>
+  <text x="284" y="308" font-size="11" fill="#5a6b7a">していることが分かる</text>
+
+  <rect x="508" y="226" width="228" height="98" rx="8" fill="#eef5f0" stroke="#3d7a52"/>
+  <text x="622" y="248" text-anchor="middle" font-size="12" font-weight="bold" fill="#3d7a52">Returning / Memory is …</text>
+  <text x="526" y="270" font-size="11" fill="#1f2933">状態の変化</text>
+  <text x="526" y="290" font-size="11" fill="#5a6b7a">値がどこで NULL に、</text>
+  <text x="526" y="308" font-size="11" fill="#5a6b7a">どこで確保されたか</text>
+  </g>
+</svg>
+<figcaption><b>図17-2</b>　note の連鎖。<strong><code>Assuming</code> の行を読むのが偽陽性判定の要</strong>。その仮定が現実に成り立たないなら、それは偽陽性である。</figcaption>
+</figure>
+
+<div class="tip">
+<span class="t">偽陽性の判定手順</span>
+<p>フロー解析の警告に対しては、次の順で判断します。</p>
+<ol style="margin-top:.5rem">
+  <li><code>Assuming</code> の行をすべて読む。</li>
+  <li>その仮定の組み合わせが、実際に起こりうるかを考える。</li>
+  <li>起こりうるなら → <strong>直す</strong>。</li>
+  <li>起こりえないなら → <strong>なぜ起こりえないかをコードで表現できないか考える</strong>（アサート、早期リターン、型で表す）。それでも無理なら <code>NOLINT</code> に理由を添える（第9章）。</li>
+</ol>
+<p style="margin-top:.5rem">4番目が重要です。「解析器には分からないが人間には分かる」情報を、コードに書き足せることは多い。そうすると警告も消えるし、コードも良くなります。</p>
+</div>
+
+<h2>17.4 なぜ遅いのか、なぜ見逃すのか</h2>
+
+<p>第13章のハンズオンで、<code>clang-analyzer-*</code> がコストの大半を占めることを測りました。その理由と、見逃しの理由は同じです。</p>
+
+<figure>
+<svg viewBox="0 0 760 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="パス爆発と解析の打ち切り">
+  <g font-family="sans-serif">
+
+  <text x="30" y="28" font-size="12.5" font-weight="bold" fill="#5a6b7a" letter-spacing="1.5">分岐のたびに経路が倍になる</text>
+
+  <g stroke="#c5d6e4" stroke-width="1.3" fill="none">
+    <path d="M60,60 L140,90"/><path d="M60,60 L140,150"/>
+    <path d="M140,90 L220,75"/><path d="M140,90 L220,110"/>
+    <path d="M140,150 L220,135"/><path d="M140,150 L220,170"/>
+    <path d="M220,75 L300,68"/><path d="M220,75 L300,86"/>
+    <path d="M220,110 L300,102"/><path d="M220,110 L300,120"/>
+    <path d="M220,135 L300,128"/><path d="M220,135 L300,146"/>
+    <path d="M220,170 L300,162"/><path d="M220,170 L300,180"/>
+  </g>
+  <circle cx="60" cy="60" r="6" fill="#2f6f9f"/>
+  <circle cx="140" cy="90" r="5" fill="#2f6f9f"/><circle cx="140" cy="150" r="5" fill="#2f6f9f"/>
+  <circle cx="220" cy="75" r="4.5" fill="#2f6f9f"/><circle cx="220" cy="110" r="4.5" fill="#2f6f9f"/>
+  <circle cx="220" cy="135" r="4.5" fill="#2f6f9f"/><circle cx="220" cy="170" r="4.5" fill="#2f6f9f"/>
+  <g fill="#2f6f9f">
+    <circle cx="300" cy="68" r="4"/><circle cx="300" cy="86" r="4"/>
+    <circle cx="300" cy="102" r="4"/><circle cx="300" cy="120" r="4"/>
+    <circle cx="300" cy="128" r="4"/><circle cx="300" cy="146" r="4"/>
+    <circle cx="300" cy="162" r="4"/><circle cx="300" cy="180" r="4"/>
+  </g>
+  <text x="330" y="128" font-size="24" fill="#b4661a">…</text>
+
+  <text x="60" y="216" font-size="11.5" fill="#1f2933">分岐 10 個 → 経路 1024 通り　　分岐 20 個 → 100 万通り超</text>
+  <text x="60" y="236" font-size="11.5" fill="#a04a34" font-weight="bold">全部たどることは原理的に不可能</text>
+
+  <rect x="396" y="46" width="340" height="140" rx="10" fill="#fbf4ea" stroke="#b4661a" stroke-width="1.8"/>
+  <text x="566" y="70" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#b4661a">だから解析器は打ち切る</text>
+  <text x="414" y="94" font-size="11.5" fill="#1f2933">・探索するノード数に上限がある</text>
+  <text x="414" y="114" font-size="11.5" fill="#1f2933">・ループは決まった回数までしか展開しない</text>
+  <text x="414" y="134" font-size="11.5" fill="#1f2933">・翻訳単位を越えた解析は限定的</text>
+  <text x="414" y="154" font-size="11.5" fill="#1f2933">・モデル化されていない関数は「何でも起こりうる」</text>
+  <text x="414" y="176" font-size="11" fill="#5a6b7a">→ 上限に達した経路の先にあるバグは見つからない</text>
+
+  <rect x="396" y="200" width="340" height="102" rx="10" fill="#eef4f9" stroke="#2f6f9f" stroke-width="1.6"/>
+  <text x="566" y="224" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#2f6f9f">実務上の帰結</text>
+  <text x="414" y="248" font-size="11.5" fill="#1f2933">・<tspan font-weight="bold">警告0件は「バグがない」証明ではない</tspan></text>
+  <text x="414" y="268" font-size="11.5" fill="#1f2933">・同じコードでも版が変わると件数が変わる</text>
+  <text x="414" y="288" font-size="11.5" fill="#1f2933">・関数が小さいほど解析が効く</text>
+
+  <rect x="30" y="256" width="330" height="46" rx="8" fill="#eef5f0" stroke="#3d7a52"/>
+  <text x="195" y="276" text-anchor="middle" font-size="11.5" fill="#3d7a52" font-weight="bold">短い関数に分けることは</text>
+  <text x="195" y="294" text-anchor="middle" font-size="11.5" fill="#3d7a52" font-weight="bold">解析精度の向上でもある</text>
+  </g>
+</svg>
+<figcaption><b>図17-3</b>　パス爆発と打ち切り。速度・見逃し・版による件数の変動は、すべてこの一つの事情から来ている。</figcaption>
+</figure>
+
+<h2>17.5 <code>bugprone-*</code> とは偽陽性の性質が違う</h2>
+
+<table>
+<tr><th></th><th>AST 照合（<code>bugprone-*</code> など）</th><th>パス探索（<code>clang-analyzer-*</code>）</th></tr>
+<tr><td>偽陽性の原因</td><td>ルールが自分のコードに合わない</td><td>解析器の仮定が現実的でない</td></tr>
+<tr><td>対処</td><td>オプション調整、チェックを外す（第8章）</td><td>コードで前提を表現する、<code>NOLINT</code></td></tr>
+<tr><td>再現性</td><td>高い。同じコードなら常に同じ</td><td>版・コンパイルオプションで変わりうる</td></tr>
+<tr><td>見逃し</td><td>ルールの対象外なら出ない（明快）</td><td>探索の打ち切りで出ないことがある（不明瞭）</td></tr>
+<tr><td>速度</td><td>速い</td><td>遅い</td></tr>
+<tr><td>診断の情報量</td><td>1行</td><td><code>note</code> の連鎖で経路を示す</td></tr>
+</table>
+
+<div class="note">
+<span class="t">運用への落とし込み</span>
+<p>この違いから、実務での置き場所が決まります。<strong><code>bugprone-*</code> は日常のビルドに、<code>clang-analyzer-*</code> は CI に。</strong> フロー解析は遅く、件数が版で揺れるので、ローカルのビルドを毎回止めるには向きません。一方 CI なら時間をかけられますし、夜間の全体解析（第15章）にちょうど合います。</p>
+</div>
+
+<h2>17.6 【ハンズオン】経路を追う</h2>
+
+<div class="hands">
+<div class="hd">HANDS-ON 17　パス感度を体感する</div>
+<div class="bd">
+<ol>
+  <li><strong>検証用ファイルを作る。</strong> <code>ch17_path.cpp</code> を次の内容で追加します。
+<pre><code>#include &lt;cstdio&gt;
+
+int* make(bool ok) {
+    if (!ok) return nullptr;
+    return new int(42);
+}
+
+int use(bool ok) {
+    int* p = make(ok);
+    return *p;               // (A) ok == false の経路で NULL 参照
+}
+
+int divide(int a) {
+    int d = 0;
+    if (a &gt; 10) d = a;
+    return 100 / d;          // (B) a &lt;= 10 の経路で 0 除算
+}
+
+void maybe_leak(bool early) {
+    char* buf = new char[16];
+    if (early) return;       // (C) early の経路でリーク
+    delete[] buf;
+}</code></pre>
+  </li>
+
+  <li><strong>フロー解析だけを走らせる。</strong>
+<pre><code>clang-tidy --checks="-*,clang-analyzer-*" ch17_path.cpp -- -std=c++23</code></pre>
+    (A)(B)(C) のそれぞれに対して警告が出ることを確認します。<strong>チェッカー名（角括弧の中）を書き出してください。</strong></li>
+
+  <li><strong>note を読む。</strong> (A) の警告に続く <code>note:</code> の行をすべて読み、
+    <ul>
+      <li>どこで <code>ok</code> が false だと仮定されたか（<code>Assuming</code>）</li>
+      <li>どちらの分岐に入ったか（<code>Taking … branch</code>）</li>
+      <li>どこで NULL が返されたか（<code>Returning null pointer</code>）</li>
+    </ul>
+    を特定します。<strong>関数をまたいで追跡している</strong>ことが読み取れるはずです。</li>
+
+  <li><strong>AST 照合では見つからないことを確認する。</strong> 同じファイルに <code>bugprone-*</code> だけを当てます。
+<pre><code>clang-tidy --checks="-*,bugprone-*" ch17_path.cpp -- -std=c++23</code></pre>
+    (A)(B)(C) が<strong>検出されない</strong>ことを確認します。これが第2章の①方式と②方式の違いです。</li>
+
+  <li><strong>前提をコードで表現して消す。</strong> <code>divide()</code> を次のように書き換え、警告が消えることを確認します。
+<pre><code>int divide(int a) {
+    if (a &lt;= 10) return 0;   // 前提を明示
+    return 100 / a;
+}</code></pre>
+    <strong><code>NOLINT</code> ではなくコードで解決した</strong>という点が重要です。</li>
+
+  <li><strong>解析器を迷わせる。</strong> <code>use()</code> の <code>make(ok)</code> の間に、解析器が中身を知らない外部関数を挟みます。
+<pre><code>extern void opaque(int**);   // 定義は別の翻訳単位にあるとする
+
+int use(bool ok) {
+    int* p = make(ok);
+    opaque(&amp;p);              // 解析器は p が何になるか分からない
+    return *p;
+}</code></pre>
+    警告が消えることを確認します。<strong>これが「見逃し」の実例です。</strong> 解析器はモデル化できない関数に出会うと、それ以上の追跡を諦めます。</li>
+
+  <li><strong>コストを測る。</strong> 題材コードのプロジェクト全体に対して、<code>bugprone-*</code> のみ、<code>clang-analyzer-*</code> のみ、で実行時間を比較します（第13章の続き）。</li>
+
+  <li><strong>運用方針を決める。</strong> <code>.clang-tidy</code> は <code>bugprone-*</code> 中心にし、<code>clang-analyzer-*</code> は CI 用の設定に回す方針を検討します。具体的な分け方は第22章で確定させます。</li>
+</ol>
+</div>
+</div>
+
+<div class="warn">
+<span class="t">「警告0件」の四つ目の意味</span>
+<p>第5章で「警告0件」には3つの意味があると書きました。フロー解析を使うと、四つ目が加わります。<strong>「解析器が探索を打ち切ったので見つけられなかった」</strong>。静的解析はバグがないことの証明ではありません。テストもレビューも、引き続き必要です。</p>
+</div>
+
+<div class="summary">
+<h2>この章のまとめ</h2>
+<ul>
+  <li><code>clang-analyzer-*</code> の実体は Clang Static Analyzer。実行経路を仮想的にたどり、変数の取りうる値を追跡する。</li>
+  <li>だから「この分岐を通ったときだけ壊れる」を、条件つきで特定できる。AST 照合では原理的に不可能。</li>
+  <li>パッケージは <code>core.</code> / <code>cplusplus.</code> / <code>unix.</code> / <code>deadcode.</code> / <code>security.</code> / <code>optin.</code>。使えるものは環境依存なので <code>--list-checks</code> で確認する。</li>
+  <li>診断は <code>note</code> の連鎖で経路を示す。<strong><code>Assuming</code> の行が偽陽性判定の鍵</strong>。</li>
+  <li>偽陽性は「コードで前提を表現する」ことで消せることが多い。<code>NOLINT</code> はその後。</li>
+  <li>遅さ・見逃し・版による件数の揺れは、すべて<strong>パス爆発と探索の打ち切り</strong>という一つの事情から来る。</li>
+  <li>関数を短くすることは、可読性の話であると同時に<strong>解析精度の話</strong>でもある。</li>
+  <li>実務では <code>bugprone-*</code> をローカルに、<code>clang-analyzer-*</code> を CI に置く。</li>
+</ul>
+</div>
+
+<p class="next"><strong>次章：</strong> 第18章「<code>modernize-*</code> ── C++23 らしく書き直す」では、性格の異なるモジュールに移ります。ほぼすべてに自動修正が付いており、実質的に一括変換ツールとして使えます。C++23 で新しく効くチェックも複数あります。</p>
+
+</div>
+</body>
+</html>

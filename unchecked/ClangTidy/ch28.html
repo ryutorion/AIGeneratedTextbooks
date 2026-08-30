@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第28章 Matcher レシピ集 ─ Clang-Tidy入門</title>
+<style>
+  :root{
+    --ink:#1f2933; --sub:#5a6b7a; --line:#d8dee4; --bg:#ffffff;
+    --code-bg:#f6f8fa; --code-line:#e2e8ee;
+    --accent:#2f6f9f; --accent-bg:#eef4f9;
+    --warn:#b4661a; --warn-bg:#fbf4ea;
+    --ok:#3d7a52; --ok-bg:#eef5f0;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0; background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Noto Sans JP","Meiryo",sans-serif;
+    font-size:16px; line-height:1.95; font-feature-settings:"palt" 1;}
+  .page{max-width:47rem; margin:0 auto; padding:3.5rem 1.6rem 6rem}
+  .chap-no{font-size:.8rem; letter-spacing:.22em; color:var(--accent); font-weight:700; margin:0 0 .5rem}
+  h1{font-size:1.85rem; line-height:1.5; margin:0 0 .6rem; letter-spacing:.01em}
+  .lede{color:var(--sub); font-size:1rem; margin:0 0 2.2rem; padding-bottom:1.6rem; border-bottom:2px solid var(--ink)}
+  h2{font-size:1.28rem; margin:3rem 0 1rem; padding-left:.7rem; border-left:4px solid var(--accent); line-height:1.6}
+  h3{font-size:1.02rem; margin:2rem 0 .6rem}
+  h3::before{content:"▸ "; color:var(--accent)}
+  p{margin:0 0 1.1rem}
+  ul,ol{margin:0 0 1.2rem; padding-left:1.6rem}
+  li{margin:.35rem 0}
+  code{font-family:"Cascadia Mono","Consolas","SFMono-Regular",monospace; font-size:.9em;
+       background:var(--code-bg); border:1px solid var(--code-line); border-radius:4px; padding:.08em .35em}
+  pre{background:var(--code-bg); border:1px solid var(--code-line); border-radius:8px;
+      padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.7}
+  pre code{background:none; border:none; padding:0; font-size:.86rem}
+  pre.term{background:#1f2933; border-color:#1f2933; color:#e6edf3}
+  pre.term code{color:#e6edf3}
+  pre.term .p{color:#7fb2d6}
+  pre.term .o{color:#9fb3c0}
+  .recipe{border:1px solid var(--line); border-left:4px solid var(--accent); border-radius:6px;
+          padding:.9rem 1.1rem; margin:0 0 1.2rem; background:#fcfdfe}
+  .recipe .rt{font-weight:700; font-size:.95rem; margin-bottom:.5rem; color:var(--ink)}
+  .recipe pre{margin:0 0 .5rem; background:#1f2933; border-color:#1f2933}
+  .recipe pre code{color:#e6edf3; font-size:.82rem}
+  .recipe .rn{font-size:.86rem; color:var(--sub); margin:0}
+  .cap{font-size:.82rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+  figure{margin:2rem 0 2.2rem}
+  figure svg{display:block; width:100%; height:auto; border:1px solid var(--line); border-radius:8px; background:#fff}
+  figcaption{font-size:.85rem; color:var(--sub); margin-top:.6rem}
+  figcaption b{color:var(--ink)}
+  .box{border-radius:8px; padding:1rem 1.2rem; margin:1.6rem 0; font-size:.94rem}
+  .box p:last-child{margin-bottom:0}
+  .box .t{font-weight:700; display:block; margin-bottom:.35rem; font-size:.88rem; letter-spacing:.04em}
+  .note{background:var(--accent-bg); border-left:4px solid var(--accent)} .note .t{color:var(--accent)}
+  .warn{background:var(--warn-bg); border-left:4px solid var(--warn)} .warn .t{color:var(--warn)}
+  .tip{background:var(--ok-bg); border-left:4px solid var(--ok)} .tip .t{color:var(--ok)}
+  .hands{border:1px solid var(--line); border-radius:10px; margin:2rem 0; overflow:hidden}
+  .hands>.hd{background:var(--ink); color:#fff; padding:.55rem 1.1rem; font-size:.85rem; letter-spacing:.1em; font-weight:700}
+  .hands>.bd{padding:1.3rem 1.3rem .4rem}
+  .hands ol{counter-reset:step; list-style:none; padding-left:0}
+  .hands ol>li{counter-increment:step; position:relative; padding-left:2.4rem; margin:0 0 1.2rem}
+  .hands ol>li::before{content:counter(step); position:absolute; left:0; top:.25rem;
+    width:1.7rem; height:1.7rem; border-radius:50%; background:var(--accent); color:#fff;
+    font-size:.82rem; font-weight:700; display:flex; align-items:center; justify-content:center; line-height:1}
+  table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+  th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+  th{background:var(--code-bg); font-weight:700}
+  .summary{border:2px solid var(--ink); border-radius:10px; padding:1.3rem 1.5rem; margin:3rem 0 1rem}
+  .summary h2{margin:0 0 .8rem; border:none; padding:0; font-size:1.1rem}
+  .summary ul{margin-bottom:0}
+  .partend{background:#1f2933; color:#fff; border-radius:10px; padding:1.4rem 1.6rem; margin:2.5rem 0 1rem}
+  .partend h2{color:#fff; border-left-color:#e8b075; margin:0 0 .8rem; font-size:1.1rem}
+  .partend p{color:#cfd8de; margin-bottom:.6rem}
+  .partend ul{color:#cfd8de; margin-bottom:0}
+  .next{color:var(--sub); font-size:.94rem; border-top:1px solid var(--line); padding-top:1.2rem; margin-top:2.5rem}
+  @media (max-width:600px){ body{font-size:15px} .page{padding:2.2rem 1.1rem 4rem} h1{font-size:1.5rem} }
+</style>
+</head>
+<body>
+<div class="page">
+
+<p class="chap-no">第 28 章</p>
+<h1>Matcher レシピ集</h1>
+<p class="lede">第5部の締めくくりです。実務で頻出するパターンを、そのまま使える形で揃えます。第6部で書くカスタムチェックは、ほぼすべてこのレシピの組み合わせになります。すべて <code>clang-query</code> で動作を確認してから使ってください ── これは本書を通じての鉄則です。</p>
+
+<h2>28.1 レシピの読み方</h2>
+
+<figure>
+<svg viewBox="0 0 760 260" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="レシピの分類マップ">
+  <g font-family="sans-serif">
+
+  <rect x="24" y="16" width="712" height="32" rx="6" fill="#1f2933"/>
+  <text x="380" y="37" text-anchor="middle" fill="#fff" font-size="12.5" font-weight="bold">「何を検出したいか」から引く</text>
+
+  <g font-size="11">
+  <rect x="24" y="60" width="170" height="76" rx="8" fill="#eef4f9" stroke="#2f6f9f" stroke-width="1.6"/>
+  <text x="109" y="82" text-anchor="middle" font-size="12" font-weight="bold" fill="#2f6f9f">A. 呼び出し</text>
+  <text x="109" y="102" text-anchor="middle" fill="#1f2933">禁止 API・誤用</text>
+  <text x="109" y="120" text-anchor="middle" fill="#5a6b7a">28.2 節</text>
+
+  <rect x="204" y="60" width="170" height="76" rx="8" fill="#fbf4ea" stroke="#b4661a" stroke-width="1.6"/>
+  <text x="289" y="82" text-anchor="middle" font-size="12" font-weight="bold" fill="#b4661a">B. 型と変数</text>
+  <text x="289" y="102" text-anchor="middle" fill="#1f2933">非推奨の型・初期化</text>
+  <text x="289" y="120" text-anchor="middle" fill="#5a6b7a">28.3 節</text>
+
+  <rect x="384" y="60" width="170" height="76" rx="8" fill="#eef5f0" stroke="#3d7a52" stroke-width="1.6"/>
+  <text x="469" y="82" text-anchor="middle" font-size="12" font-weight="bold" fill="#3d7a52">C. クラスと継承</text>
+  <text x="469" y="102" text-anchor="middle" fill="#1f2933">規約・設計ルール</text>
+  <text x="469" y="120" text-anchor="middle" fill="#5a6b7a">28.4 節</text>
+
+  <rect x="564" y="60" width="172" height="76" rx="8" fill="#f7e9e5" stroke="#a04a34" stroke-width="1.6"/>
+  <text x="650" y="82" text-anchor="middle" font-size="12" font-weight="bold" fill="#a04a34">D. 所有権・制御</text>
+  <text x="650" y="102" text-anchor="middle" fill="#1f2933">new/delete・分岐</text>
+  <text x="650" y="120" text-anchor="middle" fill="#5a6b7a">28.5 / 28.6 節</text>
+  </g>
+
+  <rect x="24" y="152" width="712" height="44" rx="8" fill="#b4661a"/>
+  <text x="380" y="172" text-anchor="middle" fill="#fff" font-size="12.5" font-weight="bold">E. 除外の技法（28.7 節）── どのレシピにも重ねて使う</text>
+  <text x="380" y="190" text-anchor="middle" fill="#fde9d0" font-size="11">ヘッダ・標準ライブラリ・生成コード・テストコードを対象外にする</text>
+
+  <rect x="24" y="210" width="712" height="40" rx="8" fill="#f4f6f8" stroke="#d8dee4"/>
+  <text x="380" y="235" text-anchor="middle" font-size="11.5" fill="#1f2933">以下のレシピは <tspan font-family="monospace" font-weight="bold">set traversal IgnoreUnlessSpelledInSource</tspan> を前提に書いている（第27章）</text>
+  </g>
+</svg>
+<figcaption><b>図28-1</b>　レシピの分類。E は独立したレシピではなく、A〜D に重ねて使う修飾。</figcaption>
+</figure>
+
+<div class="warn">
+<span class="t">レシピは出発点であって完成品ではない</span>
+<p>Matcher の名前や引数は、LLVM のバージョンによって追加・変更されます。<strong>本書のレシピをそのまま貼るのではなく、必ず <code>clang-query</code> で実行して件数を確認し、自分のコードベースに合わせて調整してください。</strong> 名前が存在しなければその場でエラーが出ます（第24章)。</p>
+</div>
+
+<h2>28.2 A. 呼び出しを捕まえる</h2>
+
+<div class="recipe">
+<div class="rt">A-1　特定の関数の呼び出し</div>
+<pre><code>callExpr(callee(functionDecl(hasName("::strcpy")))).bind("call")</code></pre>
+<p class="rn">最も基本。<code>::</code> を付けてグローバルの関数に限定する（第27章）。第32章の土台。</p>
+</div>
+
+<div class="recipe">
+<div class="rt">A-2　禁止 API のリスト</div>
+<pre><code>callExpr(callee(functionDecl(
+  hasAnyName("::strcpy", "::strcat", "::sprintf", "::gets")
+))).bind("call")</code></pre>
+<p class="rn">チームの禁止リストをそのまま並べる。増えたらここに足すだけ。</p>
+</div>
+
+<div class="recipe">
+<div class="rt">A-3　名前のパターンで捕まえる</div>
+<pre><code>callExpr(callee(functionDecl(
+  matchesName("^::Legacy[A-Z]")
+))).bind("call")</code></pre>
+<p class="rn">「<code>Legacy</code> で始まる関数はすべて非推奨」のような規約に。正規表現が使える。</p>
+</div>
+
+<div class="recipe">
+<div class="rt">A-4　特定クラスのメンバ関数の呼び出し</div>
+<pre><code>cxxMemberCallExpr(
+  on(hasType(cxxRecordDecl(hasName("::Widget")))),
+  callee(cxxMethodDecl(hasName("resize")))
+).bind("call")</code></pre>
+<p class="rn"><code>on(…)</code> は「どのオブジェクトに対して呼んでいるか」へ移る Traversal Matcher。</p>
+</div>
+
+<div class="recipe">
+<div class="rt">A-5　戻り値を無視している呼び出し</div>
+<pre><code>callExpr(
+  callee(functionDecl(hasName("::fopen"))),
+  hasParent(compoundStmt())
+).bind("call")</code></pre>
+<p class="rn">親が <code>compoundStmt</code>（＝文としてそのまま置かれている）なら、戻り値はどこにも使われていない。</p>
+</div>
+
+<div class="recipe">
+<div class="rt">A-6　特定の引数を渡している呼び出し</div>
+<pre><code>callExpr(
+  callee(functionDecl(hasName("::memset"))),
+  hasArgument(1, integerLiteral(equals(1)))
+).bind("call")</code></pre>
+<p class="rn">「<code>memset</code> の第2引数に <code>1</code> を渡している」＝引数の順序を間違えている疑い。</p>
+</div>
+
+<h2>28.3 B. 型と変数</h2>
+
+<div class="recipe">
+<div class="rt">B-1　非推奨の型の変数</div>
+<pre><code>varDecl(hasType(cxxRecordDecl(hasName("::LegacyString")))).bind("var")</code></pre>
+<p class="rn">型の移行を進めるときに使う。残っている箇所を一覧できる。</p>
+</div>
+
+<div class="recipe">
+<div class="rt">B-2　生ポインタのメンバ変数</div>
+<pre><code>fieldDecl(hasType(pointerType())).bind("field")</code></pre>
+<p class="rn">所有権の所在が曖昧な箇所を洗い出す。件数が多いはずなので、除外条件と併用する。</p>
+</div>
+
+<div class="recipe">
+<div class="rt">B-3　初期化されていないローカル変数</div>
+<pre><code>varDecl(
+  hasLocalStorage(),
+  unless(hasInitializer(anything())),
+  unless(isImplicit())
+).bind("var")</code></pre>
+<p class="rn"><code>unless(hasInitializer(anything()))</code> で「初期化式を持たない」を表現する。</p>
+</div>
+
+<div class="recipe">
+<div class="rt">B-4　特定の型を値で受け取る引数</div>
+<pre><code>parmVarDecl(hasType(cxxRecordDecl(hasName("::HeavyData")))).bind("param")</code></pre>
+<p class="rn">コピーコストの高い型を値渡ししている箇所。<code>performance-*</code> より対象を限定できる。</p>
+</div>
+
+<h2>28.4 C. クラスと継承</h2>
+
+<div class="recipe">
+<div class="rt">C-1　特定の基底クラスの派生クラス</div>
+<pre><code>cxxRecordDecl(isDerivedFrom(hasName("::Component"))).bind("cls")</code></pre>
+<p class="rn">フレームワークの規約を機械化する出発点。</p>
+</div>
+
+<div class="recipe">
+<div class="rt">C-2　命名規約（基底クラスに応じた接尾辞）</div>
+<pre><code>cxxRecordDecl(
+  isDerivedFrom(hasName("::Component")),
+  unless(matchesName("Component$")),
+  isExpansionInMainFile()
+).bind("cls")</code></pre>
+<p class="rn"><strong>標準チェックでは表現できない、チーム固有のルールの典型。</strong> 第34章で扱う。</p>
+</div>
+
+<div class="recipe">
+<div class="rt">C-3　仮想関数を持つのに仮想デストラクタがない</div>
+<pre><code>cxxRecordDecl(
+  isDefinition(),
+  hasMethod(isVirtual()),
+  unless(hasMethod(cxxDestructorDecl(isVirtual())))
+).bind("cls")</code></pre>
+<p class="rn"><code>cppcoreguidelines-virtual-class-destructor</code> と同趣旨。自作すると仕組みが分かる。</p>
+</div>
+
+<div class="recipe">
+<div class="rt">C-4　public なメンバ変数</div>
+<pre><code>fieldDecl(isPublic(), hasParent(cxxRecordDecl(unless(isStruct())))).bind("field")</code></pre>
+<p class="rn">「<code>struct</code> は許すが <code>class</code> では許さない」といった細かい規約が表現できる。</p>
+</div>
+
+<h2>28.5 D-1. メモリと所有権</h2>
+
+<div class="recipe">
+<div class="rt">D-1　<code>new[]</code> と <code>delete</code> の不一致</div>
+<pre><code>cxxDeleteExpr(
+  unless(isArrayForm()),
+  has(ignoringImplicit(declRefExpr(to(varDecl(
+    hasInitializer(ignoringImplicit(cxxNewExpr(isArray()).bind("alloc")))
+  )))))
+).bind("del")</code></pre>
+<p class="rn">第27章で完成させたもの。<strong>2か所を bind して、警告と note を出し分ける（第35章）。</strong></p>
+</div>
+
+<div class="recipe">
+<div class="rt">D-2　C 形式のメモリ確保</div>
+<pre><code>callExpr(callee(functionDecl(
+  hasAnyName("::malloc", "::calloc", "::realloc", "::free")
+))).bind("call")</code></pre>
+<p class="rn">C++ コードで C の確保関数を使っている箇所。</p>
+</div>
+
+<div class="recipe">
+<div class="rt">D-3　生ポインタへの <code>new</code></div>
+<pre><code>varDecl(
+  hasType(pointerType()),
+  hasInitializer(ignoringImplicit(cxxNewExpr()))
+).bind("var")</code></pre>
+<p class="rn">「スマートポインタを使え」という規約の機械化。第33章で扱う。</p>
+</div>
+
+<h2>28.6 D-2. 制御構造</h2>
+
+<div class="recipe">
+<div class="rt">D-4　<code>if</code> の条件式で代入している</div>
+<pre><code>ifStmt(hasCondition(
+  binaryOperator(hasOperatorName("="))
+)).bind("if")</code></pre>
+<p class="rn"><code>==</code> と書くつもりの書き間違い。<code>bugprone-assignment-in-if-condition</code> と同趣旨。</p>
+</div>
+
+<div class="recipe">
+<div class="rt">D-5　空の catch ブロック</div>
+<pre><code>cxxCatchStmt(has(compoundStmt(statementCountIs(0)))).bind("catch")</code></pre>
+<p class="rn">例外を握りつぶしている箇所。</p>
+</div>
+
+<div class="recipe">
+<div class="rt">D-6　特定の関数の中だけを対象にする</div>
+<pre><code>callExpr(
+  callee(functionDecl(hasName("::malloc"))),
+  hasAncestor(functionDecl(matchesName("^::render")))
+).bind("call")</code></pre>
+<p class="rn">「描画パスの中では動的確保を禁止」のような、文脈に依存するルール。</p>
+</div>
+
+<h2>28.7 E. 除外の技法</h2>
+
+<p>どのレシピも、そのままでは大量にマッチします。除外条件を重ねて実用的な件数まで落とします。</p>
+
+<figure>
+<svg viewBox="0 0 760 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="除外条件の重ね方">
+  <g font-family="sans-serif">
+
+  <text x="30" y="28" font-size="12.5" font-weight="bold" fill="#5a6b7a" letter-spacing="1.5">除外は「重ねる」もの</text>
+
+  <g font-size="11">
+  <rect x="30" y="44" width="640" height="30" rx="5" fill="#1f2933"/>
+  <text x="46" y="64" font-family="monospace" fill="#e6edf3">callExpr(callee(functionDecl(hasName("::malloc"))))</text>
+  <rect x="682" y="44" width="48" height="30" rx="5" fill="#f4f6f8" stroke="#5a6b7a"/>
+  <text x="706" y="64" text-anchor="middle" fill="#1f2933" font-weight="bold">842</text>
+
+  <rect x="30" y="82" width="640" height="30" rx="5" fill="#2f6f9f"/>
+  <text x="46" y="102" font-family="monospace" fill="#fff">  + isExpansionInMainFile()　　ヘッダを除外</text>
+  <rect x="682" y="82" width="48" height="30" rx="5" fill="#eef4f9" stroke="#2f6f9f"/>
+  <text x="706" y="102" text-anchor="middle" fill="#2f6f9f" font-weight="bold">31</text>
+
+  <rect x="30" y="120" width="640" height="30" rx="5" fill="#b4661a"/>
+  <text x="46" y="140" font-family="monospace" fill="#fff">  + unless(isInStdNamespace())　　標準ライブラリを除外</text>
+  <rect x="682" y="120" width="48" height="30" rx="5" fill="#fbf4ea" stroke="#b4661a"/>
+  <text x="706" y="140" text-anchor="middle" fill="#b4661a" font-weight="bold">28</text>
+
+  <rect x="30" y="158" width="640" height="30" rx="5" fill="#3d7a52"/>
+  <text x="46" y="178" font-family="monospace" fill="#fff">  + unless(isImplicit())　　コンパイラ生成物を除外</text>
+  <rect x="682" y="158" width="48" height="30" rx="5" fill="#eef5f0" stroke="#3d7a52"/>
+  <text x="706" y="178" text-anchor="middle" fill="#3d7a52" font-weight="bold">28</text>
+
+  <rect x="30" y="196" width="640" height="30" rx="5" fill="#a04a34"/>
+  <text x="46" y="216" font-family="monospace" fill="#fff">  + unless(hasAncestor(functionDecl(matchesName("Test"))))　　テストを除外</text>
+  <rect x="682" y="196" width="48" height="30" rx="5" fill="#f7e9e5" stroke="#a04a34"/>
+  <text x="706" y="216" text-anchor="middle" fill="#a04a34" font-weight="bold">12</text>
+  </g>
+
+  <rect x="30" y="242" width="700" height="66" rx="8" fill="#fbf4ea" stroke="#b4661a" stroke-width="1.6"/>
+  <text x="52" y="266" font-size="12" font-weight="bold" fill="#b4661a">除外しすぎに注意</text>
+  <text x="52" y="288" font-size="11.5" fill="#1f2933">条件を足すたびに件数を記録し、<tspan font-weight="bold">「検出したい実例」が消えていないか</tspan>を毎回確認する</text>
+  <text x="52" y="304" font-size="11" fill="#5a6b7a">第25章の「マッチするはずのコードを先に用意する」がここで効く</text>
+  </g>
+</svg>
+<figcaption><b>図28-2</b>　除外条件の重ね方。件数の推移を記録しながら進める。</figcaption>
+</figure>
+
+<table>
+<tr><th>除外条件</th><th>効果</th></tr>
+<tr><td><code>isExpansionInMainFile()</code></td><td>ヘッダ由来を除外。<strong>ほぼ常用</strong></td></tr>
+<tr><td><code>unless(isExpansionInSystemHeader())</code></td><td>システムヘッダのみ除外（自作ヘッダは残す）</td></tr>
+<tr><td><code>unless(isInStdNamespace())</code></td><td><code>std</code> 名前空間の中を除外</td></tr>
+<tr><td><code>unless(isImplicit())</code></td><td>コンパイラが生成したノードを除外</td></tr>
+<tr><td><code>unless(hasAncestor(functionDecl(matchesName("Test"))))</code></td><td>テスト関数の中を除外</td></tr>
+<tr><td><code>unless(isExpansionInFileMatching("generated"))</code></td><td>生成コードのファイルを除外</td></tr>
+</table>
+
+<h2>28.8 リファレンスの引き方</h2>
+
+<p>レシピにないものを書きたくなったときの調べ方です。第25章の三分類が、そのまま検索の道具になります。</p>
+
+<figure>
+<svg viewBox="0 0 760 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="AST Matcher Reference の引き方">
+  <defs>
+    <marker id="a28" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5a6b7a"/>
+    </marker>
+  </defs>
+  <g font-family="sans-serif">
+
+  <rect x="24" y="20" width="220" height="80" rx="8" fill="#1f2933"/>
+  <text x="134" y="46" text-anchor="middle" fill="#fff" font-size="12" font-weight="bold">① 検出したいコードを</text>
+  <text x="134" y="64" text-anchor="middle" fill="#fff" font-size="12" font-weight="bold">1行書く</text>
+  <text x="134" y="86" text-anchor="middle" fill="#b8c4cd" font-size="10.5">マッチするはずの実例</text>
+  <line x1="244" y1="60" x2="272" y2="60" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#a28)"/>
+
+  <rect x="276" y="20" width="220" height="80" rx="8" fill="#b4661a"/>
+  <text x="386" y="46" text-anchor="middle" fill="#fff" font-size="12" font-weight="bold">② その AST を dump</text>
+  <text x="386" y="70" text-anchor="middle" fill="#fde9d0" font-size="10.5" font-family="monospace">set output dump</text>
+  <text x="386" y="88" text-anchor="middle" fill="#fde9d0" font-size="10.5">ノード名を読む</text>
+  <line x1="496" y1="60" x2="524" y2="60" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#a28)"/>
+
+  <rect x="528" y="20" width="208" height="80" rx="8" fill="#2f6f9f"/>
+  <text x="632" y="46" text-anchor="middle" fill="#fff" font-size="12" font-weight="bold">③ Node Matcher が決まる</text>
+  <text x="632" y="70" text-anchor="middle" fill="#d6e6f2" font-size="10.5">ノード名を小文字始まりに</text>
+  <text x="632" y="88" text-anchor="middle" fill="#d6e6f2" font-size="10.5">（第23章）</text>
+
+  <line x1="380" y1="108" x2="380" y2="126" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#a28)"/>
+
+  <rect x="24" y="130" width="350" height="90" rx="8" fill="#fbf4ea" stroke="#b4661a" stroke-width="1.6"/>
+  <text x="199" y="154" text-anchor="middle" font-size="12" font-weight="bold" fill="#b4661a">④ 属性で絞りたい</text>
+  <text x="42" y="176" font-size="11" fill="#1f2933">→ リファレンスの <tspan font-weight="bold">Narrowing Matchers</tspan> を</text>
+  <text x="42" y="194" font-size="11" fill="#1f2933">　 そのノード型の項で探す</text>
+  <text x="42" y="212" font-size="10.5" fill="#5a6b7a">例：「const かどうか」→ isConst()</text>
+
+  <rect x="386" y="130" width="350" height="90" rx="8" fill="#eef5f0" stroke="#3d7a52" stroke-width="1.6"/>
+  <text x="561" y="154" text-anchor="middle" font-size="12" font-weight="bold" fill="#3d7a52">④' 別のノードへ移りたい</text>
+  <text x="404" y="176" font-size="11" fill="#1f2933">→ リファレンスの <tspan font-weight="bold">Traversal Matchers</tspan> を</text>
+  <text x="404" y="194" font-size="11" fill="#1f2933">　 そのノード型の項で探す</text>
+  <text x="404" y="212" font-size="10.5" fill="#5a6b7a">例：「引数へ」→ hasArgument()</text>
+
+  <rect x="24" y="236" width="712" height="52" rx="8" fill="#f4f6f8" stroke="#d8dee4"/>
+  <text x="46" y="258" font-size="11.5" fill="#1f2933"><tspan font-weight="bold">リファレンスは「ノード型ごと」に整理されている。</tspan>だから③でノード型が決まれば、探す範囲は一気に狭まる。</text>
+  <text x="46" y="278" font-size="11.5" fill="#1f2933">どの型にも使える Matcher（<tspan font-family="monospace">unless</tspan>、<tspan font-family="monospace">anyOf</tspan> など）は各節の先頭にまとめられている。</text>
+  </g>
+</svg>
+<figcaption><b>図28-3</b>　リファレンスの引き方。AST を先に見ることで、探す範囲がノード型の項に限定される。</figcaption>
+</figure>
+
+<h2>28.9 【ハンズオン】第6部の材料を揃える</h2>
+
+<div class="hands">
+<div class="hd">HANDS-ON 28　3つのルールをクエリにする</div>
+<div class="bd">
+<ol>
+  <li><strong>題材を用意する。</strong> <code>samples\ch28_rules.cpp</code> を作ります。<strong>各ルールについて、検出されるべきコードと、検出されるべきでないコードを両方入れる</strong>のが要点です。
+<pre><code>#include &lt;cstring&gt;
+#include &lt;cstdlib&gt;
+#include &lt;memory&gt;
+
+class Component { public: virtual ~Component() = default; };
+class RenderComponent : public Component {};   // OK：接尾辞あり
+class Physics : public Component {};           // NG：接尾辞なし
+class Helper {};                               // 対象外：Component 派生ではない
+
+void bad(char* dst, const char* src) {
+    strcpy(dst, src);                          // NG
+}
+void good(char* dst, const char* src, size_t n) {
+    strncpy(dst, src, n);                      // OK
+}
+
+void alloc() {
+    int*  raw   = new int(1);                  // NG：生ポインタへの new
+    auto  smart = std::make_unique&lt;int&gt;(1);    // OK
+    void* mem   = malloc(16);                  // NG
+    free(mem);
+}</code></pre>
+  </li>
+
+  <li><strong>準備する。</strong>
+<pre><code>clang-query ch28_rules.cpp -- -std=c++23</code></pre>
+<pre><code>set traversal IgnoreUnlessSpelledInSource
+set output diag</code></pre>
+  </li>
+
+  <li><strong>ルール1：禁止 API。</strong> レシピ A-2 を使い、<code>strcpy</code> がマッチし、<code>strncpy</code> がマッチしないことを確認します。
+<pre><code>m callExpr(callee(functionDecl(hasAnyName("::strcpy", "::strcat", "::sprintf"))), isExpansionInMainFile()).bind("call")</code></pre>
+    <strong>期待件数は1件です。</strong> 合わなければ条件を見直してください。</li>
+
+  <li><strong>ルール2：生ポインタへの <code>new</code>。</strong> レシピ D-3 を使い、<code>raw</code> がマッチして <code>smart</code> がマッチしないことを確認します。
+<pre><code>m varDecl(hasType(pointerType()), hasInitializer(cxxNewExpr()), isExpansionInMainFile()).bind("var")</code></pre>
+  </li>
+
+  <li><strong>ルール3：命名規約。</strong> レシピ C-2 を使い、<code>Physics</code> だけがマッチすることを確認します。
+<pre><code>m cxxRecordDecl(isDerivedFrom(hasName("::Component")), unless(matchesName("Component$")), isExpansionInMainFile()).bind("cls")</code></pre>
+    <strong><code>RenderComponent</code> と <code>Helper</code> がマッチしないことが重要な確認点です。</strong></li>
+
+  <li><strong>bind の位置を確認する。</strong> 3つそれぞれについて、<code>note: "…" binds here</code> がソースの意図した位置を指しているか確認します。第26章の失敗パターンを思い出してください。</li>
+
+  <li><strong>暗黙ノードに備える。</strong> <code>set traversal AsIs</code> に戻して同じクエリを実行し、<strong>どれが動かなくなるか</strong>を確認します。動かなくなったものは、<code>ignoringImplicit()</code> を使った形に書き換えてください。<strong>これが設定ファイルに持っていける形です（第27章 27.2 節）。</strong></li>
+
+  <li><strong>コストを測る。</strong>
+<pre><code>set enable-profile true</code></pre>
+    3つのクエリの実行時間を記録します。<code>hasAncestor</code> / <code>hasDescendant</code> を含むクエリと比べてみてください。</li>
+
+  <li><strong>保存する。</strong> <code>queries\</code> に3つのクエリファイルを作ります。それぞれに、
+    <ul>
+      <li>何を検出したいか（日本語のコメント）</li>
+      <li>期待される件数</li>
+      <li>マッチしてはいけない例</li>
+    </ul>
+    を書いておいてください。<strong>これがそのまま、第6部でカスタムチェックを書くときの仕様書になります。</strong></li>
+</ol>
+</div>
+</div>
+
+<div class="partend">
+<h2>第5部の終わりに</h2>
+<p>独自ルールを書くための土台が揃いました。</p>
+<ul>
+  <li>AST の形を読め、ノード名から Matcher 名を導ける（第23章）</li>
+  <li><code>clang-query</code> で対話的に試行錯誤できる（第24章）</li>
+  <li>Node / Narrowing / Traversal の三分類でクエリを組み立てられる（第25章）</li>
+  <li><code>bind</code> で診断を出す位置を指定できる（第26章）</li>
+  <li>暗黙ノードを越え、マッチしない／しすぎるときのデバッグ手順を持っている（第27章）</li>
+  <li>頻出パターンをレシピとして持っている（第28章）</li>
+</ul>
+<p style="margin-top:.8rem">そして手元には、<strong>clang-query で動作確認済みの3つのクエリ</strong>があります。</p>
+<p style="margin-top:.6rem">第6部では、これを <code>.clang-tidy</code> の <code>CustomChecks</code> に書き移します。C++ のコードは一行も書きません。設定ファイルにクエリと診断メッセージを書くだけで、<strong>あなたのチームにしか存在しないルールが、Visual Studio のエラー一覧に警告として出るようになります。</strong></p>
+</div>
+
+<div class="summary">
+<h2>この章のまとめ</h2>
+<ul>
+  <li>レシピは A：呼び出し／B：型と変数／C：クラスと継承／D：所有権と制御 の4分類。E：除外はすべてに重ねて使う。</li>
+  <li>レシピはそのまま貼らず、<strong>必ず <code>clang-query</code> で件数を確認してから使う</strong>。</li>
+  <li>関数名は <code>::</code> を付けて完全修飾で指定する。</li>
+  <li>除外は重ねる。<code>isExpansionInMainFile()</code> → <code>unless(isInStdNamespace())</code> → <code>unless(isImplicit())</code> → テスト・生成コードの順で件数を落とす。</li>
+  <li><strong>除外しすぎに注意。</strong> 条件を足すたびに「検出したい実例」が消えていないか確認する。</li>
+  <li>リファレンスは<strong>ノード型ごとに整理されている</strong>。AST を先に見てノード型を決めれば、探す範囲が絞れる。</li>
+  <li>クエリファイルには「何を検出したいか」「期待件数」「マッチしてはいけない例」を書く。これが第6部の仕様書になる。</li>
+</ul>
+</div>
+
+<p class="next"><strong>次章：</strong> 第6部に入ります。第29章「Query Based Custom Check とは何か」で、本書の主題である機能の全体像と、実験的機能であることの意味を確認します。そして第30章で、最初のカスタムチェックを <code>.clang-tidy</code> に書きます。</p>
+
+</div>
+</body>
+</html>

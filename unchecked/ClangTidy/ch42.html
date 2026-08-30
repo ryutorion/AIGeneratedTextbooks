@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第42章 Query Based Custom Check の限界と、その先 ─ Clang-Tidy入門</title>
+<style>
+  :root{
+    --ink:#1f2933; --sub:#5a6b7a; --line:#d8dee4; --bg:#ffffff;
+    --code-bg:#f6f8fa; --code-line:#e2e8ee;
+    --accent:#2f6f9f; --accent-bg:#eef4f9;
+    --warn:#b4661a; --warn-bg:#fbf4ea;
+    --ok:#3d7a52; --ok-bg:#eef5f0;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0; background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Noto Sans JP","Meiryo",sans-serif;
+    font-size:16px; line-height:1.95; font-feature-settings:"palt" 1;}
+  .page{max-width:47rem; margin:0 auto; padding:3.5rem 1.6rem 6rem}
+  .chap-no{font-size:.8rem; letter-spacing:.22em; color:var(--accent); font-weight:700; margin:0 0 .5rem}
+  h1{font-size:1.75rem; line-height:1.5; margin:0 0 .6rem; letter-spacing:.01em}
+  .lede{color:var(--sub); font-size:1rem; margin:0 0 2.2rem; padding-bottom:1.6rem; border-bottom:2px solid var(--ink)}
+  h2{font-size:1.28rem; margin:3rem 0 1rem; padding-left:.7rem; border-left:4px solid var(--accent); line-height:1.6}
+  h3{font-size:1.05rem; margin:2.2rem 0 .7rem}
+  h3::before{content:"◆ "; color:var(--accent); font-size:.8em}
+  p{margin:0 0 1.1rem}
+  ul,ol{margin:0 0 1.2rem; padding-left:1.6rem}
+  li{margin:.35rem 0}
+  code{font-family:"Cascadia Mono","Consolas","SFMono-Regular",monospace; font-size:.9em;
+       background:var(--code-bg); border:1px solid var(--code-line); border-radius:4px; padding:.08em .35em}
+  pre{background:var(--code-bg); border:1px solid var(--code-line); border-radius:8px;
+      padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.7}
+  pre code{background:none; border:none; padding:0; font-size:.86rem}
+  pre.term{background:#1f2933; border-color:#1f2933; color:#e6edf3}
+  pre.term code{color:#e6edf3}
+  pre.term .p{color:#7fb2d6}
+  pre.term .o{color:#9fb3c0}
+  .cap{font-size:.82rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+  figure{margin:2rem 0 2.2rem}
+  figure svg{display:block; width:100%; height:auto; border:1px solid var(--line); border-radius:8px; background:#fff}
+  figcaption{font-size:.85rem; color:var(--sub); margin-top:.6rem}
+  figcaption b{color:var(--ink)}
+  .box{border-radius:8px; padding:1rem 1.2rem; margin:1.6rem 0; font-size:.94rem}
+  .box p:last-child{margin-bottom:0}
+  .box .t{font-weight:700; display:block; margin-bottom:.35rem; font-size:.88rem; letter-spacing:.04em}
+  .note{background:var(--accent-bg); border-left:4px solid var(--accent)} .note .t{color:var(--accent)}
+  .warn{background:var(--warn-bg); border-left:4px solid var(--warn)} .warn .t{color:var(--warn)}
+  .tip{background:var(--ok-bg); border-left:4px solid var(--ok)} .tip .t{color:var(--ok)}
+  .hands{border:1px solid var(--line); border-radius:10px; margin:2rem 0; overflow:hidden}
+  .hands>.hd{background:var(--ink); color:#fff; padding:.55rem 1.1rem; font-size:.85rem; letter-spacing:.1em; font-weight:700}
+  .hands>.bd{padding:1.3rem 1.3rem .4rem}
+  .hands ol{counter-reset:step; list-style:none; padding-left:0}
+  .hands ol>li{counter-increment:step; position:relative; padding-left:2.4rem; margin:0 0 1.2rem}
+  .hands ol>li::before{content:counter(step); position:absolute; left:0; top:.25rem;
+    width:1.7rem; height:1.7rem; border-radius:50%; background:var(--accent); color:#fff;
+    font-size:.82rem; font-weight:700; display:flex; align-items:center; justify-content:center; line-height:1}
+  table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+  th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+  th{background:var(--code-bg); font-weight:700}
+  .summary{border:2px solid var(--ink); border-radius:10px; padding:1.3rem 1.5rem; margin:3rem 0 1rem}
+  .summary h2{margin:0 0 .8rem; border:none; padding:0; font-size:1.1rem}
+  .summary ul{margin-bottom:0}
+  .bookend{background:#1f2933; color:#fff; border-radius:12px; padding:1.8rem 1.8rem; margin:3rem 0 1rem}
+  .bookend h2{color:#fff; border-left-color:#e8b075; margin:0 0 1rem; font-size:1.2rem; padding-left:.7rem}
+  .bookend p{color:#cfd8de; margin-bottom:.9rem}
+  .bookend strong{color:#fff}
+  .bookend em{color:#e8b075; font-style:normal; font-weight:700}
+  @media (max-width:600px){ body{font-size:15px} .page{padding:2.2rem 1.1rem 4rem} h1{font-size:1.4rem} }
+</style>
+</head>
+<body>
+<div class="page">
+
+<p class="chap-no">第 42 章 ─ 最終章</p>
+<h1>Query Based Custom Check の限界と、その先</h1>
+<p class="lede">本書の最後です。第6部で作ったカスタムチェックは、AST の形を照合するものでした。実務のルールの大半はそれで足ります。しかし、いつか足りない日が来ます。「この変数が初期化される前に使われていないか」──そういうルールに突き当たったとき、次にどこへ行けばよいのか。その地図を渡して、本書を終えます。</p>
+
+<h2>42.1 三つの限界</h2>
+
+<figure>
+<svg viewBox="0 0 760 400" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Query Based Custom Check の三つの限界">
+  <g font-family="sans-serif">
+
+  <rect x="24" y="16" width="712" height="32" rx="6" fill="#1f2933"/>
+  <text x="380" y="37" text-anchor="middle" fill="#fff" font-size="12.5" font-weight="bold">クエリで書けないものは、この3つに分類できる</text>
+
+  <rect x="24" y="60" width="712" height="104" rx="10" fill="#f7e9e5" stroke="#a04a34" stroke-width="1.8"/>
+  <text x="44" y="86" font-size="13" font-weight="bold" fill="#a04a34">① 状態を追う必要があるもの</text>
+  <text x="44" y="110" font-size="11.5" fill="#1f2933">「初期化される前に使われていないか」「ロックを取ったまま return していないか」</text>
+  <text x="44" y="132" font-size="11.5" fill="#1f2933">AST の形は正しいが、<tspan font-weight="bold">実行経路をたどらないと判定できない</tspan></text>
+  <text x="44" y="154" font-size="11" fill="#5a6b7a">→ 第17章のフロー解析の領分。AST Matcher では原理的に扱えない</text>
+
+  <rect x="24" y="176" width="712" height="104" rx="10" fill="#fbf4ea" stroke="#b4661a" stroke-width="1.8"/>
+  <text x="44" y="202" font-size="13" font-weight="bold" fill="#b4661a">② 翻訳単位をまたぐもの</text>
+  <text x="44" y="226" font-size="11.5" fill="#1f2933">「この関数を呼んでいるのは1か所だけか」「この型を使っているモジュールはいくつあるか」</text>
+  <text x="44" y="248" font-size="11.5" fill="#1f2933">Clang-Tidy は<tspan font-weight="bold">翻訳単位ごとに独立して解析する</tspan>（第10章）</text>
+  <text x="44" y="270" font-size="11" fill="#5a6b7a">→ 全体を見渡す情報が必要。別の仕組み（集計スクリプト等）が要る</text>
+
+  <rect x="24" y="292" width="712" height="104" rx="10" fill="#eef4f9" stroke="#2f6f9f" stroke-width="1.8"/>
+  <text x="44" y="318" font-size="13" font-weight="bold" fill="#2f6f9f">③ 計算や複雑な条件が必要なもの</text>
+  <text x="44" y="342" font-size="11.5" fill="#1f2933">「引数の個数が戻り値の型のテンプレート引数と一致しているか」「名前が辞書に載っているか」</text>
+  <text x="44" y="364" font-size="11.5" fill="#1f2933">Matcher は<tspan font-weight="bold">宣言的なパターン</tspan>であって、手続きを書く場所がない</text>
+  <text x="44" y="386" font-size="11" fill="#5a6b7a">→ C++ の <tspan font-family="monospace">check()</tspan> メソッドの中でなら書ける</text>
+  </g>
+</svg>
+<figcaption><b>図42-1</b>　三つの限界。<strong>①は C++ で書いても難しく、②③は C++ なら書ける</strong>という点が、次の判断につながります。</figcaption>
+</figure>
+
+<h2>42.2 突き当たったときの選択肢</h2>
+
+<figure>
+<svg viewBox="0 0 760 420" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="クエリで書けないときの判断フロー">
+  <defs>
+    <marker id="a42" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5a6b7a"/>
+    </marker>
+  </defs>
+  <g font-family="sans-serif">
+
+  <rect x="270" y="14" width="220" height="34" rx="17" fill="#1f2933"/>
+  <text x="380" y="37" text-anchor="middle" fill="#fff" font-size="12.5" font-weight="bold">クエリで書けなかった</text>
+  <line x1="380" y1="48" x2="380" y2="64" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#a42)"/>
+
+  <path d="M380,68 L540,100 L380,132 L220,100 Z" fill="#eef5f0" stroke="#3d7a52" stroke-width="1.6"/>
+  <text x="380" y="96" text-anchor="middle" font-size="11.5" fill="#1f2933" font-weight="bold">標準チェックで代用できないか？</text>
+  <text x="380" y="114" text-anchor="middle" font-size="10" fill="#5a6b7a">clang-analyzer-* / bugprone-*</text>
+  <line x1="540" y1="100" x2="590" y2="100" stroke="#3d7a52" stroke-width="1.6" marker-end="url(#a42)"/>
+  <text x="552" y="92" font-size="10.5" fill="#3d7a52" font-weight="bold">できる</text>
+  <rect x="594" y="80" width="142" height="40" rx="8" fill="#3d7a52"/>
+  <text x="665" y="105" text-anchor="middle" fill="#fff" font-size="12" font-weight="bold">それを使う</text>
+
+  <line x1="380" y1="132" x2="380" y2="148" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#a42)"/>
+
+  <path d="M380,152 L540,184 L380,216 L220,184 Z" fill="#eef4f9" stroke="#2f6f9f" stroke-width="1.6"/>
+  <text x="380" y="180" text-anchor="middle" font-size="11.5" fill="#1f2933" font-weight="bold">ルールを分割できないか？</text>
+  <text x="380" y="198" text-anchor="middle" font-size="10" fill="#5a6b7a">8 割を拾う簡単な形にする</text>
+  <line x1="540" y1="184" x2="590" y2="184" stroke="#2f6f9f" stroke-width="1.6" marker-end="url(#a42)"/>
+  <text x="552" y="176" font-size="10.5" fill="#2f6f9f" font-weight="bold">できる</text>
+  <rect x="594" y="164" width="142" height="40" rx="8" fill="#2f6f9f"/>
+  <text x="665" y="189" text-anchor="middle" fill="#fff" font-size="12" font-weight="bold">分割して書く</text>
+
+  <line x1="380" y1="216" x2="380" y2="232" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#a42)"/>
+
+  <path d="M380,236 L540,268 L380,300 L220,268 Z" fill="#fbf4ea" stroke="#b4661a" stroke-width="1.6"/>
+  <text x="380" y="264" text-anchor="middle" font-size="11.5" fill="#1f2933" font-weight="bold">そのルールの価値は</text>
+  <text x="380" y="282" text-anchor="middle" font-size="11.5" fill="#1f2933" font-weight="bold">実装コストに見合うか？</text>
+  <line x1="220" y1="268" x2="176" y2="268" stroke="#b4661a" stroke-width="1.6" marker-end="url(#a42)"/>
+  <text x="182" y="260" font-size="10.5" fill="#b4661a" font-weight="bold">見合わない</text>
+  <rect x="24" y="248" width="148" height="40" rx="8" fill="#f4f6f8" stroke="#5a6b7a" stroke-dasharray="4 3"/>
+  <text x="98" y="273" text-anchor="middle" fill="#5a6b7a" font-size="12" font-weight="bold">レビューに残す</text>
+
+  <line x1="380" y1="300" x2="380" y2="324" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#a42)"/>
+  <text x="396" y="318" font-size="10.5" fill="#a04a34" font-weight="bold">見合う</text>
+
+  <rect x="230" y="328" width="300" height="72" rx="10" fill="#a04a34"/>
+  <text x="380" y="354" text-anchor="middle" fill="#fff" font-size="13" font-weight="bold">C++ で実装する</text>
+  <text x="380" y="376" text-anchor="middle" fill="#f0d5cf" font-size="11">ここまで来て初めて検討する</text>
+  <text x="380" y="392" text-anchor="middle" fill="#f0d5cf" font-size="10.5">42.3 節へ</text>
+  </g>
+</svg>
+<figcaption><b>図42-2</b>　判断フロー。<strong>C++ 実装は最後の選択肢です。</strong> 上の3段で、たいていは解決します。</figcaption>
+</figure>
+
+<div class="tip">
+<span class="t">「レビューに残す」は正当な結論</span>
+<p>すべてを機械化する必要はありません。<strong>年に数回しか起きない違反のために、保守コストの高いチェックを持つのは割に合いません。</strong> 第33章で書いたとおり、「8割を機械が拾い、2割を人間が見る」は健全な状態です。</p>
+</div>
+
+<h2>42.3 C++ でチェックを実装する</h2>
+
+<p>それでも必要になったときのために、全体像を示します。<strong>本書はここに踏み込みません</strong>が、道筋を知っていることには意味があります。</p>
+
+<h3>雛形を生成する</h3>
+
+<p>LLVM のソースツリーには、新しいチェックの雛形を作るスクリプトがあります。公式ドキュメントによれば、このスクリプトは次を行います。</p>
+
+<ul>
+  <li>指定したモジュールのディレクトリにチェックのクラスを作り、<strong>モジュールとビルドシステムに登録する</strong></li>
+  <li><code>test/clang-tidy/</code> にテストファイルを作る</li>
+  <li>ドキュメントファイルを作り、チェック一覧に追加する</li>
+</ul>
+
+<pre class="term"><code><span class="p">$</span> clang-tidy/add_new_check.py readability awesome-function-names</code></pre>
+
+<h3>チェッククラスの構造</h3>
+
+<figure>
+<svg viewBox="0 0 760 340" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="C++ で書くチェッククラスの構造">
+  <defs>
+    <marker id="b42" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5a6b7a"/>
+    </marker>
+  </defs>
+  <g font-family="sans-serif">
+
+  <rect x="24" y="20" width="712" height="34" rx="8" fill="#1f2933"/>
+  <text x="380" y="43" text-anchor="middle" fill="#fff" font-size="13" font-weight="bold">ClangTidyCheck を継承したクラスが持つメソッド</text>
+
+  <rect x="24" y="66" width="350" height="112" rx="10" fill="#eef4f9" stroke="#2f6f9f" stroke-width="1.8"/>
+  <text x="199" y="92" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#2f6f9f">registerMatchers()</text>
+  <text x="199" y="114" text-anchor="middle" font-size="11.5" fill="#1f2933">AST Matcher 式を組み立てる</text>
+  <rect x="44" y="126" width="310" height="40" rx="5" fill="#fff" stroke="#c5d6e4"/>
+  <text x="199" y="143" text-anchor="middle" font-size="10.5" fill="#5a6b7a">第5部で書いてきたクエリと</text>
+  <text x="199" y="159" text-anchor="middle" font-size="10.5" fill="#2f6f9f" font-weight="bold">同じものを C++ の式として書く</text>
+
+  <rect x="386" y="66" width="350" height="112" rx="10" fill="#fbf4ea" stroke="#b4661a" stroke-width="2.2"/>
+  <text x="561" y="92" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#b4661a">check()</text>
+  <text x="561" y="114" text-anchor="middle" font-size="11.5" fill="#1f2933">マッチ結果を受け取って診断を出す</text>
+  <rect x="406" y="126" width="310" height="40" rx="5" fill="#fff" stroke="#e6d5bd"/>
+  <text x="561" y="143" text-anchor="middle" font-size="10.5" fill="#5a6b7a">ここに手続きを書ける</text>
+  <text x="561" y="159" text-anchor="middle" font-size="10.5" fill="#b4661a" font-weight="bold">＝ 図42-1 の②③がここで解決する</text>
+
+  <rect x="24" y="190" width="350" height="92" rx="10" fill="#eef5f0" stroke="#3d7a52" stroke-width="1.6"/>
+  <text x="199" y="214" text-anchor="middle" font-size="12" font-weight="bold" fill="#3d7a52">registerPPCallbacks()</text>
+  <text x="199" y="236" text-anchor="middle" font-size="11" fill="#1f2933">プリプロセッサを監視する</text>
+  <text x="199" y="258" text-anchor="middle" font-size="10.5" fill="#5a6b7a">第2章の③方式。マクロや include を扱う</text>
+  <text x="199" y="274" text-anchor="middle" font-size="10.5" fill="#5a6b7a">既定では生成されない</text>
+
+  <rect x="386" y="190" width="350" height="92" rx="10" fill="#f4f6f8" stroke="#5a6b7a" stroke-width="1.6"/>
+  <text x="561" y="214" text-anchor="middle" font-size="12" font-weight="bold" fill="#5a6b7a">storeOptions()</text>
+  <text x="561" y="236" text-anchor="middle" font-size="11" fill="#1f2933">チェックのオプションを公開する</text>
+  <text x="561" y="258" text-anchor="middle" font-size="10.5" fill="#5a6b7a">第8章の CheckOptions が使えるようになる</text>
+  <text x="561" y="274" text-anchor="middle" font-size="10.5" fill="#a04a34">→ Query Based では持てない機能</text>
+
+  <rect x="24" y="294" width="712" height="34" rx="8" fill="#b4661a"/>
+  <text x="380" y="316" text-anchor="middle" fill="#fff" font-size="12" font-weight="bold">最後に CheckFactories.registerCheck&lt;MyCheck&gt;("my-check-name") でモジュールに登録する</text>
+  </g>
+</svg>
+<figcaption><b>図42-2</b>　C++ チェックの構造。<strong><code>registerMatchers()</code> に書くのは、第5部で練習したものと同じ Matcher 式です。</strong></figcaption>
+</figure>
+
+<div class="note">
+<span class="t">第5部の学習は無駄にならない</span>
+<p>C++ で実装する場合も、<strong>核心は AST Matcher 式です。</strong> 第23〜28章で身につけたものが、そのまま <code>registerMatchers()</code> の中身になります。違うのは、<code>check()</code> という手続きを書ける場所が増えることです。</p>
+</div>
+
+<h3>テストの書き方</h3>
+
+<p>LLVM のテストは <code>check_clang_tidy.py</code> というスクリプトを使い、<code>CHECK-MESSAGES</code> と <code>CHECK-FIXES</code> のディレクティブで期待を書きます。</p>
+
+<pre><code>// RUN: %check_clang_tidy %s readability-awesome-function-names %t
+void bad_name();
+// CHECK-MESSAGES: :[[@LINE-1]]:6: warning: function name is not awesome</code></pre>
+
+<p><strong>第37章で作った回帰テストの仕組みと、発想は同じです。</strong> 「期待をソースに書いて、機械が突き合わせる」という形は変わりません。</p>
+
+<h2>42.4 配布方式と Windows の現実</h2>
+
+<p>C++ で実装したチェックを使うには、2つの方式があります。<strong>ここに Windows 固有の事情があります。</strong></p>
+
+<table>
+<tr><th></th><th>本体ビルド方式</th><th>プラグイン方式</th></tr>
+<tr><td>やること</td><td>LLVM のソースにチェックを追加し、<code>clang-tidy</code> をビルドして配布</td><td>チェックを共有ライブラリにし、<code>-load</code> で読み込ませる</td></tr>
+<tr><td>ビルド</td><td>LLVM 全体（数時間・数十 GB）</td><td>自分のコードだけ</td></tr>
+<tr><td>配布</td><td>ビルドした実行ファイルを全開発者・CI に配る</td><td>DLL / .so を配る</td></tr>
+<tr><td><strong>Windows での可否</strong></td><td>可能（時間はかかる）</td><td><strong>歴史的に困難</strong></td></tr>
+</table>
+
+<div class="warn">
+<span class="t">Windows におけるプラグイン方式の状況</span>
+<p>Clang/LLVM のプラグイン機構は、長らく Windows で動きませんでした。理由は ELF と PE/COFF の違いです。ELF ではシンボルが暗黙にエクスポートされるのに対し、<strong>Windows の PE 形式では明示的なエクスポート指定が必要で、しかもエクスポートできるシンボル数に上限があります。</strong></p>
+<p style="margin-top:.5rem">この問題に対しては LLVM 側で改善作業が進んでおり、2024 年の Google Summer of Code で Windows 向けの共有ライブラリ構成が実装され、一部は本体に取り込まれています。ただし本書執筆時点では作業が継続中で、<strong>MSVC でビルドしたコードから消費できないといった制約も残っています。</strong></p>
+<p style="margin-top:.5rem">つまり <strong>Windows での実用的な選択肢は、当面「本体ビルド方式」か「Query Based Custom Check」の二択</strong>だということです。最新の状況は、お使いの LLVM のリリースノートで確認してください。</p>
+</div>
+
+<div class="tip">
+<span class="t">本書が Query Based Custom Check を主題に選んだ理由</span>
+<p>ここまで読んでいただければ、その理由は明らかだと思います。<strong>Windows + Visual Studio という環境で、独自ルールを現実的なコストで運用できる手段は、いまのところこれしかありません。</strong> 実験的機能であるという弱点を抱えてなお、代替が存在しないのです。だからこそ、第37章の回帰テストと第38章のバージョン管理を、あれほど強調しました。</p>
+</div>
+
+<h2>42.5 どこまでクエリ、どこから C++ か</h2>
+
+<table>
+<tr><th>状況</th><th>選択</th></tr>
+<tr><td>AST の形で判定でき、除外条件も式で書ける</td><td><strong>Query Based Custom Check</strong></td></tr>
+<tr><td>形は書けるが、条件が複雑で式が長大になる</td><td>クエリを<strong>分割</strong>して複数のチェックにする</td></tr>
+<tr><td>マッチ後に計算や複雑な判定が必要</td><td>C++（<code>check()</code> に書く）</td></tr>
+<tr><td>チェックにオプションを持たせたい</td><td>C++（<code>storeOptions()</code>）</td></tr>
+<tr><td>マクロや include を見たい</td><td>C++（<code>registerPPCallbacks()</code>）</td></tr>
+<tr><td>実行経路を追う必要がある</td><td><strong>標準の <code>clang-analyzer-*</code> で代用できないか先に検討</strong></td></tr>
+<tr><td>翻訳単位をまたぐ集計が必要</td><td>Clang-Tidy の外側（解析結果を集計するスクリプト）</td></tr>
+</table>
+
+<div class="bookend">
+<h2>本書を終えるにあたって</h2>
+
+<p>第1章で、リスト1-1 の <code>ConfigLoader</code> を見ました。コンパイルは通り、テストも通る。それでも6つの問題を抱えたコードでした。</p>
+
+<p>あのとき、コンパイラが指摘できたのは半分以下でした。残りは <em>「合法だが危うい」</em> という、機械が黙る領域にありました。</p>
+
+<p>本書を通じて、その領域を埋める道具を一つずつ積み上げてきました。標準チェックが問題の多くを拾い、設定とオプションでそれを自分たちの基準に合わせ、CI が新しいコードを守る。そして最後に、<strong>標準チェックにも存在しない「あなたのチームにしかないルール」を、自分の手で書けるようになりました。</strong></p>
+
+<p>Query Based Custom Check は実験的機能です。設定の形も、クエリの記述も、これから変わるかもしれません。しかし本書で本当に身につけたのは、設定ファイルの書式ではありません。<em>AST を読み、条件を式にし、件数で判断し、記録を残す</em> ── この一連の作業の型です。仕組みが変わっても、この型は残ります。</p>
+
+<p>そして最も大事なことを、もう一度。<strong>静的解析の目的は、警告を出すことではありません。</strong> 出た警告が読まれ、直され、次から同じ問題が起きなくなること。そのために本書では、件数を数え、Tier を分け、メッセージの書き方にこだわり、導入の順序を設計しました。<em>ツールは、人が使って初めて意味を持ちます。</em></p>
+
+<p style="margin-bottom:0">あなたのプロジェクトの <code>.clang-tidy</code> が、これから育っていきますように。</p>
+</div>
+
+<div class="summary">
+<h2>この章のまとめ</h2>
+<ul>
+  <li>クエリで書けないものは3つ。<strong>①状態を追うもの ②翻訳単位をまたぐもの ③計算や複雑な条件が必要なもの。</strong></li>
+  <li>突き当たったら、<strong>標準チェックで代用 → ルールを分割 → 価値とコストを比較</strong>の順に検討する。C++ 実装は最後。</li>
+  <li><strong>「レビューに残す」は正当な結論。</strong> すべてを機械化する必要はない。</li>
+  <li>C++ 実装の核心も AST Matcher 式（<code>registerMatchers()</code>）。<strong>第5部の学習はそのまま活きる。</strong></li>
+  <li><code>check()</code> に手続きを書けるので②③が解決する。<code>storeOptions()</code> でオプションも持てる。</li>
+  <li><strong>Windows ではプラグイン方式が歴史的に困難。</strong> 改善作業は進行中だが、当面は「本体ビルド」か「Query Based Custom Check」の二択。</li>
+  <li>だからこそ本書は Query Based Custom Check を主題に選んだ。<strong>実験的機能であることを、回帰テストとバージョン管理で補う。</strong></li>
+</ul>
+</div>
+
+<p style="text-align:center; color:#5a6b7a; font-size:.9rem; margin-top:3rem; padding-top:2rem; border-top:1px solid #d8dee4">
+── 全42章 完 ──
+</p>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第2章 Clang-Tidy とその仲間たち ─ Clang-Tidy入門</title>
+<style>
+  :root{
+    --ink:#1f2933; --sub:#5a6b7a; --line:#d8dee4; --bg:#ffffff;
+    --code-bg:#f6f8fa; --code-line:#e2e8ee;
+    --accent:#2f6f9f; --accent-bg:#eef4f9;
+    --warn:#b4661a; --warn-bg:#fbf4ea;
+    --ok:#3d7a52; --ok-bg:#eef5f0;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Noto Sans JP","Meiryo",sans-serif;
+    font-size:16px; line-height:1.95; font-feature-settings:"palt" 1;
+  }
+  .page{max-width:47rem; margin:0 auto; padding:3.5rem 1.6rem 6rem}
+  .chap-no{font-size:.8rem; letter-spacing:.22em; color:var(--accent); font-weight:700; margin:0 0 .5rem}
+  h1{font-size:1.85rem; line-height:1.5; margin:0 0 .6rem; letter-spacing:.01em}
+  .lede{color:var(--sub); font-size:1rem; margin:0 0 2.2rem; padding-bottom:1.6rem; border-bottom:2px solid var(--ink)}
+  h2{font-size:1.28rem; margin:3rem 0 1rem; padding-left:.7rem; border-left:4px solid var(--accent); line-height:1.6}
+  h3{font-size:1.05rem; margin:2.2rem 0 .7rem; color:var(--ink)}
+  h3::before{content:"◆ "; color:var(--accent); font-size:.8em}
+  p{margin:0 0 1.1rem}
+  ul,ol{margin:0 0 1.2rem; padding-left:1.6rem}
+  li{margin:.35rem 0}
+  code{font-family:"Cascadia Mono","Consolas","SFMono-Regular",monospace; font-size:.9em;
+       background:var(--code-bg); border:1px solid var(--code-line); border-radius:4px; padding:.08em .35em}
+  pre{background:var(--code-bg); border:1px solid var(--code-line); border-radius:8px;
+      padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.7}
+  pre code{background:none; border:none; padding:0; font-size:.86rem}
+  .cap{font-size:.82rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+  figure{margin:2rem 0 2.2rem}
+  figure svg{display:block; width:100%; height:auto; border:1px solid var(--line); border-radius:8px; background:#fff}
+  figcaption{font-size:.85rem; color:var(--sub); margin-top:.6rem}
+  figcaption b{color:var(--ink)}
+  .box{border-radius:8px; padding:1rem 1.2rem; margin:1.6rem 0; font-size:.94rem}
+  .box p:last-child{margin-bottom:0}
+  .box .t{font-weight:700; display:block; margin-bottom:.35rem; font-size:.88rem; letter-spacing:.04em}
+  .note{background:var(--accent-bg); border-left:4px solid var(--accent)}
+  .note .t{color:var(--accent)}
+  .warn{background:var(--warn-bg); border-left:4px solid var(--warn)}
+  .warn .t{color:var(--warn)}
+  .tip{background:var(--ok-bg); border-left:4px solid var(--ok)}
+  .tip .t{color:var(--ok)}
+  .hands{border:1px solid var(--line); border-radius:10px; margin:2rem 0; overflow:hidden}
+  .hands>.hd{background:var(--ink); color:#fff; padding:.55rem 1.1rem; font-size:.85rem; letter-spacing:.1em; font-weight:700}
+  .hands>.bd{padding:1.3rem 1.3rem .4rem}
+  .hands ol{counter-reset:step; list-style:none; padding-left:0}
+  .hands ol>li{counter-increment:step; position:relative; padding-left:2.4rem; margin:0 0 1.2rem}
+  .hands ol>li::before{content:counter(step); position:absolute; left:0; top:.25rem;
+    width:1.7rem; height:1.7rem; border-radius:50%; background:var(--accent); color:#fff;
+    font-size:.82rem; font-weight:700; display:flex; align-items:center; justify-content:center; line-height:1}
+  table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+  th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+  th{background:var(--code-bg); font-weight:700}
+  .summary{border:2px solid var(--ink); border-radius:10px; padding:1.3rem 1.5rem; margin:3rem 0 1rem}
+  .summary h2{margin:0 0 .8rem; border:none; padding:0; font-size:1.1rem}
+  .summary ul{margin-bottom:0}
+  .next{color:var(--sub); font-size:.94rem; border-top:1px solid var(--line); padding-top:1.2rem; margin-top:2.5rem}
+  @media (max-width:600px){ body{font-size:15px} .page{padding:2.2rem 1.1rem 4rem} h1{font-size:1.5rem} }
+</style>
+</head>
+<body>
+<div class="page">
+
+<p class="chap-no">第 2 章</p>
+<h1>Clang-Tidy とその仲間たち</h1>
+<p class="lede">Clang-Tidy は「文字列をパターンマッチする lint」ではありません。実際に C++ をコンパイルするのと同じ手順でソースを解析し、構文木を組み立て、その木に対して問い合わせを行います。この仕組みを理解しておくと、後半で自分でルールを書くときに迷いません。あわせて <code>clang-query</code>、<code>run-clang-tidy</code>、<code>clang-apply-replacements</code> といった周辺ツールの役割分担も押さえます。</p>
+
+<h2>2.1 Clang-Tidy は「コンパイラの目」を借りている</h2>
+
+<p>古典的な lint ツールの多くは、ソースコードをテキストとして正規表現で検査していました。手軽ですが限界があります。たとえば「<code>strcpy</code> の呼び出しを検出したい」とき、テキスト検索では次を区別できません。</p>
+
+<pre><code>strcpy(dst, src);          // 検出したい
+// strcpy(dst, src);       // コメント。検出したくない
+const char* s = "strcpy";  // 文字列リテラル。検出したくない
+MyClass::strcpy(a, b);     // 自作の別物。検出したくない
+#define strcpy my_strcpy   // マクロで置換済み。さて？</code></pre>
+
+<p>Clang-Tidy はこの問題を、根本から回避します。テキストではなく <strong>Clang が構築した抽象構文木（AST: Abstract Syntax Tree）</strong> を見るからです。AST の段階ではコメントも文字列リテラルもマクロも解決済みで、「これは <code>::strcpy</code> という関数への呼び出し式である」という意味レベルの情報が付いています。</p>
+
+<div class="note">
+<span class="t">つまり Clang-Tidy を動かすにはコンパイルが必要</span>
+<p>AST を作るということは、実際にプリプロセスとパースを通すということです。したがって Clang-Tidy には <strong>コンパイルオプション（インクルードパス、マクロ定義、言語規格）を正しく渡さなければなりません</strong>。「なぜかヘッダが見つからないと言われる」という初学者の詰まりどころは、ほぼ全部ここに由来します。第12章で正面から扱います。</p>
+</div>
+
+<h2>2.2 内部で起きていること</h2>
+
+<p>Clang-Tidy が1つのソースファイルを処理する流れを図にすると、次のようになります。</p>
+
+<figure>
+<svg viewBox="0 0 760 470" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Clang-Tidy の内部処理パイプライン">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5a6b7a"/>
+    </marker>
+    <marker id="ao" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#b4661a"/>
+    </marker>
+  </defs>
+  <g font-family="sans-serif">
+
+  <!-- inputs -->
+  <rect x="24" y="20" width="150" height="40" rx="6" fill="#1f2933"/>
+  <text x="99" y="45" text-anchor="middle" fill="#fff" font-size="13" font-weight="bold">.cpp / .h</text>
+
+  <rect x="24" y="72" width="150" height="40" rx="6" fill="#4a5b6a"/>
+  <text x="99" y="90" text-anchor="middle" fill="#fff" font-size="12" font-weight="bold">コンパイルオプション</text>
+  <text x="99" y="105" text-anchor="middle" fill="#cfd8de" font-size="10">-std / -I / -D</text>
+
+  <rect x="24" y="124" width="150" height="40" rx="6" fill="#2f6f9f"/>
+  <text x="99" y="142" text-anchor="middle" fill="#fff" font-size="12" font-weight="bold">.clang-tidy</text>
+  <text x="99" y="157" text-anchor="middle" fill="#d6e6f2" font-size="10">どのチェックを使うか</text>
+
+  <path d="M174,40 L215,40 L215,124" fill="none" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#a)"/>
+  <path d="M174,92 L215,92" fill="none" stroke="#5a6b7a" stroke-width="1.5"/>
+
+  <!-- frontend -->
+  <rect x="240" y="20" width="200" height="150" rx="8" fill="#eef4f9" stroke="#2f6f9f" stroke-width="1.5"/>
+  <text x="340" y="44" text-anchor="middle" font-size="13.5" font-weight="bold" fill="#2f6f9f">Clang フロントエンド</text>
+  <rect x="260" y="58" width="160" height="30" rx="5" fill="#fff" stroke="#c5d6e4"/>
+  <text x="340" y="78" text-anchor="middle" font-size="12" fill="#1f2933">プリプロセス</text>
+  <rect x="260" y="94" width="160" height="30" rx="5" fill="#fff" stroke="#c5d6e4"/>
+  <text x="340" y="114" text-anchor="middle" font-size="12" fill="#1f2933">字句解析・構文解析</text>
+  <rect x="260" y="130" width="160" height="30" rx="5" fill="#fff" stroke="#c5d6e4"/>
+  <text x="340" y="150" text-anchor="middle" font-size="12" fill="#1f2933">意味解析</text>
+
+  <line x1="440" y1="95" x2="486" y2="95" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#a)"/>
+
+  <!-- AST -->
+  <rect x="510" y="55" width="222" height="80" rx="8" fill="#1f2933"/>
+  <text x="621" y="82" text-anchor="middle" fill="#fff" font-size="15" font-weight="bold">AST</text>
+  <text x="621" y="103" text-anchor="middle" fill="#b8c4cd" font-size="11">FunctionDecl / CallExpr /</text>
+  <text x="621" y="119" text-anchor="middle" fill="#b8c4cd" font-size="11">CXXNewExpr / VarDecl …</text>
+
+  <path d="M621,135 L621,168" fill="none" stroke="#5a6b7a" stroke-width="1.5"/>
+  <path d="M621,168 L160,168 L160,196" fill="none" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#a)"/>
+  <path d="M621,168 L380,168 L380,196" fill="none" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#a)"/>
+  <path d="M621,168 L600,168 L600,196" fill="none" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#a)"/>
+
+  <!-- three check kinds -->
+  <rect x="34" y="200" width="252" height="112" rx="8" fill="#fbf4ea" stroke="#b4661a" stroke-width="2.2"/>
+  <text x="160" y="223" text-anchor="middle" font-size="13" font-weight="bold" fill="#b4661a">① AST Matcher 方式</text>
+  <text x="50" y="245" font-size="11.5" fill="#1f2933">木の「形」を問い合わせる</text>
+  <text x="50" y="264" font-size="11.5" fill="#1f2933">大多数のチェックがこれ</text>
+  <text x="50" y="283" font-size="11.5" fill="#1f2933">bugprone-* / modernize-* …</text>
+  <rect x="46" y="290" width="228" height="18" rx="4" fill="#b4661a"/>
+  <text x="160" y="303" text-anchor="middle" font-size="10.5" fill="#fff" font-weight="bold">★ 本書のカスタムチェックはここ</text>
+
+  <rect x="300" y="200" width="160" height="112" rx="8" fill="#eef5f0" stroke="#3d7a52" stroke-width="1.5"/>
+  <text x="380" y="223" text-anchor="middle" font-size="13" font-weight="bold" fill="#3d7a52">② フロー解析方式</text>
+  <text x="314" y="245" font-size="11.5" fill="#1f2933">実行経路をたどる</text>
+  <text x="314" y="264" font-size="11.5" fill="#1f2933">Clang Static Analyzer</text>
+  <text x="314" y="283" font-size="11.5" fill="#1f2933">clang-analyzer-*</text>
+  <text x="314" y="302" font-size="11" fill="#5a6b7a">（重いが強力）</text>
+
+  <rect x="474" y="200" width="252" height="112" rx="8" fill="#eef4f9" stroke="#2f6f9f" stroke-width="1.5"/>
+  <text x="600" y="223" text-anchor="middle" font-size="13" font-weight="bold" fill="#2f6f9f">③ プリプロセッサ方式</text>
+  <text x="488" y="245" font-size="11.5" fill="#1f2933">#include / #define を監視</text>
+  <text x="488" y="264" font-size="11.5" fill="#1f2933">AST に残らない情報を扱う</text>
+  <text x="488" y="283" font-size="11.5" fill="#1f2933">例: マクロの命名規則</text>
+
+  <path d="M160,312 L160,344 L340,344" fill="none" stroke="#5a6b7a" stroke-width="1.5"/>
+  <path d="M380,312 L380,344" fill="none" stroke="#5a6b7a" stroke-width="1.5"/>
+  <path d="M600,312 L600,344 L420,344" fill="none" stroke="#5a6b7a" stroke-width="1.5"/>
+  <line x1="380" y1="344" x2="380" y2="368" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#a)"/>
+
+  <!-- diagnostics -->
+  <rect x="230" y="372" width="300" height="44" rx="8" fill="#1f2933"/>
+  <text x="380" y="392" text-anchor="middle" fill="#fff" font-size="13" font-weight="bold">診断（warning / note）</text>
+  <text x="380" y="409" text-anchor="middle" fill="#b8c4cd" font-size="11">ファイル・行・列・メッセージ・チェック名</text>
+
+  <path d="M230,394 L120,394 L120,430" fill="none" stroke="#b4661a" stroke-width="1.5" marker-end="url(#ao)"/>
+  <path d="M530,394 L640,394 L640,430" fill="none" stroke="#b4661a" stroke-width="1.5" marker-end="url(#ao)"/>
+
+  <rect x="26" y="434" width="188" height="30" rx="6" fill="#fff" stroke="#b4661a"/>
+  <text x="120" y="454" text-anchor="middle" font-size="12" fill="#b4661a" font-weight="bold">エラー一覧・波線・標準出力</text>
+
+  <rect x="546" y="434" width="188" height="30" rx="6" fill="#fff" stroke="#b4661a"/>
+  <text x="640" y="454" text-anchor="middle" font-size="12" fill="#b4661a" font-weight="bold">FixIt（自動修正パッチ）</text>
+
+  </g>
+</svg>
+<figcaption><b>図2-1</b>　Clang-Tidy の内部処理。ソースは一度きちんとコンパイルされ、その結果できた AST に対して3方式のチェックが走る。診断は警告として出るだけでなく、修正案（FixIt）を伴うことがある。</figcaption>
+</figure>
+
+<p>図の①〜③がチェックの実装方式です。それぞれ性格が違います。</p>
+
+<table>
+<tr><th>方式</th><th>見ているもの</th><th>速度</th><th>得意なこと</th></tr>
+<tr><td>① AST Matcher</td><td>構文木の形</td><td>速い</td><td>「この形のコードを禁止」「この書き方に置き換え」。<strong>自作ルールの主戦場</strong></td></tr>
+<tr><td>② フロー解析</td><td>実行経路と値の状態</td><td>遅い</td><td>「この経路を通ると NULL 参照になる」といった経路依存の欠陥</td></tr>
+<tr><td>③ プリプロセッサ</td><td>マクロ・インクルード</td><td>速い</td><td>AST に残らないもの（マクロ名、include の順序）</td></tr>
+</table>
+
+<p>第1章のリスト1-1 に当てはめると、<code>new[]</code> と <code>delete</code> の不一致は①（形を見れば分かる）、<code>fopen</code> の戻り値未チェックによる NULL 参照は②（経路をたどらないと分からない）です。</p>
+
+<div class="tip">
+<span class="t">ここが本書の要</span>
+<p>第6部で扱う <strong>Query Based Custom Check は ① の仕組みをそのまま設定ファイルから使えるようにしたもの</strong> です。つまり、C++ を一行も書かずに「AST の形を指定して警告を出す」ができる。逆にいえば、②のフロー解析が必要なルールはクエリでは書けません。この線引きが第42章の主題になります。</p>
+</div>
+
+<h2>2.3 チェックの名前はモジュール名で始まる</h2>
+
+<p>Clang-Tidy のチェックは <code>モジュール名-チェック名</code> という命名になっています。</p>
+
+<pre><code>bugprone-use-after-move
+modernize-use-nullptr
+performance-unnecessary-value-param
+readability-identifier-naming
+clang-analyzer-core.NullDereference</code></pre>
+
+<p>モジュールは出自や目的でまとまっています。主なものだけ挙げます。</p>
+
+<table>
+<tr><th>モジュール</th><th>性格</th></tr>
+<tr><td><code>bugprone-</code></td><td>バグになりやすい書き方。最初に有効化する価値が高い</td></tr>
+<tr><td><code>clang-analyzer-</code></td><td>Clang Static Analyzer によるフロー解析</td></tr>
+<tr><td><code>modernize-</code></td><td>古い書き方をモダンな C++ に置き換える</td></tr>
+<tr><td><code>performance-</code></td><td>不要なコピー・変換など性能上の無駄</td></tr>
+<tr><td><code>readability-</code></td><td>可読性・命名規則</td></tr>
+<tr><td><code>cppcoreguidelines-</code> / <code>cert-</code> / <code>hicpp-</code></td><td>各種コーディング標準の機械化</td></tr>
+<tr><td><code>misc-</code> / <code>portability-</code> / <code>concurrency-</code></td><td>その他、移植性、並行性</td></tr>
+<tr><td><strong><code>custom-</code></strong></td><td><strong>Query Based Custom Check で定義した自作チェックが入るモジュール</strong></td></tr>
+</table>
+
+<p>最後の <code>custom-</code> に注目してください。設定ファイルに <code>Name: no-strcpy</code> と書いたチェックは、有効化するときには <code>custom-no-strcpy</code> という名前になります。標準チェックと名前が衝突しないよう、専用のモジュールに隔離される仕組みです。第30章で実際に書きます。</p>
+
+<h2>2.4 周辺ツールの役割分担</h2>
+
+<p>Clang-Tidy は単体で完結せず、いくつかのツールと組で使われます。それぞれ「いつ使うか」がはっきり分かれています。</p>
+
+<figure>
+<svg viewBox="0 0 760 400" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Clang-Tidy 周辺ツールの役割分担">
+  <defs>
+    <marker id="b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#2f6f9f"/>
+    </marker>
+  </defs>
+  <g font-family="sans-serif">
+
+  <text x="30" y="30" font-size="12" font-weight="bold" fill="#5a6b7a" letter-spacing="2">ルールを作る局面</text>
+  <line x1="30" y1="40" x2="730" y2="40" stroke="#d8dee4"/>
+
+  <rect x="30" y="56" width="200" height="86" rx="8" fill="#fbf4ea" stroke="#b4661a" stroke-width="2"/>
+  <text x="130" y="80" text-anchor="middle" font-size="14" font-weight="bold" fill="#b4661a">clang-query</text>
+  <text x="130" y="102" text-anchor="middle" font-size="11.5" fill="#1f2933">対話シェル。AST を覗き、</text>
+  <text x="130" y="120" text-anchor="middle" font-size="11.5" fill="#1f2933">Matcher を試行錯誤する</text>
+  <text x="130" y="136" text-anchor="middle" font-size="10.5" fill="#5a6b7a">→ 第24〜28章</text>
+
+  <path d="M230,99 L286,99" fill="none" stroke="#2f6f9f" stroke-width="1.6" marker-end="url(#b)"/>
+  <text x="258" y="92" text-anchor="middle" font-size="10" fill="#5a6b7a">確定したら</text>
+
+  <rect x="292" y="56" width="200" height="86" rx="8" fill="#eef4f9" stroke="#2f6f9f" stroke-width="2"/>
+  <text x="392" y="80" text-anchor="middle" font-size="14" font-weight="bold" fill="#2f6f9f">.clang-tidy</text>
+  <text x="392" y="102" text-anchor="middle" font-size="11.5" fill="#1f2933">設定ファイル。有効チェック・</text>
+  <text x="392" y="120" text-anchor="middle" font-size="11.5" fill="#1f2933">オプション・カスタムチェック</text>
+  <text x="392" y="136" text-anchor="middle" font-size="10.5" fill="#5a6b7a">→ 第7章・第30章</text>
+
+  <path d="M492,99 L548,99" fill="none" stroke="#2f6f9f" stroke-width="1.6" marker-end="url(#b)"/>
+
+  <rect x="554" y="56" width="176" height="86" rx="8" fill="#f4f6f8" stroke="#5a6b7a" stroke-dasharray="4 3"/>
+  <text x="642" y="80" text-anchor="middle" font-size="13" font-weight="bold" fill="#5a6b7a">C++ での拡張</text>
+  <text x="642" y="102" text-anchor="middle" font-size="11" fill="#1f2933">クエリで書けない場合</text>
+  <text x="642" y="120" text-anchor="middle" font-size="11" fill="#1f2933">のみ。本書では概説</text>
+  <text x="642" y="136" text-anchor="middle" font-size="10.5" fill="#5a6b7a">→ 第42章</text>
+
+  <text x="30" y="190" font-size="12" font-weight="bold" fill="#5a6b7a" letter-spacing="2">ルールを走らせる局面</text>
+  <line x1="30" y1="200" x2="730" y2="200" stroke="#d8dee4"/>
+
+  <rect x="30" y="216" width="200" height="98" rx="8" fill="#1f2933"/>
+  <text x="130" y="242" text-anchor="middle" font-size="14" font-weight="bold" fill="#fff">clang-tidy</text>
+  <text x="130" y="264" text-anchor="middle" font-size="11.5" fill="#cfd8de">本体。1ファイル単位で解析</text>
+  <text x="130" y="282" text-anchor="middle" font-size="11.5" fill="#cfd8de">VS からも内部で呼ばれる</text>
+  <text x="130" y="300" text-anchor="middle" font-size="10.5" fill="#8fa3b2">→ 第5章・第12章</text>
+
+  <rect x="248" y="216" width="200" height="98" rx="8" fill="#eef5f0" stroke="#3d7a52" stroke-width="1.6"/>
+  <text x="348" y="242" text-anchor="middle" font-size="14" font-weight="bold" fill="#3d7a52">run-clang-tidy</text>
+  <text x="348" y="264" text-anchor="middle" font-size="11.5" fill="#1f2933">プロジェクト全体を並列実行</text>
+  <text x="348" y="282" text-anchor="middle" font-size="11.5" fill="#1f2933">compile_commands.json 必要</text>
+  <text x="348" y="300" text-anchor="middle" font-size="10.5" fill="#5a6b7a">→ 第15章</text>
+
+  <rect x="466" y="216" width="264" height="98" rx="8" fill="#eef4f9" stroke="#2f6f9f" stroke-width="1.6"/>
+  <text x="598" y="242" text-anchor="middle" font-size="14" font-weight="bold" fill="#2f6f9f">clang-apply-replacements</text>
+  <text x="598" y="264" text-anchor="middle" font-size="11.5" fill="#1f2933">複数ファイルにまたがる FixIt を</text>
+  <text x="598" y="282" text-anchor="middle" font-size="11.5" fill="#1f2933">競合を解決しながら一括適用</text>
+  <text x="598" y="300" text-anchor="middle" font-size="10.5" fill="#5a6b7a">→ 第11章・第15章</text>
+
+  <rect x="30" y="332" width="700" height="52" rx="8" fill="#f4f6f8" stroke="#d8dee4"/>
+  <text x="52" y="356" font-size="13" font-weight="bold" fill="#1f2933">clang-format</text>
+  <text x="52" y="374" font-size="11.5" fill="#5a6b7a">別ツール。「書式」を整える。clang-tidy は「意味」を見る。守備範囲が違う（→ 第41章）</text>
+  </g>
+</svg>
+<figcaption><b>図2-2</b>　周辺ツールの役割分担。上段が「ルールを作る」流れ、下段が「ルールを走らせる」流れ。本書の第5部・第6部は上段の左半分を徹底的にやる。</figcaption>
+</figure>
+
+<h3>clang-query ── 対話的に AST を探る</h3>
+<p>Clang-Tidy のカスタムチェックを書くうえで、最も時間を使うのがこのツールです。ソースを読み込ませて <code>match functionDecl(hasName("load"))</code> のような問い合わせを打ち、何がマッチするかを即座に確認できます。<strong>いきなり <code>.clang-tidy</code> にクエリを書くのは悪手</strong> で、まずここで確定させてから設定ファイルに移すのが定石です（第36章）。</p>
+
+<h3>run-clang-tidy ── 一括実行</h3>
+<p><code>clang-tidy</code> 本体は原則1ファイルずつです。プロジェクト全体を回すには、コンパイルデータベース（<code>compile_commands.json</code>）を渡して <code>run-clang-tidy</code> で並列実行します。CI で使う主力はこちらです。</p>
+
+<h3>clang-apply-replacements ── 修正の一括適用</h3>
+<p>並列実行では、複数の翻訳単位が同じヘッダを修正しようとして衝突します。そこで各プロセスは修正案を YAML に書き出すだけにしておき、後からこのツールで重複排除しつつ適用します。</p>
+
+<h2>2.5 MSVC のコード分析との関係</h2>
+
+<p>Visual Studio にはもともと Microsoft 製のコード分析（<code>/analyze</code>、C++ Core Check）が載っています。Clang-Tidy はこれを置き換えるものではなく、並べて使えます。</p>
+
+<table>
+<tr><th></th><th>Microsoft コード分析</th><th>Clang-Tidy</th></tr>
+<tr><td>パーサ</td><td>MSVC 本体</td><td>Clang</td></tr>
+<tr><td>強み</td><td>SAL 注釈の活用、Windows API の知識、MSVC 拡張の完全な理解</td><td>チェックの豊富さ、自動修正、<strong>ルールの自作</strong></td></tr>
+<tr><td>設定</td><td>ルールセット（<code>.ruleset</code>）</td><td><code>.clang-tidy</code>（テキスト、リポジトリで共有しやすい）</td></tr>
+<tr><td>注意点</td><td>—</td><td>MSVC 固有の拡張構文でパースエラーになることがある</td></tr>
+</table>
+
+<div class="warn">
+<span class="t">Clang でパースできないコードは解析できない</span>
+<p>Clang-Tidy は Clang でソースを読みます。MSVC 固有の拡張（一部の <code>__declspec</code>、古い COM ヘッダの書き方など）を含むコードでは、パースエラーが出て解析が途中で止まることがあります。この場合、解析対象から除外するか、<code>--extra-args</code> で MSVC 互換モードの指定を調整します（第12章）。「警告が0件だ、素晴らしい」と思ったら実はパースに失敗していた、というのはよくある落とし穴です。</p>
+</div>
+
+<h2>2.6 【ハンズオン】検出方式を見分ける</h2>
+
+<p>この章のハンズオンは机上作業です。まだツールは動かしません。しかしこの分類ができるかどうかが、第6部でカスタムチェックを書けるかどうかを決めます。</p>
+
+<div class="hands">
+<div class="hd">HANDS-ON 2　問題を検出方式に振り分ける</div>
+<div class="bd">
+<ol>
+  <li>第1章のリスト1-1 をもう一度開きます。</li>
+  <li>次の各問題について、図2-1 の ①AST Matcher / ②フロー解析 / ③プリプロセッサ のどれで検出できるかを考え、理由を一行で書きます。
+    <ul>
+      <li>(a) <code>delete buffer_;</code> が <code>new char[4096]</code> に対応していない</li>
+      <li>(b) <code>fopen</code> の戻り値が NULL のまま <code>fread</code> に渡される</li>
+      <li>(c) <code>strcpy</code> を呼んでいる</li>
+      <li>(d) <code>entries()</code> が値返しでコピーを起こす</li>
+      <li>(e) <code>ConfigLoader(const char*)</code> に <code>explicit</code> が付いていない</li>
+    </ul>
+  </li>
+  <li>「①で検出できる」と判断したものについて、<strong>どんな「形」を探せばよいか</strong> を日本語で言語化してみます。たとえば (c) なら「<code>strcpy</code> という名前の関数への呼び出し式」。この日本語が、後に Matcher の式になります。</li>
+</ol>
+</div>
+</div>
+
+<div class="note">
+<span class="t">解答の目安</span>
+<p>(a) ①：<code>new[]</code> 式で初期化されたポインタに対する <code>delete</code> 式、という形の問題。(b) ②：<code>fopen</code> が NULL を返す経路をたどる必要がある。(c) ①：呼び出し式の形だけで判定できる。<strong>ここが自作ルールで最も作りやすいパターン</strong>。(d) ①：戻り値型がコンテナで、値返ししているメンバ関数、という形。(e) ①：引数1個の非 <code>explicit</code> コンストラクタ、という形。<br>
+つまり5つのうち4つが AST Matcher で扱えます。これが「クエリだけで実用的なルールが書ける」根拠です。</p>
+</div>
+
+<div class="summary">
+<h2>この章のまとめ</h2>
+<ul>
+  <li>Clang-Tidy はテキストではなく Clang が構築した AST を見る。だから正しいコンパイルオプションが必要になる。</li>
+  <li>チェックの実装は3方式ある。①AST Matcher（大多数）、②フロー解析（<code>clang-analyzer-*</code>）、③プリプロセッサ。</li>
+  <li><strong>Query Based Custom Check は①の仕組みを設定ファイルから使う機能</strong>。②が必要なルールはクエリでは書けない。</li>
+  <li>チェック名は <code>モジュール名-チェック名</code>。自作チェックは <code>custom-</code> モジュールに入る。</li>
+  <li>ルールは <code>clang-query</code> で試作 → <code>.clang-tidy</code> に確定 → <code>clang-tidy</code> / <code>run-clang-tidy</code> で実行、という流れで作る。</li>
+  <li>Microsoft コード分析とは併用可能。ただし Clang がパースできないコードは解析できない点に注意。</li>
+</ul>
+</div>
+
+<p class="next"><strong>次章：</strong> 第3章「ハンズオン環境を作る」では、Visual Studio 2026 に必要なコンポーネントを入れ、C++23 を有効にし、本書を通して使うソリューション <code>TidyLab</code> を組み立てます。</p>
+
+</div>
+</body>
+</html>

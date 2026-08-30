@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第16章 bugprone-* ── バグの温床を突く ─ Clang-Tidy入門</title>
+<style>
+  :root{
+    --ink:#1f2933; --sub:#5a6b7a; --line:#d8dee4; --bg:#ffffff;
+    --code-bg:#f6f8fa; --code-line:#e2e8ee;
+    --accent:#2f6f9f; --accent-bg:#eef4f9;
+    --warn:#b4661a; --warn-bg:#fbf4ea;
+    --ok:#3d7a52; --ok-bg:#eef5f0;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0; background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Noto Sans JP","Meiryo",sans-serif;
+    font-size:16px; line-height:1.95; font-feature-settings:"palt" 1;}
+  .page{max-width:47rem; margin:0 auto; padding:3.5rem 1.6rem 6rem}
+  .chap-no{font-size:.8rem; letter-spacing:.22em; color:var(--accent); font-weight:700; margin:0 0 .5rem}
+  h1{font-size:1.85rem; line-height:1.5; margin:0 0 .6rem; letter-spacing:.01em}
+  .lede{color:var(--sub); font-size:1rem; margin:0 0 2.2rem; padding-bottom:1.6rem; border-bottom:2px solid var(--ink)}
+  h2{font-size:1.28rem; margin:3rem 0 1rem; padding-left:.7rem; border-left:4px solid var(--accent); line-height:1.6}
+  h3{font-size:1.05rem; margin:2.2rem 0 .7rem}
+  h3::before{content:"◆ "; color:var(--accent); font-size:.8em}
+  p{margin:0 0 1.1rem}
+  ul,ol{margin:0 0 1.2rem; padding-left:1.6rem}
+  li{margin:.35rem 0}
+  code{font-family:"Cascadia Mono","Consolas","SFMono-Regular",monospace; font-size:.9em;
+       background:var(--code-bg); border:1px solid var(--code-line); border-radius:4px; padding:.08em .35em}
+  pre{background:var(--code-bg); border:1px solid var(--code-line); border-radius:8px;
+      padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.7}
+  pre code{background:none; border:none; padding:0; font-size:.86rem}
+  pre.term{background:#1f2933; border-color:#1f2933; color:#e6edf3}
+  pre.term code{color:#e6edf3}
+  pre.term .p{color:#7fb2d6}
+  pre.term .o{color:#9fb3c0}
+  pre.term .w{color:#e8b075}
+  .cap{font-size:.82rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+  figure{margin:2rem 0 2.2rem}
+  figure svg{display:block; width:100%; height:auto; border:1px solid var(--line); border-radius:8px; background:#fff}
+  figcaption{font-size:.85rem; color:var(--sub); margin-top:.6rem}
+  figcaption b{color:var(--ink)}
+  .box{border-radius:8px; padding:1rem 1.2rem; margin:1.6rem 0; font-size:.94rem}
+  .box p:last-child{margin-bottom:0}
+  .box .t{font-weight:700; display:block; margin-bottom:.35rem; font-size:.88rem; letter-spacing:.04em}
+  .note{background:var(--accent-bg); border-left:4px solid var(--accent)} .note .t{color:var(--accent)}
+  .warn{background:var(--warn-bg); border-left:4px solid var(--warn)} .warn .t{color:var(--warn)}
+  .tip{background:var(--ok-bg); border-left:4px solid var(--ok)} .tip .t{color:var(--ok)}
+  .hands{border:1px solid var(--line); border-radius:10px; margin:2rem 0; overflow:hidden}
+  .hands>.hd{background:var(--ink); color:#fff; padding:.55rem 1.1rem; font-size:.85rem; letter-spacing:.1em; font-weight:700}
+  .hands>.bd{padding:1.3rem 1.3rem .4rem}
+  .hands ol{counter-reset:step; list-style:none; padding-left:0}
+  .hands ol>li{counter-increment:step; position:relative; padding-left:2.4rem; margin:0 0 1.2rem}
+  .hands ol>li::before{content:counter(step); position:absolute; left:0; top:.25rem;
+    width:1.7rem; height:1.7rem; border-radius:50%; background:var(--accent); color:#fff;
+    font-size:.82rem; font-weight:700; display:flex; align-items:center; justify-content:center; line-height:1}
+  table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+  th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+  th{background:var(--code-bg); font-weight:700}
+  .summary{border:2px solid var(--ink); border-radius:10px; padding:1.3rem 1.5rem; margin:3rem 0 1rem}
+  .summary h2{margin:0 0 .8rem; border:none; padding:0; font-size:1.1rem}
+  .summary ul{margin-bottom:0}
+  .next{color:var(--sub); font-size:.94rem; border-top:1px solid var(--line); padding-top:1.2rem; margin-top:2.5rem}
+  @media (max-width:600px){ body{font-size:15px} .page{padding:2.2rem 1.1rem 4rem} h1{font-size:1.5rem} }
+</style>
+</head>
+<body>
+<div class="page">
+
+<p class="chap-no">第 16 章</p>
+<h1><code>bugprone-*</code> ── バグの温床を突く</h1>
+<p class="lede">第4部に入ります。ここからは中身の話です。まず <code>bugprone-*</code> から始めるのには理由があります。<strong>導入コストに対する見返りが最も大きいモジュール</strong>だからです。好みの問題がほとんど絡まず、指摘されたら大抵は直したほうがよい。最初に有効にすべきものが何かと聞かれたら、答えはこれです。</p>
+
+<h2>16.1 このモジュールの性格</h2>
+
+<p><code>bugprone-</code> という名前が示すとおり、「バグを生みやすい書き方」を集めたモジュールです。特徴は3つあります。</p>
+
+<ul>
+  <li><strong>規格違反ではない。</strong> どれもコンパイルは通ります。だからコンパイラは黙ります（第1章）。</li>
+  <li><strong>好みの問題が少ない。</strong> 「<code>auto</code> を使うべきか」のような論争になりにくく、チームの合意を取りやすい。</li>
+  <li><strong>大半が AST の形だけで判定できる。</strong> 第2章の①方式なので速い。日常のビルドに入れても耐えます。</li>
+</ul>
+
+<p>一方で、<strong>自動修正が付いているものは少数派</strong>です。「この書き方は危ない」と指摘はできても、何が正しいかは文脈次第だからです。指摘されたら人間が考える、という前提のモジュールです。</p>
+
+<h2>16.2 四つの系統で捉える</h2>
+
+<p>100件近いチェックがありますが、性質でまとめると見通しが立ちます。</p>
+
+<figure>
+<svg viewBox="0 0 760 470" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="bugprone チェックの四系統">
+  <g font-family="sans-serif">
+
+  <rect x="24" y="16" width="712" height="36" rx="8" fill="#1f2933"/>
+  <text x="380" y="40" text-anchor="middle" fill="#fff" font-size="13.5" font-weight="bold">bugprone-* ── 「合法だが危うい」を4つの角度から突く</text>
+
+  <!-- 1 -->
+  <rect x="24" y="64" width="350" height="186" rx="10" fill="#f7e9e5" stroke="#a04a34" stroke-width="1.8"/>
+  <text x="44" y="90" font-size="13" font-weight="bold" fill="#a04a34">① メモリ・所有権</text>
+  <text x="44" y="110" font-size="11" fill="#5a6b7a">壊れると被害が大きい系統。最優先で入れる</text>
+  <g font-size="11" font-family="monospace" fill="#1f2933">
+  <text x="44" y="134">use-after-move</text>
+  <text x="44" y="154">dangling-handle</text>
+  <text x="44" y="174">undefined-memory-manipulation</text>
+  <text x="44" y="194">raw-memory-call-on-non-trivial-type</text>
+  <text x="44" y="214">unique-ptr-array-mismatch</text>
+  <text x="44" y="234">shared-ptr-array-mismatch</text>
+  </g>
+
+  <!-- 2 -->
+  <rect x="386" y="64" width="350" height="186" rx="10" fill="#fbf4ea" stroke="#b4661a" stroke-width="1.8"/>
+  <text x="406" y="90" font-size="13" font-weight="bold" fill="#b4661a">② 数値・型変換</text>
+  <text x="406" y="110" font-size="11" fill="#5a6b7a">静かに値が壊れる系統。テストをすり抜けやすい</text>
+  <g font-size="11" font-family="monospace" fill="#1f2933">
+  <text x="406" y="134">narrowing-conversions</text>
+  <text x="406" y="154">integer-division</text>
+  <text x="406" y="174">implicit-widening-of-multiplication-result</text>
+  <text x="406" y="194">too-small-loop-variable</text>
+  <text x="406" y="214">misplaced-widening-cast</text>
+  <text x="406" y="234">signed-char-misuse</text>
+  </g>
+
+  <!-- 3 -->
+  <rect x="24" y="262" width="350" height="186" rx="10" fill="#eef4f9" stroke="#2f6f9f" stroke-width="1.8"/>
+  <text x="44" y="288" font-size="13" font-weight="bold" fill="#2f6f9f">③ 制御フロー・条件</text>
+  <text x="44" y="308" font-size="11" fill="#5a6b7a">「書き間違い」を機械的に拾う系統</text>
+  <g font-size="11" font-family="monospace" fill="#1f2933">
+  <text x="44" y="332">branch-clone</text>
+  <text x="44" y="352">suspicious-semicolon</text>
+  <text x="44" y="372">assignment-in-if-condition</text>
+  <text x="44" y="392">infinite-loop</text>
+  <text x="44" y="412">terminating-continue</text>
+  <text x="44" y="432">chained-comparison</text>
+  </g>
+
+  <!-- 4 -->
+  <rect x="386" y="262" width="350" height="186" rx="10" fill="#eef5f0" stroke="#3d7a52" stroke-width="1.8"/>
+  <text x="406" y="288" font-size="13" font-weight="bold" fill="#3d7a52">④ API の誤用</text>
+  <text x="406" y="308" font-size="11" fill="#5a6b7a">標準ライブラリ・C 関数の落とし穴</text>
+  <g font-size="11" font-family="monospace" fill="#1f2933">
+  <text x="406" y="332">unsafe-functions</text>
+  <text x="406" y="352">not-null-terminated-result</text>
+  <text x="406" y="372">string-constructor</text>
+  <text x="406" y="392">suspicious-string-compare</text>
+  <text x="406" y="412">unused-return-value</text>
+  <text x="406" y="432">unhandled-self-assignment</text>
+  </g>
+  </g>
+</svg>
+<figcaption><b>図16-1</b>　<code>bugprone-*</code> の四系統。全体を一度に理解しようとせず、系統ごとに「自分のコードで起こりうるか」を判断すると選びやすい。</figcaption>
+</figure>
+
+<h2>16.3 題材コードに当ててみる</h2>
+
+<p>第1章のリスト1-1 に <code>bugprone-*</code> を当てると、複数の系統から指摘が出ます。</p>
+
+<pre class="term"><code><span class="p">&gt;</span> clang-tidy --checks="-*,bugprone-*" config_loader.cpp -- -std=c++23
+<span class="w">config_loader.cpp:31:9: warning:</span> <span class="o">function 'strcpy' is marked as unsafe [bugprone-unsafe-functions]</span>
+<span class="w">config_loader.cpp:22:5: warning:</span> <span class="o">the result of 'fread' is unused [bugprone-unused-return-value]</span>
+<span class="o">…</span></code></pre>
+
+<div class="note">
+<span class="t">出る警告はバージョンと設定で変わる</span>
+<p>本書に載せた出力はあくまで例です。第4章で確認したバージョンによって、チェックの追加・改名・検出精度の向上があります。<strong>自分の環境で実際に何が出るかを、必ず自分の目で確認してください。</strong> 以降の章でも同じです。</p>
+</div>
+
+<h2>16.4 掘り下げ ── 三つの代表的なチェック</h2>
+
+<h3><code>bugprone-use-after-move</code> ── ムーブ後の使用</h3>
+
+<p>C++ で最も静かに壊れるバグの一つです。ムーブ後のオブジェクトは「有効だが未規定の状態」であり、読み取っても未定義動作ではありませんが、値の保証はありません。</p>
+
+<pre><code>void send(std::string payload);
+
+void process(std::string msg) {
+    send(std::move(msg));
+    log("sent: " + msg);   // ← msg の中身は保証されない
+}</code></pre>
+
+<figure>
+<svg viewBox="0 0 760 260" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="use-after-move が追跡する状態遷移">
+  <defs>
+    <marker id="a16" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5a6b7a"/>
+    </marker>
+  </defs>
+  <g font-family="sans-serif">
+
+  <text x="30" y="28" font-size="12.5" font-weight="bold" fill="#5a6b7a" letter-spacing="1.5">チェックが変数ごとに追う「状態」</text>
+
+  <rect x="40" y="48" width="160" height="52" rx="26" fill="#eef5f0" stroke="#3d7a52" stroke-width="1.8"/>
+  <text x="120" y="72" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#3d7a52">有効</text>
+  <text x="120" y="90" text-anchor="middle" font-size="10.5" fill="#5a6b7a">読み書きしてよい</text>
+
+  <line x1="200" y1="74" x2="286" y2="74" stroke="#5a6b7a" stroke-width="1.6" marker-end="url(#a16)"/>
+  <text x="243" y="66" text-anchor="middle" font-size="11" font-family="monospace" fill="#1f2933">std::move(x)</text>
+
+  <rect x="290" y="48" width="180" height="52" rx="26" fill="#f7e9e5" stroke="#a04a34" stroke-width="2"/>
+  <text x="380" y="72" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#a04a34">ムーブ済み</text>
+  <text x="380" y="90" text-anchor="middle" font-size="10.5" fill="#5a6b7a">値は未規定</text>
+
+  <line x1="470" y1="74" x2="556" y2="74" stroke="#5a6b7a" stroke-width="1.6" marker-end="url(#a16)"/>
+  <text x="513" y="66" text-anchor="middle" font-size="11" font-family="monospace" fill="#1f2933">x = …  / x.clear()</text>
+
+  <rect x="560" y="48" width="160" height="52" rx="26" fill="#eef5f0" stroke="#3d7a52" stroke-width="1.8"/>
+  <text x="640" y="72" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#3d7a52">再び有効</text>
+  <text x="640" y="90" text-anchor="middle" font-size="10.5" fill="#5a6b7a">再代入で復帰</text>
+
+  <path d="M380,100 L380,132" fill="none" stroke="#a04a34" stroke-width="1.6" marker-end="url(#a16)"/>
+  <text x="396" y="122" font-size="11" fill="#a04a34">この状態で読むと</text>
+
+  <rect x="240" y="136" width="280" height="42" rx="8" fill="#a04a34"/>
+  <text x="380" y="162" text-anchor="middle" fill="#fff" font-size="12.5" font-weight="bold">bugprone-use-after-move が警告</text>
+
+  <rect x="40" y="196" width="680" height="50" rx="8" fill="#f4f6f8" stroke="#d8dee4"/>
+  <text x="60" y="218" font-size="11.5" fill="#1f2933">分岐やループがあると「ムーブされたかもしれない」経路が生まれる。診断には <tspan font-family="monospace" font-weight="bold">note</tspan> が付き、</text>
+  <text x="60" y="236" font-size="11.5" fill="#1f2933">「どこでムーブされたか」が示される。<tspan font-weight="bold">警告本体だけでなく note まで読むこと</tspan></text>
+  </g>
+</svg>
+<figcaption><b>図16-2</b>　<code>use-after-move</code> が追跡する状態。再代入すれば状態は戻るので、「ムーブしたら二度と使えない」わけではない。</figcaption>
+</figure>
+
+<h3><code>bugprone-unsafe-functions</code> ── 危険な C 関数</h3>
+
+<p><code>strcpy</code>、<code>strcat</code>、<code>sprintf</code>、<code>gets</code> のように、境界チェックのない関数の使用を指摘します。題材コードの <code>strcpy(e.name, line)</code> がこれに当たります。</p>
+
+<div class="tip">
+<span class="t">この章と第6部のつながり</span>
+<p>「禁止したい関数のリスト」は、チームごとに違います。標準の <code>bugprone-unsafe-functions</code> は一般的に危険な関数を扱いますが、<strong>「うちのコードベースでは <code>LegacyCopy()</code> を使わない」といったルールは、標準チェックには入っていません</strong>。それを自分で書くのが第32章「実践1：禁止 API を検出する」です。この章で標準チェックの限界を体感しておいてください。</p>
+</div>
+
+<h3><code>bugprone-easily-swappable-parameters</code> ── 偽陽性の代表</h3>
+
+<p>同じ型の引数が連続していると「呼び出し側で取り違えうる」と警告します。</p>
+
+<pre><code>void drawRect(int x, int y, int w, int h);   // ← int が4つ並ぶ</code></pre>
+
+<p>指摘としては正しいのですが、実際のコードでは大量に出ます。既定の <code>MinimumLength</code> を上げるか、そもそも <code>Checks</code> から外すのが現実的です。<strong>「正しい指摘」と「有用な指摘」は別物</strong>という、静的解析の本質的な問題がよく表れているチェックです。</p>
+
+<pre><code>CheckOptions:
+  bugprone-easily-swappable-parameters.MinimumLength: '4'</code></pre>
+
+<h2>16.5 自動修正がないことの意味</h2>
+
+<p>第11章で扱った FixIt は、<code>bugprone-*</code> では少数派です。修正が付くのは、<strong>正しい形が一意に決まる</strong>ものに限られます。</p>
+
+<table>
+<tr><th>修正が付く例</th><th>理由</th></tr>
+<tr><td><code>bugprone-macro-parentheses</code></td><td>括弧を足せばよいだけ</td></tr>
+<tr><td><code>bugprone-swapped-arguments</code></td><td>入れ替えればよい</td></tr>
+<tr><td><code>bugprone-string-integer-assignment</code></td><td>変換を明示すればよい</td></tr>
+<tr><td><code>bugprone-terminating-continue</code></td><td><code>continue</code> を <code>break</code> にする</td></tr>
+</table>
+
+<table>
+<tr><th>修正が付かない例</th><th>理由</th></tr>
+<tr><td><code>bugprone-use-after-move</code></td><td>再代入すべきか、ムーブをやめるべきかは設計判断</td></tr>
+<tr><td><code>bugprone-unsafe-functions</code></td><td>代替関数の選択とバッファサイズの決定が必要</td></tr>
+<tr><td><code>bugprone-narrowing-conversions</code></td><td>型を変えるのか、明示キャストするのかは意図次第</td></tr>
+<tr><td><code>bugprone-branch-clone</code></td><td>片方が書き間違いなのか、意図的な重複なのか分からない</td></tr>
+</table>
+
+<h2>16.6 【ハンズオン】<code>bugprone-*</code> を評価する</h2>
+
+<div class="hands">
+<div class="hd">HANDS-ON 16　自分のコードにとっての価値を測る</div>
+<div class="bd">
+<ol>
+  <li><strong>件数を把握する。</strong> <code>.clang-tidy</code> を <code>Checks: '-*,bugprone-*'</code> だけにして、プロジェクト全体を回します（第15章）。
+<pre><code>python "C:\Program Files\LLVM\bin\run-clang-tidy" -p out\build\ninja -j 4</code></pre>
+  </li>
+
+  <li><strong>チェック名で集計する。</strong> 出力をファイルに落とし、どのチェックが何件出たかを数えます。
+<pre><code>python "C:\Program Files\LLVM\bin\run-clang-tidy" -p out\build\ninja &gt; tidy.log 2&gt;&amp;1
+findstr /c:"[bugprone-" tidy.log | sort</code></pre>
+    <strong>件数の多い上位3つ</strong>を特定してください。導入の成否は、たいていこの上位3つの扱いで決まります。</li>
+
+  <li><strong>危険度で分類する。</strong> 上位のチェックそれぞれについて、公式ドキュメントで内容を確認し、次のどれかに分類します。
+    <ul>
+      <li><strong>A：直すべき</strong> ── 実際にバグ、または将来バグになる</li>
+      <li><strong>B：オプションで調整</strong> ── 指摘は正しいが、しきい値が自分たちに合わない</li>
+      <li><strong>C：外す</strong> ── 自分たちのコードでは価値が薄い</li>
+    </ul>
+  </li>
+
+  <li><strong>四系統で試す。</strong> 系統ごとに絞って回し、どの角度からの指摘が多いかを見ます。
+<pre><code>--checks="-*,bugprone-use-after-move,bugprone-dangling-handle,bugprone-undefined-memory-manipulation"
+--checks="-*,bugprone-narrowing-conversions,bugprone-integer-division,bugprone-too-small-loop-variable"
+--checks="-*,bugprone-branch-clone,bugprone-suspicious-semicolon,bugprone-assignment-in-if-condition"
+--checks="-*,bugprone-unsafe-functions,bugprone-unused-return-value,bugprone-string-constructor"</code></pre>
+  </li>
+
+  <li><strong>偽陽性を体験する。</strong> <code>bugprone-easily-swappable-parameters</code> だけを有効にして回し、件数を見ます。次に <code>MinimumLength</code> を <code>3</code> → <code>4</code> → <code>5</code> と上げ、件数の変化を記録します。</li>
+
+  <li><strong>note を読む。</strong> <code>use-after-move</code> の警告が出た箇所があれば、警告本体だけでなく続く <code>note:</code> の行も読みます。「どこでムーブされたか」が示されているはずです。<strong>note を読む習慣は、第17章のフロー解析で決定的に重要になります。</strong></li>
+
+  <li><strong>採用セットを決める。</strong> 手順3の分類に基づき、<code>.clang-tidy</code> を次の形に整えます。
+<pre><code>Checks: &gt;
+  -*,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters
+
+CheckOptions:
+  bugprone-narrowing-conversions.WarnOnIntegerNarrowingConversion: 'true'</code></pre>
+    除外したものについて、<strong>なぜ外したかを設定ファイルにコメントで書いてください。</strong> 第22章でこの記録が効いてきます。</li>
+</ol>
+</div>
+</div>
+
+<div class="warn">
+<span class="t">「全部直す」から始めない</span>
+<p>既存コードで数百件出たとき、全部直そうとすると挫折します。第15章の差分解析を使い、<strong>「新しく書く行では <code>bugprone-*</code> を守る」</strong> から始めてください。既存分は、そのファイルを触るときに直す。この進め方は第39章で詳しく扱います。</p>
+</div>
+
+<div class="summary">
+<h2>この章のまとめ</h2>
+<ul>
+  <li><code>bugprone-*</code> は導入コストに対する見返りが最大。好みの問題が少なく、合意を取りやすい。</li>
+  <li>四系統で捉える。①メモリ・所有権、②数値・型変換、③制御フロー・条件、④API の誤用。</li>
+  <li>大半は AST の形で判定できるので速い。日常のビルドに入れられる。</li>
+  <li><strong>自動修正が付くのは「正しい形が一意に決まる」ものだけ。</strong> 大半は人間が判断する前提。</li>
+  <li><code>use-after-move</code> は変数の状態を追う。再代入で状態は戻る。<strong>note に「どこでムーブされたか」が出るので必ず読む。</strong></li>
+  <li><code>easily-swappable-parameters</code> は「正しいが有用でない」指摘の代表。オプションで調整するか外す。</li>
+  <li>チーム固有の禁止 API は標準チェックには入っていない。それが第6部の主題になる。</li>
+</ul>
+</div>
+
+<p class="next"><strong>次章：</strong> 第17章「<code>clang-analyzer-*</code> ── パス感度のある解析」では、AST の形ではなく<strong>実行経路</strong>をたどる解析に入ります。強力ですが遅く、偽陽性の性質も違います。</p>
+
+</div>
+</body>
+</html>

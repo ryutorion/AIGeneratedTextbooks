@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第34章 実践3：命名・構造の規約をチェックする ─ Clang-Tidy入門</title>
+<style>
+  :root{
+    --ink:#1f2933; --sub:#5a6b7a; --line:#d8dee4; --bg:#ffffff;
+    --code-bg:#f6f8fa; --code-line:#e2e8ee;
+    --accent:#2f6f9f; --accent-bg:#eef4f9;
+    --warn:#b4661a; --warn-bg:#fbf4ea;
+    --ok:#3d7a52; --ok-bg:#eef5f0;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0; background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Noto Sans JP","Meiryo",sans-serif;
+    font-size:16px; line-height:1.95; font-feature-settings:"palt" 1;}
+  .page{max-width:47rem; margin:0 auto; padding:3.5rem 1.6rem 6rem}
+  .chap-no{font-size:.8rem; letter-spacing:.22em; color:var(--accent); font-weight:700; margin:0 0 .5rem}
+  h1{font-size:1.85rem; line-height:1.5; margin:0 0 .6rem; letter-spacing:.01em}
+  .lede{color:var(--sub); font-size:1rem; margin:0 0 2.2rem; padding-bottom:1.6rem; border-bottom:2px solid var(--ink)}
+  h2{font-size:1.28rem; margin:3rem 0 1rem; padding-left:.7rem; border-left:4px solid var(--accent); line-height:1.6}
+  h3{font-size:1.05rem; margin:2.2rem 0 .7rem}
+  h3::before{content:"◆ "; color:var(--accent); font-size:.8em}
+  p{margin:0 0 1.1rem}
+  ul,ol{margin:0 0 1.2rem; padding-left:1.6rem}
+  li{margin:.35rem 0}
+  code{font-family:"Cascadia Mono","Consolas","SFMono-Regular",monospace; font-size:.9em;
+       background:var(--code-bg); border:1px solid var(--code-line); border-radius:4px; padding:.08em .35em}
+  pre{background:var(--code-bg); border:1px solid var(--code-line); border-radius:8px;
+      padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.7}
+  pre code{background:none; border:none; padding:0; font-size:.86rem}
+  pre.term{background:#1f2933; border-color:#1f2933; color:#e6edf3}
+  pre.term code{color:#e6edf3}
+  pre.term .p{color:#7fb2d6}
+  pre.term .o{color:#9fb3c0}
+  .cap{font-size:.82rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+  figure{margin:2rem 0 2.2rem}
+  figure svg{display:block; width:100%; height:auto; border:1px solid var(--line); border-radius:8px; background:#fff}
+  figcaption{font-size:.85rem; color:var(--sub); margin-top:.6rem}
+  figcaption b{color:var(--ink)}
+  .box{border-radius:8px; padding:1rem 1.2rem; margin:1.6rem 0; font-size:.94rem}
+  .box p:last-child{margin-bottom:0}
+  .box .t{font-weight:700; display:block; margin-bottom:.35rem; font-size:.88rem; letter-spacing:.04em}
+  .note{background:var(--accent-bg); border-left:4px solid var(--accent)} .note .t{color:var(--accent)}
+  .warn{background:var(--warn-bg); border-left:4px solid var(--warn)} .warn .t{color:var(--warn)}
+  .tip{background:var(--ok-bg); border-left:4px solid var(--ok)} .tip .t{color:var(--ok)}
+  .hands{border:1px solid var(--line); border-radius:10px; margin:2rem 0; overflow:hidden}
+  .hands>.hd{background:var(--ink); color:#fff; padding:.55rem 1.1rem; font-size:.85rem; letter-spacing:.1em; font-weight:700}
+  .hands>.bd{padding:1.3rem 1.3rem .4rem}
+  .hands ol{counter-reset:step; list-style:none; padding-left:0}
+  .hands ol>li{counter-increment:step; position:relative; padding-left:2.4rem; margin:0 0 1.2rem}
+  .hands ol>li::before{content:counter(step); position:absolute; left:0; top:.25rem;
+    width:1.7rem; height:1.7rem; border-radius:50%; background:var(--accent); color:#fff;
+    font-size:.82rem; font-weight:700; display:flex; align-items:center; justify-content:center; line-height:1}
+  table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+  th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+  th{background:var(--code-bg); font-weight:700}
+  .summary{border:2px solid var(--ink); border-radius:10px; padding:1.3rem 1.5rem; margin:3rem 0 1rem}
+  .summary h2{margin:0 0 .8rem; border:none; padding:0; font-size:1.1rem}
+  .summary ul{margin-bottom:0}
+  .next{color:var(--sub); font-size:.94rem; border-top:1px solid var(--line); padding-top:1.2rem; margin-top:2.5rem}
+  @media (max-width:600px){ body{font-size:15px} .page{padding:2.2rem 1.1rem 4rem} h1{font-size:1.5rem} }
+</style>
+</head>
+<body>
+<div class="page">
+
+<p class="chap-no">第 34 章</p>
+<h1>実践3：命名・構造の規約をチェックする</h1>
+<p class="lede">第20章で <code>readability-identifier-naming</code> を設定しました。あれは強力ですが、扱えるのは「識別子の種類ごとの命名形式」だけです。<strong>「何を継承しているか」「どのインターフェイスを実装しているか」に応じたルール</strong>は表現できません。そこがカスタムチェックの独壇場です。</p>
+
+<h2>34.1 標準チェックとの境界</h2>
+
+<figure>
+<svg viewBox="0 0 760 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="identifier-naming とカスタムチェックの守備範囲">
+  <g font-family="sans-serif">
+
+  <rect x="24" y="20" width="350" height="280" rx="10" fill="#eef4f9" stroke="#2f6f9f" stroke-width="1.8"/>
+  <text x="199" y="46" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#2f6f9f">readability-identifier-naming</text>
+  <text x="199" y="66" text-anchor="middle" font-size="11" fill="#5a6b7a">「種類 × 形式」の表で表せるもの</text>
+
+  <g font-size="11.5" fill="#1f2933">
+  <text x="44" y="96">・クラスは CamelCase</text>
+  <text x="44" y="120">・関数は camelBack</text>
+  <text x="44" y="144">・private メンバは接尾辞 _</text>
+  <text x="44" y="168">・定数は UPPER_CASE</text>
+  <text x="44" y="192">・マクロは UPPER_CASE</text>
+  </g>
+
+  <rect x="44" y="212" width="310" height="70" rx="6" fill="#fff" stroke="#c5d6e4"/>
+  <text x="199" y="234" text-anchor="middle" font-size="11" fill="#2f6f9f" font-weight="bold">判定材料は「識別子の種類」だけ</text>
+  <text x="199" y="256" text-anchor="middle" font-size="10.5" fill="#5a6b7a">その識別子が何を継承しているか、</text>
+  <text x="199" y="272" text-anchor="middle" font-size="10.5" fill="#5a6b7a">どこに置かれているかは見ない</text>
+
+  <rect x="386" y="20" width="350" height="280" rx="10" fill="#fbf4ea" stroke="#b4661a" stroke-width="2.2"/>
+  <text x="561" y="46" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#b4661a">カスタムチェック</text>
+  <text x="561" y="66" text-anchor="middle" font-size="11" fill="#5a6b7a">「文脈」に依存するもの</text>
+
+  <g font-size="11.5" fill="#1f2933">
+  <text x="406" y="96">・Component 派生は接尾辞 Component</text>
+  <text x="406" y="120">・Factory 派生は create で始まる関数を持つ</text>
+  <text x="406" y="144">・detail 名前空間の型は外部に公開しない</text>
+  <text x="406" y="168">・テスト用の型は Mock で始まる</text>
+  <text x="406" y="192">・特定の基底の派生は final を付ける</text>
+  </g>
+
+  <rect x="406" y="212" width="310" height="70" rx="6" fill="#fff" stroke="#e6d5bd"/>
+  <text x="561" y="234" text-anchor="middle" font-size="11" fill="#b4661a" font-weight="bold">「条件を満たすなら、名前はこうであれ」</text>
+  <text x="561" y="256" text-anchor="middle" font-size="10.5" fill="#5a6b7a">条件の部分に AST の構造が使える</text>
+  <text x="561" y="272" text-anchor="middle" font-size="10.5" fill="#5a6b7a">→ これが標準チェックにはできない</text>
+  </g>
+</svg>
+<figcaption><b>図34-1</b>　守備範囲の境界。<strong>「条件つきの命名規約」がカスタムチェックの領分。</strong></figcaption>
+</figure>
+
+<h2>34.2 文脈依存ルールの構造</h2>
+
+<p>この種のルールは、すべて同じ形をしています。</p>
+
+<figure>
+<svg viewBox="0 0 760 260" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="文脈依存の命名規約の構造">
+  <g font-family="sans-serif">
+
+  <rect x="24" y="20" width="712" height="34" rx="8" fill="#1f2933"/>
+  <text x="380" y="43" text-anchor="middle" fill="#fff" font-size="13" font-weight="bold">「A ならば B であれ」を「A かつ B でない」に変換する</text>
+
+  <rect x="24" y="70" width="340" height="80" rx="10" fill="#eef4f9" stroke="#2f6f9f" stroke-width="1.6"/>
+  <text x="194" y="94" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#2f6f9f">規約の言い方</text>
+  <text x="194" y="118" text-anchor="middle" font-size="12" fill="#1f2933">「Component を継承したクラスは</text>
+  <text x="194" y="138" text-anchor="middle" font-size="12" fill="#1f2933">Component で終わる名前にする」</text>
+
+  <text x="380" y="118" text-anchor="middle" font-size="20" fill="#5a6b7a">→</text>
+
+  <rect x="396" y="70" width="340" height="80" rx="10" fill="#fbf4ea" stroke="#b4661a" stroke-width="2"/>
+  <text x="566" y="94" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#b4661a">クエリの言い方</text>
+  <text x="566" y="118" text-anchor="middle" font-size="12" fill="#1f2933">「Component を継承していて</text>
+  <text x="566" y="138" text-anchor="middle" font-size="12" fill="#a04a34" font-weight="bold">かつ Component で終わらない」</text>
+
+  <rect x="24" y="168" width="712" height="76" rx="10" fill="#1f2933"/>
+  <g font-size="11.5" font-family="monospace">
+  <text x="46" y="192" fill="#a3d9a5">match cxxRecordDecl(</text>
+  <text x="66" y="212" fill="#7fb2d6">  isDerivedFrom(hasName("::Component")),</text>
+  <text x="266" y="212" fill="#9fb3c0">  ← 条件 A</text>
+  <text x="66" y="232" fill="#e08a74">  unless(matchesName("Component$"))</text>
+  <text x="266" y="232" fill="#9fb3c0">  ← 条件 B の否定</text>
+  </g>
+  </g>
+</svg>
+<figcaption><b>図34-2</b>　規約からクエリへの変換。<strong>規約は肯定形、クエリは違反の検出なので否定形になる。</strong></figcaption>
+</figure>
+
+<h2>34.3 ルール1：基底クラスに応じた接尾辞</h2>
+
+<pre><code>  - Name: component-naming
+    Query: |
+      match cxxRecordDecl(
+        isDerivedFrom(cxxRecordDecl(hasName("::Component")).bind("base")),
+        unless(matchesName("Component$")),
+        isDefinition(),
+        isExpansionInMainFile()
+      ).bind("cls")
+    Diagnostic:
+      - BindName: cls
+        Message: "Component の派生クラスは、名前を Component で終わらせてください（例: PhysicsComponent）"
+        Level: Warning
+      - BindName: base
+        Message: "この基底クラスを継承しています"
+        Level: Note</code></pre>
+
+<div class="tip">
+<span class="t">Note で規約の根拠を指す</span>
+<p><code>base</code> を bind して <code>Note</code> を出しているのがポイントです。<strong>「なぜこの規約が適用されるのか」を、コードの上で示せます。</strong> 継承が深い場合、どの基底が原因かはコードを読むだけでは分かりません。第31章 31.5 節でいう「規約違反で、根拠が別にある」ケースです。</p>
+</div>
+
+<h3>注意点：<code>isDerivedFrom</code> は間接継承も拾う</h3>
+
+<pre><code>class Component {};
+class RenderComponent : public Component {};        // 直接
+class SpriteRenderComponent : public RenderComponent {};  // 間接</code></pre>
+
+<p><code>isDerivedFrom</code> は間接的な派生も含みます。<strong>直接継承だけを対象にしたい場合は、別の Matcher が必要です。</strong> <code>clang-query</code> で <code>hasDirectBase</code> のような名前を試し、使えるものを探してください（第24章のエラーメッセージが教えてくれます）。</p>
+
+<h2>34.4 ルール2：構造の制約</h2>
+
+<p>命名だけでなく、「持つべきもの」「持ってはいけないもの」も表現できます。</p>
+
+<h3>特定の基底の派生には仮想デストラクタを必須にする</h3>
+
+<pre><code>  - Name: component-needs-virtual-dtor
+    Query: |
+      match cxxRecordDecl(
+        isDerivedFrom(hasName("::Component")),
+        isDefinition(),
+        unless(hasMethod(cxxDestructorDecl(isVirtual()))),
+        isExpansionInMainFile()
+      ).bind("cls")
+    Diagnostic:
+      - BindName: cls
+        Message: "Component の派生クラスには仮想デストラクタが必要です"
+        Level: Warning</code></pre>
+
+<h3>特定の名前空間の型を外部に公開させない</h3>
+
+<pre><code>  - Name: no-detail-in-public-api
+    Query: |
+      match parmVarDecl(
+        hasType(cxxRecordDecl(matchesName("^::mylib::detail::"))),
+        hasAncestor(functionDecl(unless(matchesName("^::mylib::detail::")))),
+        isExpansionInMainFile()
+      ).bind("param")
+    Diagnostic:
+      - BindName: param
+        Message: "detail 名前空間の型を公開 API の引数に使わないでください"
+        Level: Warning</code></pre>
+
+<p><strong>これは標準チェックには絶対にありません。</strong> <code>mylib</code> という名前空間も <code>detail</code> という慣習も、あなたのプロジェクト固有だからです。</p>
+
+<h2>34.5 ルール3：テスト向けの規約</h2>
+
+<pre><code>  - Name: mock-naming
+    Query: |
+      match cxxRecordDecl(
+        isDerivedFrom(hasName("::IService")),
+        matchesName("Mock"),
+        unless(matchesName("^::.*::Mock[A-Z]")),
+        isExpansionInMainFile()
+      ).bind("cls")
+    Diagnostic:
+      - BindName: cls
+        Message: "モックは Mock で始まる名前にしてください（例: MockUserService）"
+        Level: Warning</code></pre>
+
+<div class="warn">
+<span class="t">正規表現は完全修飾名に対して評価される</span>
+<p><code>matchesName</code> が見るのは、名前空間を含む完全修飾名です。<code>::mylib::PhysicsComponent</code> のような文字列に対して正規表現が当たります。</p>
+<ul style="margin-top:.5rem">
+  <li><code>"Component$"</code> → 末尾が <code>Component</code>。名前空間があっても効く</li>
+  <li><code>"^Mock"</code> → <strong>効かない</strong>。先頭は <code>::mylib::</code> だから</li>
+  <li><code>"^::.*::Mock"</code> または <code>"::Mock[A-Z]"</code> → こちらを使う</li>
+</ul>
+<p style="margin-top:.5rem"><strong>必ず <code>clang-query</code> で、名前空間ありとなしの両方のケースを確認してください。</strong></p>
+</div>
+
+<h2>34.6 メッセージには「例」を書く</h2>
+
+<p>命名規約のメッセージには、<strong>正しい例を具体的に書いてください。</strong> 抽象的な説明より、1つの実例のほうが速く伝わります。</p>
+
+<table>
+<tr><th>✕</th><th>○</th></tr>
+<tr><td>「命名規約に違反しています」</td><td>「Component の派生クラスは Component で終わらせてください（例: PhysicsComponent）」</td></tr>
+<tr><td>「接尾辞が必要です」</td><td>「<code>Physics</code> → <code>PhysicsComponent</code> のように変更してください」</td></tr>
+</table>
+
+<h2>34.7 【ハンズオン】文脈依存の規約を作る</h2>
+
+<div class="hands">
+<div class="hd">HANDS-ON 34　条件つき命名規約を実装する</div>
+<div class="bd">
+<ol>
+  <li><strong>検証ファイルを作る。</strong> <code>tests\custom-checks\naming.cpp</code> に、規約に合う例・合わない例・対象外の例をすべて書きます。
+<pre><code>namespace mylib {
+
+class Component { public: virtual ~Component() = default; };
+class IService  { public: virtual ~IService() = default; };
+
+class RenderComponent : public Component {};        // OK
+class Physics        : public Component {};         // NG：接尾辞なし
+class SpriteRenderComponent : public RenderComponent {};  // OK（間接継承）
+class Sprite         : public RenderComponent {};   // NG：間接継承でも規約対象
+class Helper {};                                    // 対象外
+
+class BadComponent : public Component {             // NG：仮想デストラクタなし
+public:
+    ~BadComponent() {}
+};
+
+class MockUserService : public IService {};         // OK
+class UserServiceMock : public IService {};         // NG：Mock で始まっていない
+
+namespace detail { struct Impl {}; }
+void publicApi(detail::Impl impl) {}                // NG：detail を公開 API に
+namespace detail { void internalApi(Impl impl) {} } // OK：detail 内なら可
+
+} // namespace mylib</code></pre>
+  </li>
+
+  <li><strong>規約をクエリに変換する。</strong> 図34-2 の手順で、規約の文を「条件 A かつ 条件 B の否定」に書き換えます。紙の上で日本語のままやってください。</li>
+
+  <li><strong>接尾辞ルールを作る。</strong> <code>clang-query</code> で確認します。
+<pre><code>clang-query naming.cpp -- -std=c++23</code></pre>
+<pre><code>set output diag
+m cxxRecordDecl(isDerivedFrom(hasName("::mylib::Component")), unless(matchesName("Component$")), isDefinition(), isExpansionInMainFile())</code></pre>
+    <strong><code>Physics</code> と <code>Sprite</code> が検出され、<code>RenderComponent</code> / <code>SpriteRenderComponent</code> / <code>Helper</code> が検出されないことを確認します。</strong></li>
+
+  <li><strong>正規表現の落とし穴を体験する。</strong>
+<pre><code>m cxxRecordDecl(isDerivedFrom(hasName("::mylib::IService")), matchesName("^Mock"))</code></pre>
+    <strong>0 件になる</strong>ことを確認してください。名前空間があるためです。次に、
+<pre><code>m cxxRecordDecl(isDerivedFrom(hasName("::mylib::IService")), matchesName("::Mock[A-Z]"))</code></pre>
+    で <code>MockUserService</code> が捕まることを確認します。</li>
+
+  <li><strong>間接継承を確認する。</strong> <code>Sprite</code> が検出されたことで、<code>isDerivedFrom</code> が間接継承も拾うことを確認しました。<strong>直接継承だけに限定したい場合の Matcher を、clang-query のエラーメッセージを頼りに探してみてください。</strong></li>
+
+  <li><strong>Note を設計する。</strong> 34.3 節のクエリで <code>base</code> を bind し、設定ファイルに書きます。実行して、<code>note:</code> が基底クラスの宣言を指していることを確認します。<strong><code>Sprite</code> の場合、note が指すのは <code>Component</code> か <code>RenderComponent</code> か</strong>を確認してください。</li>
+
+  <li><strong>構造の制約を作る。</strong> 34.4 節の「仮想デストラクタ必須」を実装し、<code>BadComponent</code> だけが検出されることを確認します。</li>
+
+  <li><strong>公開 API のルールを作る。</strong> 34.4 節の <code>no-detail-in-public-api</code> を実装します。<strong>これが最も難しいはずです。</strong> <code>publicApi</code> が検出され、<code>internalApi</code> が検出されないところまで持っていってください。うまくいかない場合は、第36章のデバッグ手順に進む前に、条件を1つずつ削って確認します（第27章 27.5 節）。</li>
+
+  <li><strong>メッセージに例を入れる。</strong> すべてのメッセージに、正しい形の具体例を入れます。実際に警告を出して、<strong>読んだ人がそのまま直せるか</strong>を自分で判定してください。</li>
+
+  <li><strong>記録する。</strong> 期待動作の表を更新します。特に、<strong>正規表現が完全修飾名に当たること</strong>と、<strong><code>isDerivedFrom</code> が間接継承を含むこと</strong>を、注意事項として書き残してください。次に命名ルールを書く人が同じ罠にはまらずに済みます。</li>
+</ol>
+</div>
+</div>
+
+<div class="summary">
+<h2>この章のまとめ</h2>
+<ul>
+  <li><code>readability-identifier-naming</code> は「識別子の種類 × 形式」しか扱えない。<strong>文脈に依存する規約はカスタムチェックの領分。</strong></li>
+  <li>規約「A ならば B であれ」は、クエリでは<strong>「A かつ B でない」</strong>と書く。</li>
+  <li>条件の部分に AST の構造（継承関係、名前空間、メンバの有無）が使えるのが強み。</li>
+  <li><strong><code>Note</code> で規約の根拠（どの基底を継承しているか）を指せる。</strong> 継承が深いときに効く。</li>
+  <li><code>isDerivedFrom</code> は<strong>間接継承も含む</strong>。直接継承だけに限定したいなら別の Matcher を探す。</li>
+  <li><strong><code>matchesName</code> は完全修飾名に対して評価される。</strong> <code>"^Mock"</code> は名前空間があると効かない。</li>
+  <li>命名規約のメッセージには<strong>正しい例を具体的に書く</strong>。抽象的な説明より速く伝わる。</li>
+</ul>
+</div>
+
+<p class="next"><strong>次章：</strong> 第35章「実践4：複数の Note で原因箇所を示す」では、これまで補助的に使ってきた <code>Note</code> を主役にします。<strong>2か所以上の関係が問題であるケース</strong>を、読み手に伝わる形で診断します。</p>
+
+</div>
+</body>
+</html>

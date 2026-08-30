@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第18章 modernize-* ── C++23 らしく書き直す ─ Clang-Tidy入門</title>
+<style>
+  :root{
+    --ink:#1f2933; --sub:#5a6b7a; --line:#d8dee4; --bg:#ffffff;
+    --code-bg:#f6f8fa; --code-line:#e2e8ee;
+    --accent:#2f6f9f; --accent-bg:#eef4f9;
+    --warn:#b4661a; --warn-bg:#fbf4ea;
+    --ok:#3d7a52; --ok-bg:#eef5f0;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0; background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Noto Sans JP","Meiryo",sans-serif;
+    font-size:16px; line-height:1.95; font-feature-settings:"palt" 1;}
+  .page{max-width:47rem; margin:0 auto; padding:3.5rem 1.6rem 6rem}
+  .chap-no{font-size:.8rem; letter-spacing:.22em; color:var(--accent); font-weight:700; margin:0 0 .5rem}
+  h1{font-size:1.85rem; line-height:1.5; margin:0 0 .6rem; letter-spacing:.01em}
+  .lede{color:var(--sub); font-size:1rem; margin:0 0 2.2rem; padding-bottom:1.6rem; border-bottom:2px solid var(--ink)}
+  h2{font-size:1.28rem; margin:3rem 0 1rem; padding-left:.7rem; border-left:4px solid var(--accent); line-height:1.6}
+  h3{font-size:1.05rem; margin:2.2rem 0 .7rem}
+  h3::before{content:"◆ "; color:var(--accent); font-size:.8em}
+  p{margin:0 0 1.1rem}
+  ul,ol{margin:0 0 1.2rem; padding-left:1.6rem}
+  li{margin:.35rem 0}
+  code{font-family:"Cascadia Mono","Consolas","SFMono-Regular",monospace; font-size:.9em;
+       background:var(--code-bg); border:1px solid var(--code-line); border-radius:4px; padding:.08em .35em}
+  pre{background:var(--code-bg); border:1px solid var(--code-line); border-radius:8px;
+      padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.7}
+  pre code{background:none; border:none; padding:0; font-size:.86rem}
+  pre.term{background:#1f2933; border-color:#1f2933; color:#e6edf3}
+  pre.term code{color:#e6edf3}
+  pre.term .p{color:#7fb2d6}
+  pre.term .o{color:#9fb3c0}
+  .cap{font-size:.82rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+  figure{margin:2rem 0 2.2rem}
+  figure svg{display:block; width:100%; height:auto; border:1px solid var(--line); border-radius:8px; background:#fff}
+  figcaption{font-size:.85rem; color:var(--sub); margin-top:.6rem}
+  figcaption b{color:var(--ink)}
+  .box{border-radius:8px; padding:1rem 1.2rem; margin:1.6rem 0; font-size:.94rem}
+  .box p:last-child{margin-bottom:0}
+  .box .t{font-weight:700; display:block; margin-bottom:.35rem; font-size:.88rem; letter-spacing:.04em}
+  .note{background:var(--accent-bg); border-left:4px solid var(--accent)} .note .t{color:var(--accent)}
+  .warn{background:var(--warn-bg); border-left:4px solid var(--warn)} .warn .t{color:var(--warn)}
+  .tip{background:var(--ok-bg); border-left:4px solid var(--ok)} .tip .t{color:var(--ok)}
+  .hands{border:1px solid var(--line); border-radius:10px; margin:2rem 0; overflow:hidden}
+  .hands>.hd{background:var(--ink); color:#fff; padding:.55rem 1.1rem; font-size:.85rem; letter-spacing:.1em; font-weight:700}
+  .hands>.bd{padding:1.3rem 1.3rem .4rem}
+  .hands ol{counter-reset:step; list-style:none; padding-left:0}
+  .hands ol>li{counter-increment:step; position:relative; padding-left:2.4rem; margin:0 0 1.2rem}
+  .hands ol>li::before{content:counter(step); position:absolute; left:0; top:.25rem;
+    width:1.7rem; height:1.7rem; border-radius:50%; background:var(--accent); color:#fff;
+    font-size:.82rem; font-weight:700; display:flex; align-items:center; justify-content:center; line-height:1}
+  table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+  th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+  th{background:var(--code-bg); font-weight:700}
+  .summary{border:2px solid var(--ink); border-radius:10px; padding:1.3rem 1.5rem; margin:3rem 0 1rem}
+  .summary h2{margin:0 0 .8rem; border:none; padding:0; font-size:1.1rem}
+  .summary ul{margin-bottom:0}
+  .next{color:var(--sub); font-size:.94rem; border-top:1px solid var(--line); padding-top:1.2rem; margin-top:2.5rem}
+  @media (max-width:600px){ body{font-size:15px} .page{padding:2.2rem 1.1rem 4rem} h1{font-size:1.5rem} }
+</style>
+</head>
+<body>
+<div class="page">
+
+<p class="chap-no">第 18 章</p>
+<h1><code>modernize-*</code> ── C++23 らしく書き直す</h1>
+<p class="lede">性格の異なるモジュールに移ります。<code>modernize-*</code> は<strong>ほぼすべてのチェックに自動修正が付いています</strong>。バグを見つけるというより、一括変換ツールとして使うものです。そして本書の環境設定がここで効いてきます。<code>-std=c++23</code> を正しく渡せているかどうかで、有効になるチェックの顔ぶれが変わります。</p>
+
+<h2>18.1 このモジュールの性格</h2>
+
+<table>
+<tr><th></th><th><code>bugprone-*</code>（第16章）</th><th><code>modernize-*</code></th></tr>
+<tr><td>目的</td><td>バグを見つける</td><td>書き方を新しくする</td></tr>
+<tr><td>自動修正</td><td>少数派</td><td><strong>ほぼ全部にある</strong></td></tr>
+<tr><td>使い方</td><td>常時オンにして番人にする</td><td>一度当てて、終わったら外してもよい</td></tr>
+<tr><td>指摘を無視した場合</td><td>いつか壊れる</td><td>古いまま。動きはする</td></tr>
+</table>
+
+<p>この違いから、運用も変わります。<code>modernize-*</code> は <strong>「移行作業として一括で当て、その後は新規コードの番人として最小限だけ残す」</strong> のが実践的です。常時全部オンにしておくと、レビューが「書き方の指摘」で埋まります。</p>
+
+<h2>18.2 有効なチェックは <code>-std</code> で変わる</h2>
+
+<p>ここが本章で最も重要な点です。<code>modernize-use-nullptr</code> は C++11 以降でしか意味を持ちませんし、<code>modernize-use-std-print</code> は C++23 の <code>std::print</code> があって初めて成立します。<strong>Clang-Tidy は解析時の言語規格を見て、成立しないチェックを黙って無効にします。</strong></p>
+
+<figure>
+<svg viewBox="0 0 760 340" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="言語規格によって有効になる modernize チェックが変わる">
+  <g font-family="sans-serif">
+
+  <text x="30" y="28" font-size="12.5" font-weight="bold" fill="#5a6b7a" letter-spacing="1.5">解析時の -std によって「使える書き換え先」が変わる</text>
+
+  <!-- axis -->
+  <line x1="60" y1="66" x2="720" y2="66" stroke="#1f2933" stroke-width="1.6"/>
+  <g font-size="11.5" font-weight="bold" fill="#1f2933">
+    <text x="90" y="56" text-anchor="middle">C++11</text>
+    <text x="255" y="56" text-anchor="middle">C++14/17</text>
+    <text x="430" y="56" text-anchor="middle">C++20</text>
+    <text x="620" y="56" text-anchor="middle">C++23</text>
+  </g>
+  <g fill="#1f2933">
+    <circle cx="90" cy="66" r="4"/><circle cx="255" cy="66" r="4"/>
+    <circle cx="430" cy="66" r="4"/><circle cx="620" cy="66" r="4"/>
+  </g>
+
+  <!-- bars -->
+  <rect x="70" y="86" width="650" height="26" rx="5" fill="#2f6f9f" opacity="0.9"/>
+  <text x="86" y="104" font-size="11" font-family="monospace" fill="#fff">use-nullptr / use-override / use-auto / use-using / loop-convert / pass-by-value</text>
+
+  <rect x="235" y="118" width="485" height="26" rx="5" fill="#4a86ad" opacity="0.9"/>
+  <text x="251" y="136" font-size="11" font-family="monospace" fill="#fff">make-unique / use-emplace / use-nodiscard / concat-nested-namespaces</text>
+
+  <rect x="410" y="150" width="310" height="26" rx="5" fill="#b4661a" opacity="0.9"/>
+  <text x="426" y="168" font-size="11" font-family="monospace" fill="#fff">use-std-format / use-constraints / use-ranges</text>
+
+  <rect x="600" y="182" width="120" height="26" rx="5" fill="#a04a34"/>
+  <text x="616" y="200" font-size="11" font-family="monospace" fill="#fff">use-std-print</text>
+  <rect x="600" y="214" width="120" height="26" rx="5" fill="#a04a34"/>
+  <text x="616" y="232" font-size="11" font-family="monospace" fill="#fff">use-designated-</text>
+  <text x="616" y="246" font-size="0" fill="#fff"></text>
+
+  <text x="726" y="232" font-size="11" fill="#a04a34" font-weight="bold">…</text>
+
+  <rect x="30" y="264" width="700" height="66" rx="8" fill="#fbf4ea" stroke="#b4661a" stroke-width="1.8"/>
+  <text x="50" y="288" font-size="12.5" font-weight="bold" fill="#b4661a">「有効にしたのに何も出ない」の原因はここにもある</text>
+  <text x="50" y="310" font-size="11.5" fill="#1f2933">第3章の図3-2 で見たとおり、MSVC への /std 指定と Clang への -std 指定は別物。</text>
+  <text x="50" y="326" font-size="11.5" fill="#1f2933">Clang 側に C++23 が伝わっていなければ、C++23 世代のチェックは<tspan font-weight="bold">静かに無効化される</tspan>。</text>
+  </g>
+</svg>
+<figcaption><b>図18-1</b>　言語規格と有効なチェックの関係。バーの左端が「そのチェックが意味を持ち始める規格」。</figcaption>
+</figure>
+
+<div class="tip">
+<span class="t">確認方法</span>
+<p>自分の設定で C++23 世代のチェックが本当に有効かは、次で確かめられます。</p>
+<pre style="margin-top:.6rem"><code>clang-tidy --checks="-*,modernize-*" --list-checks</code></pre>
+<p>ただしこの一覧は「登録されているチェック」であって、規格による無効化は解析時に起こります。確実なのは、<strong><code>printf</code> を1行書いて <code>modernize-use-std-print</code> が反応するかを見る</strong>ことです。ハンズオンでこれを行います。</p>
+</div>
+
+<h2>18.3 C++23 世代のチェック</h2>
+
+<p>本書の環境で新しく使えるものを挙げます。どれも自動修正付きです。</p>
+
+<table>
+<tr><th>チェック</th><th>変換内容</th></tr>
+<tr><td><code>modernize-use-std-print</code></td><td><code>printf</code> / <code>fprintf</code> → <code>std::print</code> / <code>std::println</code></td></tr>
+<tr><td><code>modernize-use-std-format</code></td><td>文字列生成を <code>std::format</code> に</td></tr>
+<tr><td><code>modernize-use-starts-ends-with</code></td><td><code>substr</code> や <code>compare</code> による前方・後方一致 → <code>starts_with</code> / <code>ends_with</code></td></tr>
+<tr><td><code>modernize-use-designated-initializers</code></td><td>集成体初期化を指示付き初期化子に</td></tr>
+<tr><td><code>modernize-use-ranges</code></td><td><code>std::sort(v.begin(), v.end())</code> → <code>std::ranges::sort(v)</code></td></tr>
+<tr><td><code>modernize-use-std-numbers</code></td><td>円周率などの手書き定数 → <code>std::numbers</code></td></tr>
+<tr><td><code>modernize-use-integer-sign-comparison</code></td><td>符号付き／符号なしの比較 → <code>std::cmp_less</code> など</td></tr>
+<tr><td><code>modernize-min-max-use-initializer-list</code></td><td>入れ子の <code>std::max(a, std::max(b, c))</code> → <code>std::max({a, b, c})</code></td></tr>
+<tr><td><code>modernize-use-scoped-lock</code></td><td><code>std::lock_guard</code> → <code>std::scoped_lock</code></td></tr>
+<tr><td><code>modernize-use-constraints</code></td><td>SFINAE（<code>enable_if</code>）→ <code>requires</code> 節</td></tr>
+</table>
+
+<p>最後の <code>use-constraints</code> は、テンプレートを多用しているコードでは効果が劇的です。<code>std::enable_if_t</code> の羅列が <code>requires</code> の一行になります。</p>
+
+<h2>18.4 基礎的なチェック</h2>
+
+<table>
+<tr><th>チェック</th><th>変換内容</th><th>注意</th></tr>
+<tr><td><code>modernize-use-nullptr</code></td><td><code>NULL</code> / <code>0</code> → <code>nullptr</code></td><td>安全。最初に当てるべき</td></tr>
+<tr><td><code>modernize-use-override</code></td><td>仮想関数のオーバーライドに <code>override</code></td><td>安全。誤りが露見することがある（それが利点）</td></tr>
+<tr><td><code>modernize-use-using</code></td><td><code>typedef</code> → <code>using</code></td><td>安全</td></tr>
+<tr><td><code>modernize-use-equals-default</code></td><td>空の特殊メンバ関数 → <code>= default</code></td><td>安全</td></tr>
+<tr><td><code>modernize-use-default-member-init</code></td><td>コンストラクタでの初期化 → メンバ宣言での初期化</td><td>おおむね安全</td></tr>
+<tr><td><code>modernize-use-emplace</code></td><td><code>push_back(T(x))</code> → <code>emplace_back(x)</code></td><td>意味が変わる場合がある</td></tr>
+<tr><td><code>modernize-loop-convert</code></td><td>添字ループ → 範囲 for</td><td>ループ内で添字を使っていると変換されない</td></tr>
+<tr><td><code>modernize-pass-by-value</code></td><td><code>const T&amp;</code> → 値渡し + <code>std::move</code></td><td><strong>性能が落ちることがある（第11章）</strong></td></tr>
+<tr><td><code>modernize-make-unique</code> / <code>make-shared</code></td><td><code>new</code> → <code>std::make_unique</code> など</td><td>安全</td></tr>
+<tr><td><code>modernize-avoid-c-arrays</code></td><td>生配列 → <code>std::array</code> を促す</td><td><strong>自動修正なし</strong>。設計判断が要る</td></tr>
+<tr><td><code>modernize-deprecated-headers</code></td><td><code>&lt;stdio.h&gt;</code> → <code>&lt;cstdio&gt;</code></td><td>安全</td></tr>
+</table>
+
+<h3>好みが分かれるもの</h3>
+
+<ul>
+  <li><strong><code>modernize-use-trailing-return-type</code></strong>：すべての関数を <code>auto f() -&gt; int</code> の形にします。統一されて読みやすいという意見と、冗長という意見が真っ二つです。チームで合意が取れていないなら入れないこと。</li>
+  <li><strong><code>modernize-use-auto</code></strong>：型を <code>auto</code> に置き換えます。オプション（<code>MinTypeNameLength</code> など）で適用範囲を絞れます。無条件に全部 <code>auto</code> にすると読みにくくなることがあります。</li>
+  <li><strong><code>modernize-use-nodiscard</code></strong>：<code>[[nodiscard]]</code> を大量に付けます。効果は大きいですが、公開 API では利用側に影響します。</li>
+</ul>
+
+<div class="note">
+<span class="t">モジュールに関するチェックは扱わない</span>
+<p>本書はモジュール（<code>import</code> / <code>export</code>）を使わない方針です（第3章 3.2 節）。したがって、モジュール移行を促す種類のチェックは対象外とします。ヘッダインクルード方式を前提に読み進めてください。</p>
+</div>
+
+<h2>18.5 題材コードを C++23 化する</h2>
+
+<figure>
+<svg viewBox="0 0 760 420" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="題材コードのどこにどのチェックが効くか">
+  <g font-family="sans-serif">
+
+  <text x="30" y="28" font-size="12.5" font-weight="bold" fill="#5a6b7a" letter-spacing="1.5">ConfigLoader のどこに、どのチェックが効くか</text>
+
+  <rect x="24" y="42" width="330" height="360" rx="10" fill="#1f2933"/>
+  <g font-size="11" font-family="monospace" fill="#e6edf3">
+  <text x="42" y="66">struct Entry {</text>
+  <text x="42" y="84">    char name[32];</text>
+  <text x="42" y="102">    int  value;</text>
+  <text x="42" y="120">};</text>
+  <text x="42" y="150">ConfigLoader::ConfigLoader(</text>
+  <text x="42" y="168">        const char* path) {</text>
+  <text x="42" y="186">    path_ = path;</text>
+  <text x="42" y="204">}</text>
+  <text x="42" y="234">ConfigLoader::~ConfigLoader() {</text>
+  <text x="42" y="252">    delete buffer_;</text>
+  <text x="42" y="270">}</text>
+  <text x="42" y="300">    buffer_ = new char[4096];</text>
+  <text x="42" y="330">    char* line = strtok(...);</text>
+  <text x="42" y="348">    while (line != NULL) {</text>
+  <text x="42" y="378">    printf("%d entries\n", n);</text>
+  </g>
+
+  <!-- arrows and labels -->
+  <g font-size="10.5">
+  <line x1="354" y1="84" x2="392" y2="84" stroke="#b4661a" stroke-width="1.3"/>
+  <rect x="396" y="70" width="340" height="26" rx="4" fill="#fbf4ea" stroke="#b4661a"/>
+  <text x="408" y="88" fill="#1f2933" font-family="monospace">modernize-avoid-c-arrays（修正なし）</text>
+
+  <line x1="354" y1="180" x2="392" y2="180" stroke="#2f6f9f" stroke-width="1.3"/>
+  <rect x="396" y="140" width="340" height="26" rx="4" fill="#eef4f9" stroke="#2f6f9f"/>
+  <text x="408" y="158" fill="#1f2933" font-family="monospace">modernize-pass-by-value</text>
+  <rect x="396" y="172" width="340" height="26" rx="4" fill="#eef4f9" stroke="#2f6f9f"/>
+  <text x="408" y="190" fill="#1f2933" font-family="monospace">cppcoreguidelines-prefer-member-initializer</text>
+
+  <line x1="354" y1="252" x2="392" y2="252" stroke="#a04a34" stroke-width="1.3"/>
+  <rect x="396" y="238" width="340" height="26" rx="4" fill="#f7e9e5" stroke="#a04a34"/>
+  <text x="408" y="256" fill="#1f2933" font-family="monospace">※ new[]/delete は modernize の範囲外（第21章）</text>
+
+  <line x1="354" y1="300" x2="392" y2="300" stroke="#2f6f9f" stroke-width="1.3"/>
+  <rect x="396" y="286" width="340" height="26" rx="4" fill="#eef4f9" stroke="#2f6f9f"/>
+  <text x="408" y="304" fill="#1f2933" font-family="monospace">modernize-make-unique（設計変更後）</text>
+
+  <line x1="354" y1="348" x2="392" y2="348" stroke="#3d7a52" stroke-width="1.3"/>
+  <rect x="396" y="334" width="340" height="26" rx="4" fill="#eef5f0" stroke="#3d7a52"/>
+  <text x="408" y="352" fill="#1f2933" font-family="monospace">modernize-use-nullptr ★ 自動修正</text>
+
+  <line x1="354" y1="378" x2="392" y2="378" stroke="#3d7a52" stroke-width="1.3"/>
+  <rect x="396" y="364" width="340" height="26" rx="4" fill="#3d7a52"/>
+  <text x="408" y="382" fill="#fff" font-family="monospace">modernize-use-std-print ★ C++23</text>
+  </g>
+  </g>
+</svg>
+<figcaption><b>図18-2</b>　題材コードへの適用マップ。★印は自動修正が付き、そのまま当てられるもの。</figcaption>
+</figure>
+
+<h2>18.6 【ハンズオン】一括変換を実行する</h2>
+
+<div class="hands">
+<div class="hd">HANDS-ON 18-A　C++23 世代のチェックが効いているか確かめる</div>
+<div class="bd">
+<ol>
+  <li><strong>検証コードを足す。</strong> <code>config_loader.cpp</code> の <code>load()</code> の末尾に、次の1行を追加します。
+<pre><code>    printf("%zu entries loaded\n", entries_.size());</code></pre>
+    <code>&lt;cstdio&gt;</code> は既にインクルードされています。</li>
+
+  <li><strong>C++23 で解析する。</strong>
+<pre><code>clang-tidy --checks="-*,modernize-use-std-print" config_loader.cpp -- -std=c++23</code></pre>
+    <code>std::println</code> への書き換えが提案されることを確認します。</li>
+
+  <li><strong>規格を下げて比べる。</strong>
+<pre><code>clang-tidy --checks="-*,modernize-use-std-print" config_loader.cpp -- -std=c++17</code></pre>
+    <strong>何も出ない</strong>ことを確認します。エラーにも警告にもならず、静かに無効化されるのが観察点です。</li>
+
+  <li><strong>IDE 側でも確認する。</strong> <code>.clang-tidy</code> の <code>Checks</code> に <code>modernize-use-std-print</code> を足してビルドします。IDE でも警告が出れば、第3章で設定した C++23 の指定が Clang 側にも正しく届いています。<strong>出なければ、事前追加オプションに <code>-std=c++23</code> を明示してください（第12章）。</strong></li>
+</ol>
+</div>
+</div>
+
+<div class="hands">
+<div class="hd">HANDS-ON 18-B　安全なものから順に当てる</div>
+<div class="bd">
+<ol>
+  <li><strong>作業ツリーをきれいにする。</strong> 第11章の手順です。コミットしてから始めます。</li>
+
+  <li><strong>第1段：<code>use-nullptr</code>。</strong>
+<pre><code>clang-tidy --checks="-*,modernize-use-nullptr" --fix config_loader.cpp -- -std=c++23
+git diff</code></pre>
+    差分を読み、ビルドが通ることを確認してコミットします。</li>
+
+  <li><strong>第2段：<code>use-std-print</code>。</strong>
+<pre><code>clang-tidy --checks="-*,modernize-use-std-print" --fix config_loader.cpp -- -std=c++23
+git diff</code></pre>
+    <code>&lt;print&gt;</code> のインクルードが追加され、<code>printf</code> が <code>std::println</code> になることを確認します。<strong>書式文字列の変換まで行われる</strong>点を差分でよく見てください。</li>
+
+  <li><strong>第3段：まとめて安全なもの。</strong>
+<pre><code>clang-tidy --checks="-*,modernize-use-using,modernize-use-equals-default,modernize-deprecated-headers,modernize-use-default-member-init" --fix config_loader.cpp config_loader.h -- -std=c++23</code></pre>
+    差分を読み、コミットします。</li>
+
+  <li><strong>危険なものを「見るだけ」にする。</strong> <code>--fix</code> を<strong>付けずに</strong>実行し、提案内容を読みます。
+<pre><code>clang-tidy --checks="-*,modernize-pass-by-value,modernize-use-emplace,modernize-use-trailing-return-type" config_loader.cpp -- -std=c++23</code></pre>
+    <code>pass-by-value</code> の提案について、<strong>呼び出し側が左辺値を渡しているか右辺値を渡しているか</strong>を確認し、本当に得になるかを自分で判断してください（第11章 11.3 節）。</li>
+
+  <li><strong>自動修正がないものを確認する。</strong>
+<pre><code>clang-tidy --checks="-*,modernize-avoid-c-arrays" config_loader.h -- -std=c++23</code></pre>
+    <code>char name[32]</code> が指摘されるが修正案は付かないことを確認します。<code>std::array&lt;char, 32&gt;</code> にするのか <code>std::string</code> にするのかは設計判断であり、機械には決められません。</li>
+
+  <li><strong>移行後の運用を決める。</strong> 一括変換が終わったら、<code>modernize-*</code> を全部有効のまま残すか、新規コードの番人として一部だけ残すかを決めます。<strong>おすすめは、自動修正が安全で意見が割れないものだけを残す</strong>ことです。
+<pre><code>Checks: &gt;
+  -*,
+  bugprone-*,
+  modernize-use-nullptr,
+  modernize-use-override,
+  modernize-use-using,
+  modernize-use-equals-default,
+  modernize-use-std-print,
+  modernize-use-std-format</code></pre>
+  </li>
+</ol>
+</div>
+</div>
+
+<div class="warn">
+<span class="t">一括変換は「一度きりの作業」として計画する</span>
+<p><code>modernize-*</code> を全部有効にしたまま日常運用すると、レビューが書き方の指摘で埋まり、本当に見るべき <code>bugprone-*</code> の警告が埋もれます。<strong>移行は移行として、期間を区切って一度やる。</strong> 終わったら、新規コードに効かせたいものだけを残す。これが健全な使い方です。</p>
+</div>
+
+<div class="summary">
+<h2>この章のまとめ</h2>
+<ul>
+  <li><code>modernize-*</code> はほぼ全チェックに自動修正がある。バグ検出ではなく<strong>一括変換ツール</strong>として扱う。</li>
+  <li><strong>有効なチェックは解析時の <code>-std</code> で変わる。</strong> 規格が届いていないチェックは、エラーも出さずに静かに無効化される。</li>
+  <li>C++23 世代では <code>use-std-print</code> / <code>use-std-format</code> / <code>use-starts-ends-with</code> / <code>use-designated-initializers</code> / <code>use-ranges</code> / <code>use-constraints</code> などが使える。</li>
+  <li>安全なもの（<code>use-nullptr</code>, <code>use-override</code>, <code>use-using</code>, <code>use-equals-default</code>）から段階的に当てる。</li>
+  <li><code>pass-by-value</code> と <code>use-emplace</code> は意味や性能が変わりうる。<code>use-trailing-return-type</code> は好みが割れる。</li>
+  <li><code>avoid-c-arrays</code> のように<strong>自動修正がないもの</strong>は、設計判断が必要という合図。</li>
+  <li>移行は期間を区切って一度で終わらせ、その後は少数だけ番人として残す。</li>
+</ul>
+</div>
+
+<p class="next"><strong>次章：</strong> 第19章「<code>performance-*</code> ── 余計なコピーを消す」では、題材コードの <code>entries()</code> が返す毎回のコピーに手を入れます。ただし「無駄を見つけた」と「速くなった」は別の話です。</p>
+
+</div>
+</body>
+</html>

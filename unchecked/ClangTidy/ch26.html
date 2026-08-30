@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第26章 bind で節点に名前を付ける ─ Clang-Tidy入門</title>
+<style>
+  :root{
+    --ink:#1f2933; --sub:#5a6b7a; --line:#d8dee4; --bg:#ffffff;
+    --code-bg:#f6f8fa; --code-line:#e2e8ee;
+    --accent:#2f6f9f; --accent-bg:#eef4f9;
+    --warn:#b4661a; --warn-bg:#fbf4ea;
+    --ok:#3d7a52; --ok-bg:#eef5f0;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0; background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Noto Sans JP","Meiryo",sans-serif;
+    font-size:16px; line-height:1.95; font-feature-settings:"palt" 1;}
+  .page{max-width:47rem; margin:0 auto; padding:3.5rem 1.6rem 6rem}
+  .chap-no{font-size:.8rem; letter-spacing:.22em; color:var(--accent); font-weight:700; margin:0 0 .5rem}
+  h1{font-size:1.85rem; line-height:1.5; margin:0 0 .6rem; letter-spacing:.01em}
+  .lede{color:var(--sub); font-size:1rem; margin:0 0 2.2rem; padding-bottom:1.6rem; border-bottom:2px solid var(--ink)}
+  h2{font-size:1.28rem; margin:3rem 0 1rem; padding-left:.7rem; border-left:4px solid var(--accent); line-height:1.6}
+  h3{font-size:1.05rem; margin:2.2rem 0 .7rem}
+  h3::before{content:"◆ "; color:var(--accent); font-size:.8em}
+  p{margin:0 0 1.1rem}
+  ul,ol{margin:0 0 1.2rem; padding-left:1.6rem}
+  li{margin:.35rem 0}
+  code{font-family:"Cascadia Mono","Consolas","SFMono-Regular",monospace; font-size:.9em;
+       background:var(--code-bg); border:1px solid var(--code-line); border-radius:4px; padding:.08em .35em}
+  pre{background:var(--code-bg); border:1px solid var(--code-line); border-radius:8px;
+      padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.7}
+  pre code{background:none; border:none; padding:0; font-size:.86rem}
+  pre.term{background:#1f2933; border-color:#1f2933; color:#e6edf3}
+  pre.term code{color:#e6edf3}
+  pre.term .p{color:#7fb2d6}
+  pre.term .o{color:#9fb3c0}
+  pre.term .y{color:#e8b075}
+  .cap{font-size:.82rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+  figure{margin:2rem 0 2.2rem}
+  figure svg{display:block; width:100%; height:auto; border:1px solid var(--line); border-radius:8px; background:#fff}
+  figcaption{font-size:.85rem; color:var(--sub); margin-top:.6rem}
+  figcaption b{color:var(--ink)}
+  .box{border-radius:8px; padding:1rem 1.2rem; margin:1.6rem 0; font-size:.94rem}
+  .box p:last-child{margin-bottom:0}
+  .box .t{font-weight:700; display:block; margin-bottom:.35rem; font-size:.88rem; letter-spacing:.04em}
+  .note{background:var(--accent-bg); border-left:4px solid var(--accent)} .note .t{color:var(--accent)}
+  .warn{background:var(--warn-bg); border-left:4px solid var(--warn)} .warn .t{color:var(--warn)}
+  .tip{background:var(--ok-bg); border-left:4px solid var(--ok)} .tip .t{color:var(--ok)}
+  .hands{border:1px solid var(--line); border-radius:10px; margin:2rem 0; overflow:hidden}
+  .hands>.hd{background:var(--ink); color:#fff; padding:.55rem 1.1rem; font-size:.85rem; letter-spacing:.1em; font-weight:700}
+  .hands>.bd{padding:1.3rem 1.3rem .4rem}
+  .hands ol{counter-reset:step; list-style:none; padding-left:0}
+  .hands ol>li{counter-increment:step; position:relative; padding-left:2.4rem; margin:0 0 1.2rem}
+  .hands ol>li::before{content:counter(step); position:absolute; left:0; top:.25rem;
+    width:1.7rem; height:1.7rem; border-radius:50%; background:var(--accent); color:#fff;
+    font-size:.82rem; font-weight:700; display:flex; align-items:center; justify-content:center; line-height:1}
+  table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+  th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+  th{background:var(--code-bg); font-weight:700}
+  .summary{border:2px solid var(--ink); border-radius:10px; padding:1.3rem 1.5rem; margin:3rem 0 1rem}
+  .summary h2{margin:0 0 .8rem; border:none; padding:0; font-size:1.1rem}
+  .summary ul{margin-bottom:0}
+  .next{color:var(--sub); font-size:.94rem; border-top:1px solid var(--line); padding-top:1.2rem; margin-top:2.5rem}
+  @media (max-width:600px){ body{font-size:15px} .page{padding:2.2rem 1.1rem 4rem} h1{font-size:1.5rem} }
+</style>
+</head>
+<body>
+<div class="page">
+
+<p class="chap-no">第 26 章</p>
+<h1><code>bind</code> で節点に名前を付ける</h1>
+<p class="lede">ここまでのクエリは「条件に合うか」を判定するだけでした。しかし実際にチェックを作るには、<strong>「木のどのノードに対して警告を出すか」</strong>を指定しなければなりません。<code>callExpr</code> 全体を指すのか、その中の関数名を指すのか。それを決めるのが <code>bind</code> です。第6部の <code>Diagnostic</code> 設定は、この名前を参照します。</p>
+
+<h2>26.1 なぜ名前が要るのか</h2>
+
+<figure>
+<svg viewBox="0 0 760 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="bind した名前が診断の出力位置になる">
+  <defs>
+    <marker id="a26" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#b4661a"/>
+    </marker>
+  </defs>
+  <g font-family="sans-serif">
+
+  <rect x="24" y="20" width="330" height="164" rx="10" fill="#eef4f9" stroke="#2f6f9f" stroke-width="1.8"/>
+  <text x="189" y="46" text-anchor="middle" font-size="13" font-weight="bold" fill="#2f6f9f">マッチした部分木</text>
+
+  <rect x="60" y="60" width="180" height="26" rx="5" fill="#b4661a"/>
+  <text x="150" y="78" text-anchor="middle" font-size="10.5" font-family="monospace" fill="#fff" font-weight="bold">CallExpr</text>
+  <text x="252" y="78" font-size="10.5" fill="#b4661a" font-weight="bold">← ここに出す？</text>
+
+  <line x1="80" y1="86" x2="80" y2="104" stroke="#c5d6e4" stroke-width="1.3"/>
+  <line x1="80" y1="104" x2="96" y2="104" stroke="#c5d6e4" stroke-width="1.3"/>
+  <rect x="100" y="92" width="150" height="24" rx="5" fill="#f4f6f8" stroke="#5a6b7a" stroke-dasharray="3 2"/>
+  <text x="175" y="109" text-anchor="middle" font-size="10" font-family="monospace" fill="#5a6b7a">ImplicitCastExpr</text>
+
+  <line x1="120" y1="116" x2="120" y2="134" stroke="#d8dee4" stroke-width="1.3"/>
+  <line x1="120" y1="134" x2="136" y2="134" stroke="#d8dee4" stroke-width="1.3"/>
+  <rect x="140" y="122" width="150" height="24" rx="5" fill="#eef5f0" stroke="#3d7a52"/>
+  <text x="215" y="139" text-anchor="middle" font-size="10" font-family="monospace" fill="#1f2933">DeclRefExpr strcpy</text>
+
+  <line x1="160" y1="146" x2="160" y2="164" stroke="#d8dee4" stroke-width="1.3"/>
+  <line x1="160" y1="164" x2="176" y2="164" stroke="#d8dee4" stroke-width="1.3"/>
+  <rect x="180" y="152" width="150" height="24" rx="5" fill="#3d7a52"/>
+  <text x="255" y="169" text-anchor="middle" font-size="10" font-family="monospace" fill="#fff" font-weight="bold">FunctionDecl strcpy</text>
+  <text x="336" y="169" font-size="10.5" fill="#3d7a52" font-weight="bold">← それとも？</text>
+
+  <path d="M360,100 L410,100" fill="none" stroke="#b4661a" stroke-width="1.6" marker-end="url(#a26)"/>
+  <text x="385" y="90" text-anchor="middle" font-size="10" fill="#b4661a">bind で指定</text>
+
+  <rect x="416" y="20" width="320" height="164" rx="10" fill="#fbf4ea" stroke="#b4661a" stroke-width="2"/>
+  <text x="576" y="46" text-anchor="middle" font-size="13" font-weight="bold" fill="#b4661a">診断の出力先</text>
+  <rect x="436" y="58" width="284" height="52" rx="6" fill="#1f2933"/>
+  <text x="450" y="78" font-size="10" font-family="monospace" fill="#e08a74">config_loader.cpp:31:9: warning:</text>
+  <text x="450" y="94" font-size="10" font-family="monospace" fill="#e6edf3">    strcpy(e.name, line);</text>
+  <text x="450" y="108" font-size="10" font-family="monospace" fill="#e8b075">    ^~~~~~</text>
+  <text x="576" y="132" text-anchor="middle" font-size="11" fill="#1f2933"><tspan font-weight="bold">bind した名前のノードの位置</tspan>に</text>
+  <text x="576" y="150" text-anchor="middle" font-size="11" fill="#1f2933">波線と警告が出る</text>
+  <text x="576" y="172" text-anchor="middle" font-size="10.5" fill="#5a6b7a">名前を付けていないノードは指せない</text>
+
+  <rect x="24" y="200" width="712" height="100" rx="10" fill="#1f2933"/>
+  <text x="46" y="226" font-size="12.5" font-weight="bold" fill="#e8b075">第6部での対応関係（第31章）</text>
+  <text x="46" y="252" font-size="11.5" font-family="monospace" fill="#e6edf3">Query:  callExpr(callee(functionDecl(hasName("strcpy")))).bind(<tspan fill="#a3d9a5">"call"</tspan>)</text>
+  <text x="46" y="276" font-size="11.5" font-family="monospace" fill="#e6edf3">Diagnostic:</text>
+  <text x="46" y="294" font-size="11.5" font-family="monospace" fill="#e6edf3">  - BindName: <tspan fill="#a3d9a5">call</tspan>　　← ここで名前を参照する</text>
+  </g>
+</svg>
+<figcaption><b>図26-1</b>　<code>bind</code> した名前が、診断を出す位置を決める。第6部の <code>BindName</code> はこの名前を指す。</figcaption>
+</figure>
+
+<h2>26.2 書き方</h2>
+
+<p><code>.bind("名前")</code> を、名前を付けたい Matcher の直後に書きます。</p>
+
+<pre><code>callExpr(callee(functionDecl(hasName("strcpy")).bind("fn"))).bind("call")</code></pre>
+
+<p>この式では2つのノードに名前が付いています。</p>
+
+<table>
+<tr><th>名前</th><th>指すノード</th></tr>
+<tr><td><code>"call"</code></td><td><code>strcpy(...)</code> という呼び出し式全体</td></tr>
+<tr><td><code>"fn"</code></td><td><code>strcpy</code> という関数の宣言</td></tr>
+</table>
+
+<div class="warn">
+<span class="t"><code>.bind()</code> が書けるのは Node Matcher だけ</span>
+<p><code>hasName("strcpy").bind("x")</code> のようには書けません。Narrowing Matcher は「属性の条件」であってノードではないからです。<code>.bind()</code> はノードに名前を付ける操作なので、<strong>Node Matcher の後ろにしか置けません。</strong></p>
+</div>
+
+<h3>結果の見え方</h3>
+
+<pre class="term"><code><span class="p">clang-query&gt;</span> <span class="y">m callExpr(callee(functionDecl(hasName("strcpy")).bind("fn"))).bind("call")</span>
+
+<span class="o">Match #1:</span>
+<span class="o">ch25_match.cpp:14:5: note: "call" binds here</span>
+<span class="o">    strcpy(dst, src);</span>
+<span class="o">    ^~~~~~~~~~~~~~~~</span>
+<span class="o">cstring:XX:XX: note: "fn" binds here</span>
+<span class="o">…</span>
+<span class="o">ch25_match.cpp:14:5: note: "root" binds here</span>
+<span class="o">    strcpy(dst, src);</span>
+<span class="o">    ^~~~~~~~~~~~~~~~</span>
+<span class="o">1 match.</span></code></pre>
+
+<p>bind した名前ごとに <code>note</code> が出ます。<strong>それぞれがソースのどこを指しているかを確認するのが、bind が正しいかの検証です。</strong></p>
+
+<h3><code>"root"</code> とは</h3>
+
+<p>自分で名前を付けなくても <code>"root"</code> という note が出ています。これは <strong>クエリ全体のマッチ対象</strong>（一番外側の Matcher が指すノード）に自動で付く名前です。邪魔なときは消せます。</p>
+
+<pre class="term"><code><span class="p">clang-query&gt;</span> <span class="y">set bind-root false</span></code></pre>
+
+<p>bind を1つも使っていない状態でこれを実行すると、何も表示されなくなります。<strong><code>bind-root false</code> にするなら、必ず自分で bind を付けてください。</strong></p>
+
+<h2>26.3 <code>hasDescendant</code> と <code>forEachDescendant</code></h2>
+
+<p>ここが本章で最も間違えやすい点です。名前が似ていますが、<strong>マッチの個数が変わります</strong>。</p>
+
+<figure>
+<svg viewBox="0 0 760 400" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="hasDescendant と forEachDescendant のマッチ数の違い">
+  <g font-family="sans-serif">
+
+  <rect x="24" y="16" width="712" height="52" rx="8" fill="#1f2933"/>
+  <text x="44" y="38" font-size="11" font-family="monospace" fill="#a3d9a5">void f() {</text>
+  <text x="44" y="56" font-size="11" font-family="monospace" fill="#e6edf3">    strcpy(a, b);   strcpy(c, d);   strcpy(e, g);   }　← 1つの関数に3つの呼び出し</text>
+
+  <!-- left -->
+  <rect x="24" y="84" width="350" height="290" rx="10" fill="#fbf4ea" stroke="#b4661a" stroke-width="1.8"/>
+  <text x="199" y="110" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#b4661a">hasDescendant</text>
+  <rect x="42" y="120" width="314" height="46" rx="5" fill="#1f2933"/>
+  <text x="54" y="139" font-size="9.5" font-family="monospace" fill="#e6edf3">m functionDecl(</text>
+  <text x="54" y="155" font-size="9.5" font-family="monospace" fill="#e6edf3">    hasDescendant(callExpr().bind("c"))).bind("f")</text>
+
+  <text x="199" y="188" text-anchor="middle" font-size="11.5" fill="#1f2933">意味：「そういう子孫を<tspan font-weight="bold">持つ</tspan>関数」</text>
+
+  <rect x="60" y="204" width="278" height="30" rx="5" fill="#b4661a"/>
+  <text x="199" y="224" text-anchor="middle" font-size="11" fill="#fff" font-weight="bold">Match #1　f が1回だけマッチ</text>
+
+  <rect x="60" y="244" width="278" height="60" rx="5" fill="#fff" stroke="#e6d5bd"/>
+  <text x="199" y="266" text-anchor="middle" font-size="10.5" fill="#1f2933">"f" → 関数 f</text>
+  <text x="199" y="288" text-anchor="middle" font-size="10.5" fill="#a04a34" font-weight="bold">"c" → 3つのうち1つだけ</text>
+
+  <rect x="60" y="316" width="278" height="44" rx="5" fill="#f7e9e5" stroke="#a04a34"/>
+  <text x="199" y="336" text-anchor="middle" font-size="10.5" fill="#a04a34" font-weight="bold">残り2つの呼び出しは報告されない</text>
+  <text x="199" y="354" text-anchor="middle" font-size="10" fill="#5a6b7a">「条件の存在を確かめる」用途</text>
+
+  <!-- right -->
+  <rect x="386" y="84" width="350" height="290" rx="10" fill="#eef5f0" stroke="#3d7a52" stroke-width="2"/>
+  <text x="561" y="110" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#3d7a52">forEachDescendant</text>
+  <rect x="404" y="120" width="314" height="46" rx="5" fill="#1f2933"/>
+  <text x="416" y="139" font-size="9.5" font-family="monospace" fill="#e6edf3">m functionDecl(</text>
+  <text x="416" y="155" font-size="9.5" font-family="monospace" fill="#e6edf3">    forEachDescendant(callExpr().bind("c"))).bind("f")</text>
+
+  <text x="561" y="188" text-anchor="middle" font-size="11.5" fill="#1f2933">意味：「子孫の<tspan font-weight="bold">それぞれ</tspan>について」</text>
+
+  <rect x="422" y="204" width="278" height="30" rx="5" fill="#3d7a52"/>
+  <text x="561" y="224" text-anchor="middle" font-size="11" fill="#fff" font-weight="bold">Match #1 / #2 / #3　3回マッチ</text>
+
+  <rect x="422" y="244" width="278" height="60" rx="5" fill="#fff" stroke="#c9dfd1"/>
+  <text x="561" y="266" text-anchor="middle" font-size="10.5" fill="#1f2933">"f" → 毎回 関数 f</text>
+  <text x="561" y="288" text-anchor="middle" font-size="10.5" fill="#3d7a52" font-weight="bold">"c" → 各マッチで別々の呼び出し</text>
+
+  <rect x="422" y="316" width="278" height="44" rx="5" fill="#eef5f0" stroke="#3d7a52"/>
+  <text x="561" y="336" text-anchor="middle" font-size="10.5" fill="#3d7a52" font-weight="bold">3か所すべてに警告を出せる</text>
+  <text x="561" y="354" text-anchor="middle" font-size="10" fill="#5a6b7a">「全部を報告する」用途</text>
+  </g>
+</svg>
+<figcaption><b>図26-2</b>　<code>hasDescendant</code> と <code>forEachDescendant</code>。<strong>警告を全箇所に出したいなら <code>forEach…</code> を使う。</strong></figcaption>
+</figure>
+
+<div class="tip">
+<span class="t">使い分けの原則</span>
+<p><strong>報告したい対象そのものを、一番外側の Matcher にする</strong>のが基本です。「<code>strcpy</code> の呼び出しを全部報告したい」なら、外側を <code>callExpr</code> にすればよく、<code>forEachDescendant</code> は不要です。</p>
+<pre style="margin-top:.6rem"><code># これで十分（3件マッチする）
+m callExpr(callee(functionDecl(hasName("strcpy")))).bind("call")</code></pre>
+<p style="margin-top:.5rem"><code>forEach…</code> が要るのは、<strong>外側に別の条件を付けたいとき</strong>です。「<code>noexcept</code> でない関数の中にある <code>strcpy</code> 呼び出しを全部」のような場合、外側は <code>functionDecl</code> にせざるをえません。</p>
+</div>
+
+<h2>26.4 複数の bind を使い分ける</h2>
+
+<p>第6部では、警告本体（<code>Warning</code>）と補足（<code>Note</code>）を別々の位置に出せます。そのために複数の bind を用意します。</p>
+
+<pre><code># 「配列で確保したものを、配列でない delete で解放している」
+cxxDeleteExpr(
+  unless(isArrayForm()),
+  has(
+    ignoringImplicit(
+      declRefExpr(
+        to(varDecl(hasInitializer(ignoringImplicit(cxxNewExpr(isArray()).bind("alloc")))))
+      )
+    )
+  )
+).bind("del")</code></pre>
+
+<table>
+<tr><th>名前</th><th>役割</th><th>第6部での使い方</th></tr>
+<tr><td><code>"del"</code></td><td>問題のある <code>delete</code> 式</td><td><code>Level: Warning</code> ── 主たる指摘</td></tr>
+<tr><td><code>"alloc"</code></td><td>対応する <code>new[]</code> 式</td><td><code>Level: Note</code> ── 「ここで確保されている」</td></tr>
+</table>
+
+<p>第17章で見た <code>clang-analyzer-*</code> の <code>note</code> 連鎖と同じ効果を、自作チェックでも作れるということです。<strong>読み手が原因にたどり着ける診断は、それだけで価値があります。</strong></p>
+
+<h2>26.5 bind した結果を確認する</h2>
+
+<p>bind が意図どおりの位置を指しているかは、必ず確認してください。よくある失敗が2つあります。</p>
+
+<h3>失敗1：期待と違うノードを指している</h3>
+
+<pre class="term"><code><span class="p">clang-query&gt;</span> <span class="y">m callExpr(callee(functionDecl(hasName("strcpy")).bind("fn")))</span>
+<span class="o">…</span>
+<span class="o">cstring:104:20: note: "fn" binds here</span></code></pre>
+
+<p><code>"fn"</code> が指しているのは、<strong>ヘッダにある <code>strcpy</code> の宣言</strong>です。呼び出し箇所ではありません。ここに警告を出すと、ユーザーのコードではなく標準ヘッダに波線が出ます。<strong>報告したい位置を bind しているか、必ず出力で確認してください。</strong></p>
+
+<h3>失敗2：暗黙ノードを指している</h3>
+
+<p>第23章で見たとおり、AST には <code>ImplicitCastExpr</code> が挟まります。うっかりそれを bind すると、位置がずれたり、意図しないマッチになったりします。これは次章の <code>set traversal</code> で対処します。</p>
+
+<h2>26.6 【ハンズオン】bind を使いこなす</h2>
+
+<div class="hands">
+<div class="hd">HANDS-ON 26　名前を付けて、位置を確かめる</div>
+<div class="bd">
+<ol>
+  <li><strong>検証コードを用意する。</strong> 第25章の <code>ch25_match.cpp</code> を拡張し、同じ関数内に <code>strcpy</code> を3回呼ぶ関数を足します。
+<pre><code>void triple(char* a, char* b, char* c, const char* s) {
+    strcpy(a, s);
+    strcpy(b, s);
+    strcpy(c, s);
+}</code></pre>
+  </li>
+
+  <li><strong>bind なしで実行する。</strong>
+<pre><code>clang-query ch25_match.cpp -- -std=c++23</code></pre>
+<pre><code>m callExpr(callee(functionDecl(hasName("strcpy"))))</code></pre>
+    <code>"root"</code> の note だけが出ることを確認します。件数も記録してください。</li>
+
+  <li><strong>bind を付ける。</strong>
+<pre><code>m callExpr(callee(functionDecl(hasName("strcpy")).bind("fn"))).bind("call")</code></pre>
+    <code>"call"</code> と <code>"fn"</code> の note が<strong>それぞれ違う場所</strong>を指していることを確認します。<code>"fn"</code> がヘッダを指していることが観察点です。</li>
+
+  <li><strong><code>bind-root</code> を切る。</strong>
+<pre><code>set bind-root false
+m callExpr(callee(functionDecl(hasName("strcpy")))).bind("call")</code></pre>
+    <code>"root"</code> の note が消えることを確認します。次に <code>.bind("call")</code> を外して実行し、<strong>何も表示されなくなる</strong>ことを確認してください。</li>
+
+  <li><strong>件数の違いを確かめる。</strong> <code>set bind-root true</code> に戻してから、次の2つを実行し、件数を比較します。
+<pre><code>m functionDecl(hasName("triple"), hasDescendant(callExpr().bind("c")))
+m functionDecl(hasName("triple"), forEachDescendant(callExpr().bind("c")))</code></pre>
+    <strong>前者が1件、後者が複数件</strong>になることを確認します。後者では <code>"c"</code> が毎回違う呼び出しを指しているはずです。</li>
+
+  <li><strong>外側を変えて簡潔にする。</strong>
+<pre><code>m callExpr(callee(functionDecl(hasName("strcpy"))), hasAncestor(functionDecl(hasName("triple")).bind("outer"))).bind("call")</code></pre>
+    <code>forEachDescendant</code> を使わずに3件マッチすることを確認します。<strong>「報告したい対象を外側にする」という原則の実例です。</strong></li>
+
+  <li><strong>2か所を指す診断を設計する。</strong> 26.4 節のクエリを <code>alloc()</code> 関数に対して実行し、<code>"del"</code> と <code>"alloc"</code> がそれぞれ <code>delete p;</code> と <code>new int[10]</code> を指すことを確認します。うまくマッチしない場合は、<code>set output dump</code> で AST を見ながら条件を調整してください。<strong>ここでつまずくのは正常です。次章の道具で解決します。</strong></li>
+
+  <li><strong>保存する。</strong> 動いたクエリを <code>queries\</code> に保存します。bind 名には、<strong>後で <code>Diagnostic</code> のメッセージを書くときに意味が通る名前</strong>を付けてください（<code>"x"</code> や <code>"a"</code> は避ける）。</li>
+</ol>
+</div>
+</div>
+
+<div class="summary">
+<h2>この章のまとめ</h2>
+<ul>
+  <li><code>.bind("名前")</code> で、マッチした木の中の特定のノードに名前を付ける。<strong>この名前が、第6部で診断を出す位置の指定になる。</strong></li>
+  <li><code>.bind()</code> は <strong>Node Matcher の後ろにしか置けない</strong>。Narrowing Matcher には付けられない。</li>
+  <li>自動で付く <code>"root"</code> はクエリ全体のマッチ対象。<code>set bind-root false</code> で消せるが、その場合は自分で bind が必須。</li>
+  <li><strong><code>hasDescendant</code> は1件、<code>forEachDescendant</code> は該当する子孫の数だけマッチする。</strong> 全箇所に警告を出したいなら後者。</li>
+  <li>原則は「<strong>報告したい対象を一番外側の Matcher にする</strong>」。そうすれば <code>forEach…</code> は不要になることが多い。</li>
+  <li>複数 bind により、警告本体と note を別々の位置に出せる。原因箇所を示す診断が作れる。</li>
+  <li>bind した位置は必ず出力で確認する。ヘッダ側の宣言や暗黙ノードを指してしまう事故が起きやすい。</li>
+</ul>
+</div>
+
+<p class="next"><strong>次章：</strong> 第27章「Matcher を書きやすくする道具」では、前章から積み残した暗黙ノードの問題を <code>set traversal</code> で解決し、<code>let</code> による再利用と、マッチしない／しすぎるときのデバッグ手順を確立します。</p>
+
+</div>
+</body>
+</html>

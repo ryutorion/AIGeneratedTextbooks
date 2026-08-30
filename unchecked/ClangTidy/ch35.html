@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第35章 実践4：複数の Note で原因箇所を示す ─ Clang-Tidy入門</title>
+<style>
+  :root{
+    --ink:#1f2933; --sub:#5a6b7a; --line:#d8dee4; --bg:#ffffff;
+    --code-bg:#f6f8fa; --code-line:#e2e8ee;
+    --accent:#2f6f9f; --accent-bg:#eef4f9;
+    --warn:#b4661a; --warn-bg:#fbf4ea;
+    --ok:#3d7a52; --ok-bg:#eef5f0;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0; background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Noto Sans JP","Meiryo",sans-serif;
+    font-size:16px; line-height:1.95; font-feature-settings:"palt" 1;}
+  .page{max-width:47rem; margin:0 auto; padding:3.5rem 1.6rem 6rem}
+  .chap-no{font-size:.8rem; letter-spacing:.22em; color:var(--accent); font-weight:700; margin:0 0 .5rem}
+  h1{font-size:1.85rem; line-height:1.5; margin:0 0 .6rem; letter-spacing:.01em}
+  .lede{color:var(--sub); font-size:1rem; margin:0 0 2.2rem; padding-bottom:1.6rem; border-bottom:2px solid var(--ink)}
+  h2{font-size:1.28rem; margin:3rem 0 1rem; padding-left:.7rem; border-left:4px solid var(--accent); line-height:1.6}
+  h3{font-size:1.05rem; margin:2.2rem 0 .7rem}
+  h3::before{content:"◆ "; color:var(--accent); font-size:.8em}
+  p{margin:0 0 1.1rem}
+  ul,ol{margin:0 0 1.2rem; padding-left:1.6rem}
+  li{margin:.35rem 0}
+  code{font-family:"Cascadia Mono","Consolas","SFMono-Regular",monospace; font-size:.9em;
+       background:var(--code-bg); border:1px solid var(--code-line); border-radius:4px; padding:.08em .35em}
+  pre{background:var(--code-bg); border:1px solid var(--code-line); border-radius:8px;
+      padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.7}
+  pre code{background:none; border:none; padding:0; font-size:.86rem}
+  pre.term{background:#1f2933; border-color:#1f2933; color:#e6edf3}
+  pre.term code{color:#e6edf3}
+  pre.term .p{color:#7fb2d6}
+  pre.term .o{color:#9fb3c0}
+  pre.term .e{color:#e08a74}
+  pre.term .n{color:#8fb8d0}
+  .cap{font-size:.82rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+  figure{margin:2rem 0 2.2rem}
+  figure svg{display:block; width:100%; height:auto; border:1px solid var(--line); border-radius:8px; background:#fff}
+  figcaption{font-size:.85rem; color:var(--sub); margin-top:.6rem}
+  figcaption b{color:var(--ink)}
+  .box{border-radius:8px; padding:1rem 1.2rem; margin:1.6rem 0; font-size:.94rem}
+  .box p:last-child{margin-bottom:0}
+  .box .t{font-weight:700; display:block; margin-bottom:.35rem; font-size:.88rem; letter-spacing:.04em}
+  .note{background:var(--accent-bg); border-left:4px solid var(--accent)} .note .t{color:var(--accent)}
+  .warn{background:var(--warn-bg); border-left:4px solid var(--warn)} .warn .t{color:var(--warn)}
+  .tip{background:var(--ok-bg); border-left:4px solid var(--ok)} .tip .t{color:var(--ok)}
+  .hands{border:1px solid var(--line); border-radius:10px; margin:2rem 0; overflow:hidden}
+  .hands>.hd{background:var(--ink); color:#fff; padding:.55rem 1.1rem; font-size:.85rem; letter-spacing:.1em; font-weight:700}
+  .hands>.bd{padding:1.3rem 1.3rem .4rem}
+  .hands ol{counter-reset:step; list-style:none; padding-left:0}
+  .hands ol>li{counter-increment:step; position:relative; padding-left:2.4rem; margin:0 0 1.2rem}
+  .hands ol>li::before{content:counter(step); position:absolute; left:0; top:.25rem;
+    width:1.7rem; height:1.7rem; border-radius:50%; background:var(--accent); color:#fff;
+    font-size:.82rem; font-weight:700; display:flex; align-items:center; justify-content:center; line-height:1}
+  table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+  th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+  th{background:var(--code-bg); font-weight:700}
+  .summary{border:2px solid var(--ink); border-radius:10px; padding:1.3rem 1.5rem; margin:3rem 0 1rem}
+  .summary h2{margin:0 0 .8rem; border:none; padding:0; font-size:1.1rem}
+  .summary ul{margin-bottom:0}
+  .next{color:var(--sub); font-size:.94rem; border-top:1px solid var(--line); padding-top:1.2rem; margin-top:2.5rem}
+  @media (max-width:600px){ body{font-size:15px} .page{padding:2.2rem 1.1rem 4rem} h1{font-size:1.5rem} }
+</style>
+</head>
+<body>
+<div class="page">
+
+<p class="chap-no">第 35 章</p>
+<h1>実践4：複数の <code>Note</code> で原因箇所を示す</h1>
+<p class="lede">実践編の最後です。これまで <code>Note</code> は補助として使ってきました。ここでは主役にします。<strong>問題が1か所では説明できないとき</strong>── 確保と解放、宣言と使用、規約と根拠 ── 読み手を原因まで導く診断の作り方を扱います。第17章でフロー解析の <code>note</code> 連鎖を読みました。あれを自作チェックで作ります。</p>
+
+<h2>35.1 1点では説明できない問題</h2>
+
+<figure>
+<svg viewBox="0 0 760 330" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="1点診断と多点診断の違い">
+  <g font-family="sans-serif">
+
+  <rect x="24" y="20" width="350" height="290" rx="10" fill="#f7e9e5" stroke="#a04a34" stroke-width="1.8"/>
+  <text x="199" y="46" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#a04a34">Warning だけの診断</text>
+
+  <rect x="42" y="58" width="314" height="88" rx="6" fill="#1f2933"/>
+  <text x="54" y="80" font-size="10" font-family="monospace" fill="#e08a74">app.cpp:24:5: warning:</text>
+  <text x="54" y="96" font-size="10" font-family="monospace" fill="#e6edf3">配列で確保したものを delete で</text>
+  <text x="54" y="112" font-size="10" font-family="monospace" fill="#e6edf3">解放しています</text>
+  <text x="54" y="132" font-size="10" font-family="monospace" fill="#e6edf3">    delete buf;</text>
+
+  <rect x="42" y="158" width="314" height="136" rx="6" fill="#fff" stroke="#e0c4bc"/>
+  <text x="199" y="182" text-anchor="middle" font-size="11.5" fill="#1f2933" font-weight="bold">読み手が次にすること</text>
+  <text x="58" y="206" font-size="11" fill="#1f2933">1. buf の宣言を探す</text>
+  <text x="58" y="228" font-size="11" fill="#1f2933">2. どこで確保されたか追う</text>
+  <text x="58" y="250" font-size="11" fill="#1f2933">3. 本当に new[] か確認する</text>
+  <text x="58" y="272" font-size="11" fill="#a04a34" font-weight="bold">4. …面倒なので後回しにする</text>
+
+  <rect x="386" y="20" width="350" height="290" rx="10" fill="#eef5f0" stroke="#3d7a52" stroke-width="2.2"/>
+  <text x="561" y="46" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#3d7a52">Warning ＋ Note の診断</text>
+
+  <rect x="404" y="58" width="314" height="108" rx="6" fill="#1f2933"/>
+  <text x="416" y="80" font-size="10" font-family="monospace" fill="#e08a74">app.cpp:24:5: warning:</text>
+  <text x="416" y="96" font-size="10" font-family="monospace" fill="#e6edf3">配列で確保したものを delete で</text>
+  <text x="416" y="112" font-size="10" font-family="monospace" fill="#e6edf3">解放しています</text>
+  <text x="416" y="132" font-size="10" font-family="monospace" fill="#e6edf3">    delete buf;</text>
+  <text x="416" y="156" font-size="10" font-family="monospace" fill="#8fb8d0">app.cpp:19:17: note: ここで new[] で確保されています</text>
+
+  <rect x="404" y="178" width="314" height="116" rx="6" fill="#fff" stroke="#c9dfd1"/>
+  <text x="561" y="202" text-anchor="middle" font-size="11.5" fill="#1f2933" font-weight="bold">読み手が次にすること</text>
+  <text x="420" y="226" font-size="11" fill="#1f2933">1. 19 行目にジャンプ</text>
+  <text x="420" y="248" font-size="11" fill="#1f2933">2. 確認する</text>
+  <text x="420" y="270" font-size="11" fill="#3d7a52" font-weight="bold">3. delete[] に直す</text>
+  <text x="561" y="290" text-anchor="middle" font-size="10.5" fill="#5a6b7a">エラー一覧からダブルクリックで飛べる</text>
+  </g>
+</svg>
+<figcaption><b>図35-1</b>　1点診断と多点診断。<strong>差は「情報量」ではなく「直してもらえる確率」。</strong></figcaption>
+</figure>
+
+<h2>35.2 <code>new[]</code> / <code>delete</code> の不一致を完成させる</h2>
+
+<p>第27章で clang-query 上で完成させたクエリを、設定ファイルに移します。</p>
+
+<pre><code>  - Name: array-delete-mismatch
+    Query: |
+      match cxxDeleteExpr(
+        unless(isArrayForm()),
+        has(ignoringImplicit(
+          declRefExpr(to(varDecl(
+            hasInitializer(ignoringImplicit(cxxNewExpr(isArray()).bind("alloc")))
+          ).bind("var")))
+        )),
+        isExpansionInMainFile()
+      ).bind("del")
+    Diagnostic:
+      - BindName: del
+        Message: "new[] で確保した領域を delete で解放しています。delete[] を使ってください"
+        Level: Warning
+      - BindName: alloc
+        Message: "ここで new[] により確保されています"
+        Level: Note
+      - BindName: var
+        Message: "対象の変数はこれです"
+        Level: Note</code></pre>
+
+<figure>
+<svg viewBox="0 0 760 340" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="AST 上で2点を結ぶ経路">
+  <defs>
+    <marker id="a35" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#b4661a"/>
+    </marker>
+  </defs>
+  <g font-family="sans-serif">
+
+  <rect x="24" y="20" width="712" height="52" rx="8" fill="#1f2933"/>
+  <text x="46" y="42" font-size="11" font-family="monospace" fill="#e6edf3">    char* buf = new char[256];   <tspan fill="#8fb8d0">// 19 行目</tspan></text>
+  <text x="46" y="62" font-size="11" font-family="monospace" fill="#e6edf3">    delete buf;                  <tspan fill="#e08a74">// 24 行目</tspan></text>
+
+  <text x="30" y="98" font-size="12" font-weight="bold" fill="#5a6b7a" letter-spacing="1.5">クエリが AST 上でたどる経路</text>
+
+  <rect x="40" y="114" width="190" height="34" rx="6" fill="#a04a34"/>
+  <text x="135" y="136" text-anchor="middle" font-size="11" font-family="monospace" fill="#fff" font-weight="bold">CXXDeleteExpr → "del"</text>
+
+  <path d="M135,148 L135,172" fill="none" stroke="#b4661a" stroke-width="1.6" marker-end="url(#a35)"/>
+  <text x="150" y="166" font-size="10.5" font-family="monospace" fill="#b4661a">has(ignoringImplicit(…))</text>
+
+  <rect x="40" y="176" width="190" height="34" rx="6" fill="#eef4f9" stroke="#2f6f9f"/>
+  <text x="135" y="198" text-anchor="middle" font-size="11" font-family="monospace" fill="#1f2933">DeclRefExpr buf</text>
+
+  <path d="M135,210 L135,234" fill="none" stroke="#b4661a" stroke-width="1.6" marker-end="url(#a35)"/>
+  <text x="150" y="228" font-size="10.5" font-family="monospace" fill="#b4661a">to(varDecl(…))</text>
+
+  <rect x="40" y="238" width="190" height="34" rx="6" fill="#2f6f9f"/>
+  <text x="135" y="260" text-anchor="middle" font-size="11" font-family="monospace" fill="#fff" font-weight="bold">VarDecl buf → "var"</text>
+
+  <path d="M230,255 L290,255 L290,300 L340,300" fill="none" stroke="#b4661a" stroke-width="1.6" marker-end="url(#a35)"/>
+  <text x="300" y="278" font-size="10.5" font-family="monospace" fill="#b4661a">hasInitializer(…)</text>
+
+  <rect x="344" y="283" width="190" height="34" rx="6" fill="#3d7a52"/>
+  <text x="439" y="305" text-anchor="middle" font-size="11" font-family="monospace" fill="#fff" font-weight="bold">CXXNewExpr → "alloc"</text>
+
+  <rect x="420" y="114" width="316" height="150" rx="10" fill="#fbf4ea" stroke="#b4661a" stroke-width="1.8"/>
+  <text x="578" y="138" text-anchor="middle" font-size="12" font-weight="bold" fill="#b4661a">3 つの bind が 3 つの位置を指す</text>
+  <text x="440" y="164" font-size="11" fill="#1f2933"><tspan font-family="monospace" font-weight="bold">"del"</tspan>　 → 24 行目（Warning）</text>
+  <text x="440" y="188" font-size="11" fill="#1f2933"><tspan font-family="monospace" font-weight="bold">"var"</tspan>　 → 19 行目の <tspan font-family="monospace">buf</tspan>（Note）</text>
+  <text x="440" y="212" font-size="11" fill="#1f2933"><tspan font-family="monospace" font-weight="bold">"alloc"</tspan> → 19 行目の <tspan font-family="monospace">new char[256]</tspan>（Note）</text>
+  <text x="578" y="242" text-anchor="middle" font-size="11" fill="#5a6b7a">同じ行でも列が違う。ソース上で正確に指せる</text>
+  </g>
+</svg>
+<figcaption><b>図35-2</b>　AST 上で2点を結ぶ。<strong>bind は経路の途中に何個でも置ける。</strong></figcaption>
+</figure>
+
+<h2>35.3 <code>Note</code> の設計原則</h2>
+
+<h3>原則1：読み手の次の行動を減らす</h3>
+
+<p><code>Note</code> を足すかどうかの基準は、<strong>「読み手が Warning だけを見て、次に何をすべきか分かるか」</strong>です。分かるなら不要です。</p>
+
+<h3>原則2：数は最小に</h3>
+
+<p>上の例では <code>"var"</code> の <code>Note</code> を出していますが、<strong>これは削るべきです。</strong> <code>"alloc"</code> の Note があれば、変数の位置も自然に分かるからです。<code>Note</code> が増えるとエラー一覧が埋まり、かえって読まれなくなります。</p>
+
+<pre><code>    Diagnostic:
+      - BindName: del
+        Message: "new[] で確保した領域を delete で解放しています。delete[] を使ってください"
+        Level: Warning
+      - BindName: alloc
+        Message: "ここで new[] により確保されています"
+        Level: Note</code></pre>
+
+<h3>原則3：<code>Note</code> は単独で意味を持たなくてよい</h3>
+
+<p>「ここで確保されています」というメッセージは、単独では何のことか分かりません。<strong>それでよいのです。</strong> <code>Note</code> は Warning に付随するものであり、Warning のメッセージと合わせて読まれます。</p>
+
+<div class="tip">
+<span class="t">メッセージの分業</span>
+<ul style="margin-top:.4rem">
+  <li><strong>Warning</strong>：何が問題か ＋ どう直すか（第31章の3要素）</li>
+  <li><strong>Note</strong>：なぜそう判定したのか（根拠となる位置を指す）</li>
+</ul>
+<p style="margin-top:.5rem">Note に長い説明を書く必要はありません。<strong>位置を指すこと自体が情報</strong>だからです。</p>
+</div>
+
+<h2>35.4 <code>Note</code> が有効なパターン</h2>
+
+<table>
+<tr><th>パターン</th><th>Warning の位置</th><th>Note の位置</th></tr>
+<tr><td>確保と解放の不一致</td><td>解放（<code>delete</code>）</td><td>確保（<code>new[]</code>）</td></tr>
+<tr><td>規約違反（継承由来）</td><td>違反しているクラス</td><td>根拠となる基底クラス（第34章）</td></tr>
+<tr><td>非推奨 API の使用</td><td>呼び出し箇所</td><td>関数の宣言（<code>[[deprecated]]</code> が付いている位置）</td></tr>
+<tr><td>ペアで使うべき API の片方欠落</td><td>片方だけを呼んでいる箇所</td><td>対になるべき API の位置</td></tr>
+<tr><td>型の不整合</td><td>使用箇所</td><td>型の宣言</td></tr>
+</table>
+
+<h2>35.5 <code>Note</code> の限界</h2>
+
+<div class="warn">
+<span class="t">AST 上で結べる範囲しか指せない</span>
+<p><code>Note</code> を出せるのは、<strong>クエリのマッチの中で bind できたノード</strong>だけです。つまり、1つの Matcher 式でたどり着ける範囲に限られます。</p>
+<ul style="margin-top:.5rem">
+  <li><strong>指せる</strong>：同じ翻訳単位内で、AST 上の経路でつながっているもの</li>
+  <li><strong>指せない</strong>：別の翻訳単位にあるもの、経路がつながっていないもの</li>
+  <li><strong>指せない</strong>：「この変数が過去にどう使われたか」のような、経路をたどる情報（第17章のフロー解析の領分）</li>
+</ul>
+<p style="margin-top:.5rem">たとえば「確保と解放が別の関数にある」ケースは、AST では結べません。<strong>それはフロー解析が必要な問題であり、Query Based Custom Check の限界です（第42章）。</strong></p>
+</div>
+
+<h2>35.6 【ハンズオン】読み手に届く診断を作る</h2>
+
+<div class="hands">
+<div class="hd">HANDS-ON 35　多点診断を設計する</div>
+<div class="bd">
+<ol>
+  <li><strong>検証ファイルを作る。</strong> <code>tests\custom-checks\notes.cpp</code> に、多点診断が効く例を書きます。
+<pre><code>#include &lt;cstddef&gt;
+
+void localCase() {
+    char* buf = new char[256];
+    // …長い処理…
+    delete buf;                  // 検出：同じ関数内
+}
+
+void correctCase() {
+    char* buf = new char[256];
+    delete[] buf;                // 検出しない
+}
+
+void scalarCase() {
+    char* p = new char;
+    delete p;                    // 検出しない（new[] ではない）
+}
+
+char* allocate() { return new char[256]; }
+void crossFunction() {
+    char* buf = allocate();
+    delete buf;                  // 検出できない（関数をまたぐ）← 限界の実例
+}</code></pre>
+  </li>
+
+  <li><strong>クエリを確認する。</strong> <code>clang-query</code> で 35.2 節のクエリを実行し、<code>localCase</code> だけが検出されることを確認します。<strong><code>crossFunction</code> が検出されないことも確認してください。これが 35.5 節の限界の実例です。</strong></li>
+
+  <li><strong>bind の位置を1つずつ確認する。</strong> 3つの bind（<code>del</code> / <code>var</code> / <code>alloc</code>）が、それぞれソースのどこを指すかを <code>clang-query</code> の出力で確認します。<strong>行だけでなく列も見てください。</strong></li>
+
+  <li><strong>設定ファイルに移す。</strong> まず3つの <code>Note</code> をすべて出す形で書き、実行します。エラー一覧がどう見えるかを確認してください。</li>
+
+  <li><strong>Note を削る。</strong> 原則2 に従って <code>"var"</code> の Note を削除し、再度実行します。<strong>情報が減っても、直すのに困らないことを確認してください。</strong> これが「最小の Note」という判断です。</li>
+
+  <li><strong>Visual Studio で見る。</strong> エラー一覧に Warning と Note がどう並ぶかを確認します。<strong>Note の行をダブルクリックして、確保箇所にジャンプできるか</strong>を試してください。これが多点診断の実用価値です。</li>
+
+  <li><strong>第34章のチェックに Note を足す。</strong> <code>component-naming</code> で、基底クラスを指す Note が出ることを確認します。<code>SpriteRenderComponent</code> のような間接継承の場合、<strong>note がどの基底を指すか</strong>を確認してください。</li>
+
+  <li><strong>限界を記録する。</strong> <code>docs\clang-tidy-decisions.md</code> に、<code>array-delete-mismatch</code> の限界を明記します。
+<pre><code>## custom-array-delete-mismatch
+- 検出できる: 同一関数内で、変数の初期化式が new[] のケース
+- 検出できない: 関数をまたぐケース、宣言と代入が分かれているケース
+- 補完手段: clang-analyzer-cplusplus.NewDelete（CI の Tier 2）で拾う</code></pre>
+    <strong>「何が検出できないか」を書いておくことが、過信を防ぎます。</strong></li>
+
+  <li><strong>標準チェックと比較する。</strong> 同じファイルに <code>clang-analyzer-*</code> を当て、<code>crossFunction</code> が検出されるかを確認します。<strong>カスタムチェックと標準チェックは競合ではなく補完関係にある</strong>ことを確認してください。</li>
+</ol>
+</div>
+</div>
+
+<div class="summary">
+<h2>この章のまとめ</h2>
+<ul>
+  <li><code>Note</code> の価値は情報量ではなく、<strong>直してもらえる確率を上げること</strong>。</li>
+  <li>bind は Matcher 式の経路の途中に何個でも置ける。それぞれが別のソース位置を指せる。</li>
+  <li><strong>原則1</strong>：読み手が Warning だけで次の行動が分かるなら Note は不要。</li>
+  <li><strong>原則2</strong>：Note は最小に。増えるとエラー一覧が埋まり、読まれなくなる。</li>
+  <li><strong>原則3</strong>：Note は単独で意味を持たなくてよい。位置を指すこと自体が情報。</li>
+  <li>メッセージの分業 ── <strong>Warning は「何が問題でどう直すか」、Note は「なぜそう判定したか」。</strong></li>
+  <li><strong>Note を出せるのは、1つの Matcher 式でたどり着ける範囲だけ。</strong> 関数をまたぐ関係は結べない ── それはフロー解析の領分。</li>
+  <li>検出できないケースを記録に残す。過信を防ぐ。</li>
+</ul>
+</div>
+
+<p class="next"><strong>次章：</strong> 実践編は終わりです。第36章「カスタムチェックのデバッグ手順」では、ここまでで必ず遭遇したはずの「clang-query では動くのに設定ファイルでは動かない」を体系的に切り分けます。</p>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第8章 チェックのオプションを変える ─ Clang-Tidy入門</title>
+<style>
+  :root{
+    --ink:#1f2933; --sub:#5a6b7a; --line:#d8dee4; --bg:#ffffff;
+    --code-bg:#f6f8fa; --code-line:#e2e8ee;
+    --accent:#2f6f9f; --accent-bg:#eef4f9;
+    --warn:#b4661a; --warn-bg:#fbf4ea;
+    --ok:#3d7a52; --ok-bg:#eef5f0;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0; background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Noto Sans JP","Meiryo",sans-serif;
+    font-size:16px; line-height:1.95; font-feature-settings:"palt" 1;}
+  .page{max-width:47rem; margin:0 auto; padding:3.5rem 1.6rem 6rem}
+  .chap-no{font-size:.8rem; letter-spacing:.22em; color:var(--accent); font-weight:700; margin:0 0 .5rem}
+  h1{font-size:1.85rem; line-height:1.5; margin:0 0 .6rem; letter-spacing:.01em}
+  .lede{color:var(--sub); font-size:1rem; margin:0 0 2.2rem; padding-bottom:1.6rem; border-bottom:2px solid var(--ink)}
+  h2{font-size:1.28rem; margin:3rem 0 1rem; padding-left:.7rem; border-left:4px solid var(--accent); line-height:1.6}
+  h3{font-size:1.05rem; margin:2.2rem 0 .7rem}
+  h3::before{content:"◆ "; color:var(--accent); font-size:.8em}
+  p{margin:0 0 1.1rem}
+  ul,ol{margin:0 0 1.2rem; padding-left:1.6rem}
+  li{margin:.35rem 0}
+  code{font-family:"Cascadia Mono","Consolas","SFMono-Regular",monospace; font-size:.9em;
+       background:var(--code-bg); border:1px solid var(--code-line); border-radius:4px; padding:.08em .35em}
+  pre{background:var(--code-bg); border:1px solid var(--code-line); border-radius:8px;
+      padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.7}
+  pre code{background:none; border:none; padding:0; font-size:.86rem}
+  pre.term{background:#1f2933; border-color:#1f2933; color:#e6edf3}
+  pre.term code{color:#e6edf3}
+  pre.term .p{color:#7fb2d6}
+  pre.term .o{color:#9fb3c0}
+  pre.term .w{color:#e8b075}
+  .cap{font-size:.82rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+  figure{margin:2rem 0 2.2rem}
+  figure svg{display:block; width:100%; height:auto; border:1px solid var(--line); border-radius:8px; background:#fff}
+  figcaption{font-size:.85rem; color:var(--sub); margin-top:.6rem}
+  figcaption b{color:var(--ink)}
+  .box{border-radius:8px; padding:1rem 1.2rem; margin:1.6rem 0; font-size:.94rem}
+  .box p:last-child{margin-bottom:0}
+  .box .t{font-weight:700; display:block; margin-bottom:.35rem; font-size:.88rem; letter-spacing:.04em}
+  .note{background:var(--accent-bg); border-left:4px solid var(--accent)} .note .t{color:var(--accent)}
+  .warn{background:var(--warn-bg); border-left:4px solid var(--warn)} .warn .t{color:var(--warn)}
+  .tip{background:var(--ok-bg); border-left:4px solid var(--ok)} .tip .t{color:var(--ok)}
+  .hands{border:1px solid var(--line); border-radius:10px; margin:2rem 0; overflow:hidden}
+  .hands>.hd{background:var(--ink); color:#fff; padding:.55rem 1.1rem; font-size:.85rem; letter-spacing:.1em; font-weight:700}
+  .hands>.bd{padding:1.3rem 1.3rem .4rem}
+  .hands ol{counter-reset:step; list-style:none; padding-left:0}
+  .hands ol>li{counter-increment:step; position:relative; padding-left:2.4rem; margin:0 0 1.2rem}
+  .hands ol>li::before{content:counter(step); position:absolute; left:0; top:.25rem;
+    width:1.7rem; height:1.7rem; border-radius:50%; background:var(--accent); color:#fff;
+    font-size:.82rem; font-weight:700; display:flex; align-items:center; justify-content:center; line-height:1}
+  table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+  th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+  th{background:var(--code-bg); font-weight:700}
+  .summary{border:2px solid var(--ink); border-radius:10px; padding:1.3rem 1.5rem; margin:3rem 0 1rem}
+  .summary h2{margin:0 0 .8rem; border:none; padding:0; font-size:1.1rem}
+  .summary ul{margin-bottom:0}
+  .next{color:var(--sub); font-size:.94rem; border-top:1px solid var(--line); padding-top:1.2rem; margin-top:2.5rem}
+  @media (max-width:600px){ body{font-size:15px} .page{padding:2.2rem 1.1rem 4rem} h1{font-size:1.5rem} }
+</style>
+</head>
+<body>
+<div class="page">
+
+<p class="chap-no">第 8 章</p>
+<h1>チェックのオプションを変える</h1>
+<p class="lede">チェックは「有効か無効か」の二択ではありません。多くのチェックは判定を調整するツマミを持っています。「関数が長すぎる」の“長すぎる”が何行なのか、「マジックナンバー」から何を除外するのか、識別子の命名規約はどの形式か ── これらはすべて設定可能です。オプションを使いこなせると、「このチェックは使えない」と諦めていたものが使えるようになります。</p>
+
+<h2>8.1 チェック＝判定ロジック＋ツマミ</h2>
+
+<figure>
+<svg viewBox="0 0 760 280" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="チェックは判定ロジックとオプションから成る">
+  <defs>
+    <marker id="i" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5a6b7a"/>
+    </marker>
+  </defs>
+  <g font-family="sans-serif">
+
+  <rect x="24" y="86" width="130" height="60" rx="8" fill="#1f2933"/>
+  <text x="89" y="112" text-anchor="middle" fill="#fff" font-size="12.5" font-weight="bold">AST</text>
+  <text x="89" y="130" text-anchor="middle" fill="#b8c4cd" font-size="11">解析対象</text>
+
+  <line x1="154" y1="116" x2="196" y2="116" stroke="#5a6b7a" stroke-width="1.6" marker-end="url(#i)"/>
+
+  <rect x="200" y="46" width="290" height="140" rx="10" fill="#eef4f9" stroke="#2f6f9f" stroke-width="1.8"/>
+  <text x="345" y="74" text-anchor="middle" font-size="13.5" font-weight="bold" fill="#2f6f9f">readability-function-size</text>
+
+  <rect x="220" y="88" width="250" height="34" rx="5" fill="#fff" stroke="#c5d6e4"/>
+  <text x="345" y="110" text-anchor="middle" font-size="12" fill="#1f2933">判定ロジック（変更できない）</text>
+
+  <rect x="220" y="130" width="250" height="42" rx="5" fill="#b4661a"/>
+  <text x="345" y="148" text-anchor="middle" font-size="12" fill="#fff" font-weight="bold">オプション（変更できる）</text>
+  <text x="345" y="164" text-anchor="middle" font-size="10.5" fill="#fde9d0">LineThreshold / StatementThreshold / …</text>
+
+  <line x1="490" y1="116" x2="532" y2="116" stroke="#5a6b7a" stroke-width="1.6" marker-end="url(#i)"/>
+
+  <rect x="536" y="60" width="200" height="52" rx="8" fill="#f7e9e5" stroke="#a04a34"/>
+  <text x="636" y="82" text-anchor="middle" font-size="12" fill="#a04a34" font-weight="bold">しきい値 80 行</text>
+  <text x="636" y="100" text-anchor="middle" font-size="11" fill="#1f2933">→ 警告 3 件</text>
+
+  <rect x="536" y="122" width="200" height="52" rx="8" fill="#eef5f0" stroke="#3d7a52"/>
+  <text x="636" y="144" text-anchor="middle" font-size="12" fill="#3d7a52" font-weight="bold">しきい値 200 行</text>
+  <text x="636" y="162" text-anchor="middle" font-size="11" fill="#1f2933">→ 警告 0 件</text>
+
+  <rect x="24" y="210" width="712" height="50" rx="8" fill="#f4f6f8" stroke="#d8dee4"/>
+  <text x="380" y="232" text-anchor="middle" font-size="12.5" fill="#1f2933">同じチェック・同じコードでも、<tspan font-weight="bold">オプション次第で結果が変わる</tspan></text>
+  <text x="380" y="250" text-anchor="middle" font-size="11.5" fill="#5a6b7a">「このチェックは自分のコードに合わない」の多くは、オプションで解決できる</text>
+  </g>
+</svg>
+<figcaption><b>図8-1</b>　チェックの構造。判定ロジックは固定だが、そこに与えるパラメータは設定で変えられる。</figcaption>
+</figure>
+
+<p>オプションが役に立つ典型的な場面は次の3つです。</p>
+
+<ul>
+  <li><strong>しきい値が自分の基準と合わない</strong>：「関数は50行まで」がチームの規約なのに、既定値が違う。</li>
+  <li><strong>正しいのに警告される（偽陽性）</strong>：意味のある定数まで「マジックナンバー」と言われる。</li>
+  <li><strong>チームの規約を機械化したい</strong>：命名規則を強制する。</li>
+</ul>
+
+<h2>8.2 書き方</h2>
+
+<p><code>.clang-tidy</code> の <code>CheckOptions</code> にキーと値の対を並べます。キーは <strong><code>チェック名.オプション名</code></strong> という形です。</p>
+
+<pre><code>---
+Checks: '-*,readability-function-size,readability-magic-numbers'
+
+CheckOptions:
+  readability-function-size.LineThreshold: '50'
+  readability-function-size.ParameterThreshold: '5'
+  readability-magic-numbers.IgnoredIntegerValues: '1;2;3;4;8;16;32;64;'
+...</code></pre>
+
+<div class="note">
+<span class="t">値はすべて文字列として書く</span>
+<p>数値も真偽値も、クォートで囲んだ文字列として書くのが安全です（<code>'50'</code>、<code>'true'</code>）。また、<strong>複数の値を並べるオプションはセミコロン区切り</strong> で、末尾にもセミコロンを付ける流儀が一般的です。カンマではありません。</p>
+</div>
+
+<h3>キーはチェックごとに独立している</h3>
+
+<p>オプション名はチェック名で名前空間が切られています。したがって、別名関係にあるチェック（第6章）でも、オプションはそれぞれに設定する必要があります。</p>
+
+<pre><code># hicpp-function-size は readability-function-size の別名だが、
+# オプションはそれぞれ独立して指定する
+CheckOptions:
+  readability-function-size.LineThreshold: '50'
+  hicpp-function-size.LineThreshold: '50'</code></pre>
+
+<h2>8.3 何が設定できるかを知る</h2>
+
+<p>オプション名を推測で書いても効きません。<strong>存在しないオプション名は無視される</strong> ので、間違いに気づけません。確実な調べ方は2つあります。</p>
+
+<h3>方法1：<code>--dump-config</code> で現在値を全部出す</h3>
+
+<p>第7章で見たコマンドです。有効なチェックが持つオプションが、既定値つきで全部並びます。</p>
+
+<pre class="term"><code><span class="p">&gt;</span> clang-tidy --checks="-*,readability-function-size" --dump-config
+<span class="o">---
+Checks:  '-*,readability-function-size'
+...
+CheckOptions:
+  readability-function-size.BranchThreshold:    '4294967295'
+  readability-function-size.LineThreshold:      '4294967295'
+  readability-function-size.NestingThreshold:   '4294967295'
+  readability-function-size.ParameterThreshold: '4294967295'
+  readability-function-size.StatementThreshold: '800'
+  readability-function-size.VariableThreshold:  '4294967295'
+...</span></code></pre>
+
+<p>ここに出た名前を、そのままコピーして使うのが最も確実です。</p>
+
+<div class="tip">
+<span class="t">巨大な数値は「無効」の意味</span>
+<p><code>4294967295</code> は 32bit 符号なし整数の最大値です。「しきい値なし＝このサブチェックは動かない」ことを表しています。つまり <code>readability-function-size</code> は既定では文数（800）しか見ておらず、行数・引数の数・ネストの深さは<strong>設定しない限りチェックされません</strong>。「有効にしたのに何も出ない」の原因がこれです。</p>
+</div>
+
+<h3>方法2：公式ドキュメントのチェック個別ページ</h3>
+
+<p>各チェックには専用のドキュメントページがあり、オプションの一覧・既定値・意味・例が載っています。<code>--dump-config</code> は名前と現在値しか教えてくれないので、<strong>意味を知るにはこちらを見ます</strong>。第4章で確認したバージョンに対応するドキュメントを見るようにしてください。</p>
+
+<h2>8.4 よく使うオプション</h2>
+
+<h3>関数の複雑さ ── <code>readability-function-size</code></h3>
+
+<pre><code>CheckOptions:
+  readability-function-size.LineThreshold: '80'        # 行数
+  readability-function-size.StatementThreshold: '100'  # 文の数
+  readability-function-size.BranchThreshold: '20'      # 分岐の数
+  readability-function-size.ParameterThreshold: '6'    # 引数の数
+  readability-function-size.NestingThreshold: '4'      # ネストの深さ
+  readability-function-size.VariableThreshold: '20'    # ローカル変数の数</code></pre>
+
+<p>既存コードベースに導入するときは、<strong>まず現状より少し厳しい値から始める</strong> のが実践的です。いきなり理想値にすると数百件出て、誰も見なくなります（第39章）。</p>
+
+<h3>マジックナンバー ── <code>readability-magic-numbers</code></h3>
+
+<pre><code>CheckOptions:
+  readability-magic-numbers.IgnoredIntegerValues: '1;2;3;4;8;16;32;64;100;'
+  readability-magic-numbers.IgnorePowersOf2IntegerValues: 'true'
+  readability-magic-numbers.IgnoredFloatingPointValues: '0.5;1.0;100.0;'</code></pre>
+
+<p>このチェックは既定のままだと大量に反応します。<code>0</code> と <code>1</code> だけ許して他は全部警告、という運用は現実的ではありません。ビットマスクを扱うコードなら <code>IgnorePowersOf2IntegerValues</code> が効きます。</p>
+
+<h3>短すぎる識別子 ── <code>readability-identifier-length</code></h3>
+
+<pre><code>CheckOptions:
+  readability-identifier-length.MinimumVariableNameLength: '3'
+  readability-identifier-length.IgnoredVariableNames: '^[ijkxyzn]$'
+  readability-identifier-length.MinimumParameterNameLength: '3'</code></pre>
+
+<p>ループカウンタの <code>i</code> まで警告されると邪魔なので、正規表現で例外を作ります。</p>
+
+<h3>命名規約 ── <code>readability-identifier-naming</code></h3>
+
+<p>オプション数が最も多く、最も実用価値の高いチェックです。<strong>識別子の種類ごとに</strong> 命名形式を指定できます。</p>
+
+<figure>
+<svg viewBox="0 0 760 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="readability-identifier-naming のオプション構造">
+  <g font-family="sans-serif">
+
+  <rect x="24" y="20" width="712" height="40" rx="8" fill="#2f6f9f"/>
+  <text x="380" y="45" text-anchor="middle" fill="#fff" font-size="14" font-weight="bold">readability-identifier-naming</text>
+
+  <text x="380" y="82" text-anchor="middle" font-size="11.5" fill="#5a6b7a">識別子の「種類」ごとにオプションが用意されている</text>
+
+  <!-- kinds -->
+  <rect x="24" y="94" width="168" height="98" rx="8" fill="#eef4f9" stroke="#2f6f9f"/>
+  <text x="108" y="118" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#2f6f9f">型</text>
+  <text x="40" y="140" font-size="11" fill="#1f2933" font-family="monospace">ClassCase</text>
+  <text x="40" y="158" font-size="11" fill="#1f2933" font-family="monospace">StructCase</text>
+  <text x="40" y="176" font-size="11" fill="#1f2933" font-family="monospace">EnumCase</text>
+
+  <rect x="204" y="94" width="168" height="98" rx="8" fill="#fbf4ea" stroke="#b4661a"/>
+  <text x="288" y="118" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#b4661a">関数</text>
+  <text x="220" y="140" font-size="11" fill="#1f2933" font-family="monospace">FunctionCase</text>
+  <text x="220" y="158" font-size="11" fill="#1f2933" font-family="monospace">MethodCase</text>
+  <text x="220" y="176" font-size="11" fill="#1f2933" font-family="monospace">ParameterCase</text>
+
+  <rect x="384" y="94" width="168" height="98" rx="8" fill="#eef5f0" stroke="#3d7a52"/>
+  <text x="468" y="118" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#3d7a52">変数</text>
+  <text x="400" y="140" font-size="11" fill="#1f2933" font-family="monospace">VariableCase</text>
+  <text x="400" y="158" font-size="11" fill="#1f2933" font-family="monospace">PrivateMemberCase</text>
+  <text x="400" y="176" font-size="11" fill="#1f2933" font-family="monospace">PrivateMemberSuffix</text>
+
+  <rect x="564" y="94" width="172" height="98" rx="8" fill="#f4f6f8" stroke="#5a6b7a"/>
+  <text x="650" y="118" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#5a6b7a">定数ほか</text>
+  <text x="580" y="140" font-size="11" fill="#1f2933" font-family="monospace">ConstantCase</text>
+  <text x="580" y="158" font-size="11" fill="#1f2933" font-family="monospace">NamespaceCase</text>
+  <text x="580" y="176" font-size="11" fill="#1f2933" font-family="monospace">MacroDefinitionCase</text>
+
+  <!-- values -->
+  <text x="380" y="222" text-anchor="middle" font-size="11.5" fill="#5a6b7a">それぞれに指定できる値（抜粋）</text>
+
+  <rect x="24" y="234" width="712" height="66" rx="8" fill="#1f2933"/>
+  <text x="60" y="258" font-size="12" font-family="monospace" fill="#a3d9a5">lower_case</text>
+  <text x="200" y="258" font-size="12" font-family="monospace" fill="#a3d9a5">UPPER_CASE</text>
+  <text x="345" y="258" font-size="12" font-family="monospace" fill="#a3d9a5">camelBack</text>
+  <text x="470" y="258" font-size="12" font-family="monospace" fill="#a3d9a5">CamelCase</text>
+  <text x="610" y="258" font-size="12" font-family="monospace" fill="#a3d9a5">aNy_CasE</text>
+
+  <text x="60" y="284" font-size="11" fill="#b8c4cd">Prefix / Suffix 系のオプションを併用すると </text>
+  <text x="330" y="284" font-size="11" font-family="monospace" fill="#e8b075">m_buffer</text>
+  <text x="405" y="284" font-size="11" fill="#b8c4cd">や</text>
+  <text x="430" y="284" font-size="11" font-family="monospace" fill="#e8b075">buffer_</text>
+  <text x="490" y="284" font-size="11" fill="#b8c4cd">のような規約も表現できる</text>
+  </g>
+</svg>
+<figcaption><b>図8-2</b>　<code>readability-identifier-naming</code> の構造。識別子の種類 × 命名形式の組み合わせで、たいていのチーム規約を表現できる。</figcaption>
+</figure>
+
+<p>題材コードの <code>ConfigLoader</code> に合わせて書くと、次のようになります。</p>
+
+<pre><code>CheckOptions:
+  readability-identifier-naming.ClassCase: 'CamelCase'
+  readability-identifier-naming.StructCase: 'CamelCase'
+  readability-identifier-naming.FunctionCase: 'lower_case'
+  readability-identifier-naming.VariableCase: 'lower_case'
+  readability-identifier-naming.ParameterCase: 'lower_case'
+  readability-identifier-naming.PrivateMemberCase: 'lower_case'
+  readability-identifier-naming.PrivateMemberSuffix: '_'
+  readability-identifier-naming.ConstantCase: 'UPPER_CASE'
+  readability-identifier-naming.NamespaceCase: 'lower_case'</code></pre>
+
+<p>このチェックには <strong>自動修正が付いています</strong>。規約に合わない識別子を、参照箇所も含めて一括リネームできます（第11章）。ただし影響範囲が大きいので、扱いには注意が必要です。</p>
+
+<h2>8.5 継承時のオプションの扱い</h2>
+
+<p>第7章の <code>InheritParentConfig: true</code> のとき、<code>CheckOptions</code> は <strong>キー単位でマージ</strong> されます。子で指定したキーだけが上書きされ、指定しなかったキーは親の値が残ります。</p>
+
+<pre><code># ルートの .clang-tidy
+CheckOptions:
+  readability-function-size.LineThreshold: '80'
+  readability-function-size.ParameterThreshold: '6'
+
+# src/legacy/.clang-tidy
+InheritParentConfig: true
+CheckOptions:
+  readability-function-size.LineThreshold: '300'   # ← ここだけ緩める
+
+# legacy 配下での実効値
+#   LineThreshold: 300      （子で上書き）
+#   ParameterThreshold: 6   （親から引き継ぎ）</code></pre>
+
+<p><code>Checks</code> が連結だったのに対し、<code>CheckOptions</code> はキー単位の上書きです。この違いを押さえておいてください。</p>
+
+<h2>8.6 【ハンズオン】命名規約を機械化する</h2>
+
+<div class="hands">
+<div class="hd">HANDS-ON 8　オプションで挙動を変える</div>
+<div class="bd">
+<ol>
+  <li><strong>既定値を観察する。</strong> 開発者コマンドプロンプトで、
+<pre><code>clang-tidy --checks="-*,readability-function-size" --dump-config</code></pre>
+    <code>LineThreshold</code> が <code>4294967295</code>、つまり事実上無効になっていることを確認します。</li>
+
+  <li><strong>しきい値を入れる。</strong> <code>TidyLab\.clang-tidy</code> の <code>Checks</code> に <code>readability-function-size</code> を足し、次を書きます。
+<pre><code>CheckOptions:
+  readability-function-size.LineThreshold: '20'
+  readability-function-size.StatementThreshold: '15'</code></pre>
+    ビルドすると <code>ConfigLoader::load()</code> が引っかかるはずです。しきい値を <code>60</code> に上げて、警告が消えることを確認してください。<strong>同じコード・同じチェックで結果が変わる</strong> ことを体験するのが目的です。</li>
+
+  <li><strong>命名規約を定める。</strong> <code>Checks</code> に <code>readability-identifier-naming</code> を足し、8.4 節の <code>CheckOptions</code> をそのまま貼ります。</li>
+
+  <li><strong>題材コードで確認する。</strong> ビルドすると、<code>config_loader.h</code> の <code>Entry</code> のメンバや <code>ConfigLoader</code> のメンバ変数に対して指摘が出ます。<code>buffer_</code> や <code>path_</code> は <code>PrivateMemberSuffix: '_'</code> を満たしているので通り、満たさないものだけが警告されることを確認します。</li>
+
+  <li><strong>わざと違反させる。</strong> <code>config_loader.h</code> のメンバを一時的に <code>char* Buffer;</code> に変えてビルドし、次のような警告が出ることを確認します。
+<pre><code>invalid case style for private member 'Buffer' [readability-identifier-naming]</code></pre>
+    確認したら元に戻します。</li>
+
+  <li><strong>マジックナンバーを調整する。</strong> <code>Checks</code> に <code>readability-magic-numbers</code> を足してビルドし、<code>config_loader.cpp</code> の <code>4096</code> や <code>4095</code> が警告されることを確認します。次に
+<pre><code>  readability-magic-numbers.IgnorePowersOf2IntegerValues: 'true'</code></pre>
+    を足すと <code>4096</code> だけが消え、<code>4095</code> は残ることを確認します。</li>
+
+  <li><strong>存在しないオプション名を試す。</strong>
+<pre><code>  readability-function-size.LineThresholdXX: '10'</code></pre>
+    と書いてもエラーにならず、単に無視されることを確認します。<strong>タイプミスは静かに失敗する</strong> という感覚を持っておいてください。</li>
+</ol>
+</div>
+</div>
+
+<div class="warn">
+<span class="t">オプションで黙らせるか、警告を受け入れるか</span>
+<p>警告がうるさいとき、しきい値を緩めて消すのは簡単です。しかしそれは「ルールを自分に合わせた」のか「問題から目を逸らした」のか、区別が必要です。判断の目安は <strong>「その値をチームの規約として文書に書けるか」</strong> です。「関数は80行まで」は書けます。「この関数だけ例外」は書けません。後者は次章の <code>NOLINT</code> の出番です。</p>
+</div>
+
+<div class="summary">
+<h2>この章のまとめ</h2>
+<ul>
+  <li>チェックは判定ロジックとオプションから成る。同じチェックでもオプション次第で結果が変わる。</li>
+  <li>書式は <code>CheckOptions</code> に <code>チェック名.オプション名: '値'</code>。値は文字列、複数値はセミコロン区切り。</li>
+  <li>設定できるオプションは <code>--dump-config</code> で確認する。<strong>存在しないオプション名は黙って無視される。</strong></li>
+  <li><code>4294967295</code> のような巨大な既定値は「そのサブチェックは無効」の意味。有効にしたのに何も出ない原因になる。</li>
+  <li><code>readability-identifier-naming</code> は識別子の種類ごとにオプションを持ち、チーム規約の機械化に最も有効。</li>
+  <li>継承時、<code>Checks</code> は連結、<code>CheckOptions</code> はキー単位の上書き。</li>
+  <li>しきい値を緩めるのは「規約として書けるとき」だけ。個別の例外は次章の抑制で扱う。</li>
+</ul>
+</div>
+
+<p class="next"><strong>次章：</strong> 第9章「警告を抑制する作法」では、<code>NOLINT</code> 系のコメントで個別の箇所だけ警告を止める方法を扱います。安易に使えば静的解析は形骸化し、使わなければ運用が回らない ── その線引きが主題です。</p>
+
+</div>
+</body>
+</html>

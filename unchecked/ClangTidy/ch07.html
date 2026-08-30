@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第7章 .clang-tidy 設定ファイルへ移行する ─ Clang-Tidy入門</title>
+<style>
+  :root{
+    --ink:#1f2933; --sub:#5a6b7a; --line:#d8dee4; --bg:#ffffff;
+    --code-bg:#f6f8fa; --code-line:#e2e8ee;
+    --accent:#2f6f9f; --accent-bg:#eef4f9;
+    --warn:#b4661a; --warn-bg:#fbf4ea;
+    --ok:#3d7a52; --ok-bg:#eef5f0;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0; background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Noto Sans JP","Meiryo",sans-serif;
+    font-size:16px; line-height:1.95; font-feature-settings:"palt" 1;}
+  .page{max-width:47rem; margin:0 auto; padding:3.5rem 1.6rem 6rem}
+  .chap-no{font-size:.8rem; letter-spacing:.22em; color:var(--accent); font-weight:700; margin:0 0 .5rem}
+  h1{font-size:1.85rem; line-height:1.5; margin:0 0 .6rem; letter-spacing:.01em}
+  .lede{color:var(--sub); font-size:1rem; margin:0 0 2.2rem; padding-bottom:1.6rem; border-bottom:2px solid var(--ink)}
+  h2{font-size:1.28rem; margin:3rem 0 1rem; padding-left:.7rem; border-left:4px solid var(--accent); line-height:1.6}
+  h3{font-size:1.05rem; margin:2.2rem 0 .7rem}
+  h3::before{content:"◆ "; color:var(--accent); font-size:.8em}
+  p{margin:0 0 1.1rem}
+  ul,ol{margin:0 0 1.2rem; padding-left:1.6rem}
+  li{margin:.35rem 0}
+  code{font-family:"Cascadia Mono","Consolas","SFMono-Regular",monospace; font-size:.9em;
+       background:var(--code-bg); border:1px solid var(--code-line); border-radius:4px; padding:.08em .35em}
+  pre{background:var(--code-bg); border:1px solid var(--code-line); border-radius:8px;
+      padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.7}
+  pre code{background:none; border:none; padding:0; font-size:.86rem}
+  pre.term{background:#1f2933; border-color:#1f2933; color:#e6edf3}
+  pre.term code{color:#e6edf3}
+  pre.term .p{color:#7fb2d6}
+  pre.term .o{color:#9fb3c0}
+  .cap{font-size:.82rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+  figure{margin:2rem 0 2.2rem}
+  figure svg{display:block; width:100%; height:auto; border:1px solid var(--line); border-radius:8px; background:#fff}
+  figcaption{font-size:.85rem; color:var(--sub); margin-top:.6rem}
+  figcaption b{color:var(--ink)}
+  .box{border-radius:8px; padding:1rem 1.2rem; margin:1.6rem 0; font-size:.94rem}
+  .box p:last-child{margin-bottom:0}
+  .box .t{font-weight:700; display:block; margin-bottom:.35rem; font-size:.88rem; letter-spacing:.04em}
+  .note{background:var(--accent-bg); border-left:4px solid var(--accent)} .note .t{color:var(--accent)}
+  .warn{background:var(--warn-bg); border-left:4px solid var(--warn)} .warn .t{color:var(--warn)}
+  .tip{background:var(--ok-bg); border-left:4px solid var(--ok)} .tip .t{color:var(--ok)}
+  .hands{border:1px solid var(--line); border-radius:10px; margin:2rem 0; overflow:hidden}
+  .hands>.hd{background:var(--ink); color:#fff; padding:.55rem 1.1rem; font-size:.85rem; letter-spacing:.1em; font-weight:700}
+  .hands>.bd{padding:1.3rem 1.3rem .4rem}
+  .hands ol{counter-reset:step; list-style:none; padding-left:0}
+  .hands ol>li{counter-increment:step; position:relative; padding-left:2.4rem; margin:0 0 1.2rem}
+  .hands ol>li::before{content:counter(step); position:absolute; left:0; top:.25rem;
+    width:1.7rem; height:1.7rem; border-radius:50%; background:var(--accent); color:#fff;
+    font-size:.82rem; font-weight:700; display:flex; align-items:center; justify-content:center; line-height:1}
+  table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+  th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+  th{background:var(--code-bg); font-weight:700}
+  .summary{border:2px solid var(--ink); border-radius:10px; padding:1.3rem 1.5rem; margin:3rem 0 1rem}
+  .summary h2{margin:0 0 .8rem; border:none; padding:0; font-size:1.1rem}
+  .summary ul{margin-bottom:0}
+  .next{color:var(--sub); font-size:.94rem; border-top:1px solid var(--line); padding-top:1.2rem; margin-top:2.5rem}
+  @media (max-width:600px){ body{font-size:15px} .page{padding:2.2rem 1.1rem 4rem} h1{font-size:1.5rem} }
+</style>
+</head>
+<body>
+<div class="page">
+
+<p class="chap-no">第 7 章</p>
+<h1><code>.clang-tidy</code> 設定ファイルへ移行する</h1>
+<p class="lede">プロパティページに書いた設定は、そのプロジェクトファイルの中にしか存在しません。チームで共有できず、コマンドラインからも CI からも再現できません。この章で設定をテキストファイルに移し、Clang-Tidy 運用の土台を作ります。ディレクトリ階層による設定の継承は、大きなリポジトリで効いてくる仕組みです。</p>
+
+<h2>7.1 なぜファイルにするのか</h2>
+
+<table>
+<tr><th></th><th>プロパティページ</th><th><code>.clang-tidy</code></th></tr>
+<tr><td>保存先</td><td><code>.vcxproj</code> の中（XML）</td><td>独立したテキストファイル</td></tr>
+<tr><td>差分の読みやすさ</td><td>XML の中に埋もれる</td><td>行単位で明瞭</td></tr>
+<tr><td>コマンドラインからの再現</td><td>できない</td><td>自動的に読まれる</td></tr>
+<tr><td>CI での再現</td><td>MSBuild 経由でのみ</td><td>そのまま使える</td></tr>
+<tr><td>ディレクトリ単位の使い分け</td><td>不可</td><td>可能（本章の主題）</td></tr>
+<tr><td>カスタムチェックの定義</td><td><strong>不可</strong></td><td><strong>可能（第6部）</strong></td></tr>
+</table>
+
+<p>最後の行が決定的です。<strong>Query Based Custom Check は <code>.clang-tidy</code> の中にしか書けません。</strong> 本書の主題に到達するには、この移行が必須です。</p>
+
+<h2>7.2 設定ファイルはどう探されるか</h2>
+
+<p>Clang-Tidy は <strong>解析対象のソースファイルごとに</strong> 設定ファイルを探します。プロジェクト単位でも、実行したカレントディレクトリでもありません。ここを誤解すると、意図しない設定が効いて混乱します。</p>
+
+<p>探索は「そのソースファイルが置かれているディレクトリから、親をたどって上へ」進み、<strong>最初に見つかった <code>.clang-tidy</code> が使われます</strong>。</p>
+
+<figure>
+<svg viewBox="0 0 760 400" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="ソースファイルごとに親ディレクトリをたどって .clang-tidy を探す仕組み">
+  <defs>
+    <marker id="h" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#b4661a"/>
+    </marker>
+  </defs>
+  <g font-family="sans-serif">
+
+  <!-- tree -->
+  <text x="30" y="30" font-size="12.5" font-weight="bold" fill="#5a6b7a" letter-spacing="1.5">リポジトリの構造</text>
+
+  <rect x="30" y="46" width="400" height="34" rx="6" fill="#2f6f9f"/>
+  <text x="48" y="68" font-size="13" fill="#fff" font-family="monospace" font-weight="bold">TidyLab\  .clang-tidy ①</text>
+
+  <line x1="54" y1="80" x2="54" y2="104" stroke="#d8dee4" stroke-width="1.4"/>
+  <rect x="54" y="104" width="376" height="34" rx="6" fill="#f4f6f8" stroke="#d8dee4"/>
+  <text x="72" y="126" font-size="13" fill="#1f2933" font-family="monospace">TidyLab\  （設定ファイルなし）</text>
+
+  <line x1="78" y1="138" x2="78" y2="162" stroke="#d8dee4" stroke-width="1.4"/>
+  <rect x="78" y="162" width="352" height="34" rx="6" fill="#1f2933"/>
+  <text x="96" y="184" font-size="13" fill="#e6edf3" font-family="monospace">config_loader.cpp</text>
+
+  <line x1="54" y1="200" x2="54" y2="224" stroke="#d8dee4" stroke-width="1.4"/>
+  <rect x="54" y="224" width="376" height="34" rx="6" fill="#b4661a"/>
+  <text x="72" y="246" font-size="13" fill="#fff" font-family="monospace" font-weight="bold">third_party\  .clang-tidy ②</text>
+
+  <line x1="78" y1="258" x2="78" y2="282" stroke="#d8dee4" stroke-width="1.4"/>
+  <rect x="78" y="282" width="352" height="34" rx="6" fill="#1f2933"/>
+  <text x="96" y="304" font-size="13" fill="#e6edf3" font-family="monospace">vendor_lib.cpp</text>
+
+  <!-- arrows -->
+  <path d="M440,179 L520,179 L520,63 L440,63" fill="none" stroke="#b4661a" stroke-width="1.8" marker-end="url(#h)"/>
+  <text x="530" y="120" font-size="11.5" fill="#b4661a" font-weight="bold">親をたどって</text>
+  <text x="530" y="138" font-size="11.5" fill="#b4661a" font-weight="bold">① を発見 → 採用</text>
+
+  <path d="M440,299 L590,299 L590,241 L440,241" fill="none" stroke="#b4661a" stroke-width="1.8" marker-end="url(#h)"/>
+  <text x="600" y="266" font-size="11.5" fill="#b4661a" font-weight="bold">同じ階層に</text>
+  <text x="600" y="284" font-size="11.5" fill="#b4661a" font-weight="bold">② があるので即採用</text>
+  <text x="600" y="306" font-size="11" fill="#5a6b7a">①は見に行かない</text>
+
+  <rect x="30" y="340" width="700" height="48" rx="8" fill="#eef4f9" stroke="#2f6f9f"/>
+  <text x="50" y="362" font-size="12" fill="#1f2933"><tspan font-weight="bold">最も近い設定ファイルだけ</tspan>が使われる（既定）。②は①を一切引き継がない。</text>
+  <text x="50" y="380" font-size="12" fill="#1f2933">→ ①の内容も使いたい場合に <tspan font-family="monospace" font-weight="bold">InheritParentConfig: true</tspan> を書く（7.3節）</text>
+  </g>
+</svg>
+<figcaption><b>図7-1</b>　設定ファイルの探索。ソースファイルの位置から上へたどり、最初に見つかった1つだけが使われる。</figcaption>
+</figure>
+
+<p>この仕組みには実用上の意味があります。<code>third_party\</code> に「全部無効」の設定ファイルを1つ置くだけで、外部ライブラリのソースをまるごと解析対象から外せます。</p>
+
+<pre><code># third_party/.clang-tidy
+Checks: '-*'</code></pre>
+
+<h2>7.3 <code>InheritParentConfig</code> ── 親を引き継ぐ</h2>
+
+<p>既定では、最も近い設定ファイルが親を完全に置き換えます。しかし大きなリポジトリでは「全体の共通ルール＋このディレクトリ固有の追加」という形にしたくなります。そのためのオプションが <code>InheritParentConfig</code> です。</p>
+
+<p>公式ドキュメントの説明はこうです。「このオプションが設定ファイルで true のとき、親ディレクトリの設定ファイル（あれば）が取得され、<strong>現在の設定ファイルがその上に適用される</strong>」。</p>
+
+<figure>
+<svg viewBox="0 0 760 330" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="InheritParentConfig による設定の合成">
+  <g font-family="sans-serif">
+
+  <!-- left: false -->
+  <text x="30" y="28" font-size="12.5" font-weight="bold" fill="#a04a34" letter-spacing="1">InheritParentConfig: false（既定）</text>
+
+  <rect x="30" y="42" width="320" height="52" rx="6" fill="#f4f6f8" stroke="#d8dee4" stroke-dasharray="4 3"/>
+  <text x="48" y="64" font-size="11.5" fill="#9aa8b4" font-family="monospace">親: Checks: '-*,bugprone-*'</text>
+  <text x="48" y="84" font-size="11.5" fill="#9aa8b4" font-family="monospace">    HeaderFilterRegex: '.*'</text>
+  <text x="290" y="74" font-size="11" fill="#a04a34" font-weight="bold">無視</text>
+
+  <text x="190" y="114" text-anchor="middle" font-size="16" fill="#a04a34">✕</text>
+
+  <rect x="30" y="124" width="320" height="52" rx="6" fill="#fff" stroke="#a04a34" stroke-width="1.6"/>
+  <text x="48" y="146" font-size="11.5" fill="#1f2933" font-family="monospace">子: Checks: '-*,readability-*'</text>
+
+  <text x="190" y="200" text-anchor="middle" font-size="12" fill="#5a6b7a">↓ 実際に効く設定</text>
+
+  <rect x="30" y="212" width="320" height="52" rx="6" fill="#a04a34"/>
+  <text x="48" y="234" font-size="11.5" fill="#fff" font-family="monospace">Checks: '-*,readability-*'</text>
+  <text x="48" y="254" font-size="11" fill="#f0d5cf">bugprone は消える</text>
+
+  <!-- right: true -->
+  <text x="410" y="28" font-size="12.5" font-weight="bold" fill="#3d7a52" letter-spacing="1">InheritParentConfig: true</text>
+
+  <rect x="410" y="42" width="320" height="52" rx="6" fill="#eef5f0" stroke="#3d7a52" stroke-width="1.4"/>
+  <text x="428" y="64" font-size="11.5" fill="#1f2933" font-family="monospace">親: Checks: '-*,bugprone-*'</text>
+  <text x="428" y="84" font-size="11.5" fill="#1f2933" font-family="monospace">    HeaderFilterRegex: '.*'</text>
+
+  <text x="570" y="114" text-anchor="middle" font-size="16" fill="#3d7a52">＋</text>
+
+  <rect x="410" y="124" width="320" height="52" rx="6" fill="#fff" stroke="#3d7a52" stroke-width="1.6"/>
+  <text x="428" y="146" font-size="11.5" fill="#1f2933" font-family="monospace">子: InheritParentConfig: true</text>
+  <text x="428" y="166" font-size="11.5" fill="#1f2933" font-family="monospace">    Checks: 'readability-*'</text>
+
+  <text x="570" y="200" text-anchor="middle" font-size="12" fill="#5a6b7a">↓ 実際に効く設定</text>
+
+  <rect x="410" y="212" width="320" height="52" rx="6" fill="#3d7a52"/>
+  <text x="428" y="234" font-size="11.5" fill="#fff" font-family="monospace">Checks: '-*,bugprone-*,readability-*'</text>
+  <text x="428" y="254" font-size="11" fill="#d5e6da">HeaderFilterRegex も引き継がれる</text>
+
+  <rect x="30" y="286" width="700" height="34" rx="6" fill="#f4f6f8" stroke="#d8dee4"/>
+  <text x="380" y="308" text-anchor="middle" font-size="12" fill="#1f2933">Checks は<tspan font-weight="bold">連結</tspan>される（第6章の図6-3 と同じ。後に来る子側が勝つ）</text>
+  </g>
+</svg>
+<figcaption><b>図7-2</b>　<code>InheritParentConfig</code> の効果。true にすると親の設定の上に子が積まれ、<code>Checks</code> は連結される。</figcaption>
+</figure>
+
+<div class="tip">
+<span class="t">大きなリポジトリでの定石</span>
+<p>リポジトリのルートに「全体で守るべき最小限のルール」を置き、サブディレクトリでは <code>InheritParentConfig: true</code> を書いて追加分だけを記述します。新規開発中のモジュールだけ厳しくする、レガシーな部分だけ緩める、といった運用が自然にできます。第39章の段階導入で使う手です。</p>
+</div>
+
+<h2>7.4 優先順位の全体像</h2>
+
+<p>ここまでに出てきた設定の出どころを整理します。下にあるものほど強く、後から上書きします。</p>
+
+<figure>
+<svg viewBox="0 0 760 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="設定の優先順位">
+  <g font-family="sans-serif">
+  <text x="30" y="28" font-size="12.5" font-weight="bold" fill="#5a6b7a" letter-spacing="1.5">弱い ↑</text>
+
+  <rect x="120" y="40" width="520" height="42" rx="6" fill="#f4f6f8" stroke="#d8dee4"/>
+  <text x="144" y="60" font-size="12.5" fill="#1f2933" font-weight="bold">① clang-tidy バイナリの既定値</text>
+  <text x="144" y="76" font-size="11" fill="#5a6b7a">Checks は空（＝チェック0件）。HeaderFilterRegex は '.*'</text>
+
+  <rect x="120" y="90" width="520" height="42" rx="6" fill="#eef4f9" stroke="#2f6f9f"/>
+  <text x="144" y="110" font-size="12.5" fill="#1f2933" font-weight="bold">② 親ディレクトリの .clang-tidy</text>
+  <text x="144" y="126" font-size="11" fill="#5a6b7a">InheritParentConfig: true のときだけ読まれる</text>
+
+  <rect x="120" y="140" width="520" height="42" rx="6" fill="#eef4f9" stroke="#2f6f9f" stroke-width="1.6"/>
+  <text x="144" y="160" font-size="12.5" fill="#1f2933" font-weight="bold">③ 最も近い .clang-tidy</text>
+  <text x="144" y="176" font-size="11" fill="#5a6b7a">ソースファイルの位置から親をたどって最初に見つかったもの</text>
+
+  <rect x="120" y="190" width="520" height="42" rx="6" fill="#fbf4ea" stroke="#b4661a" stroke-width="1.8"/>
+  <text x="144" y="210" font-size="12.5" fill="#1f2933" font-weight="bold">④ コマンドライン / VS プロパティ</text>
+  <text x="144" y="226" font-size="11" fill="#5a6b7a">--checks は連結、それ以外の多くは上書き（--header-filter など）</text>
+
+  <rect x="120" y="240" width="520" height="42" rx="6" fill="#1f2933"/>
+  <text x="144" y="260" font-size="12.5" fill="#fff" font-weight="bold">⑤ --config / --config-file</text>
+  <text x="144" y="276" font-size="11" fill="#b8c4cd">設定ファイルの探索そのものを行わず、指定した内容で置き換える</text>
+
+  <text x="30" y="272" font-size="12.5" font-weight="bold" fill="#5a6b7a" letter-spacing="1.5">強い ↓</text>
+  </g>
+</svg>
+<figcaption><b>図7-3</b>　設定の優先順位。<code>--config</code> / <code>--config-file</code> は探索自体を止めるので、CI で環境差を排除したいときに使う。</figcaption>
+</figure>
+
+<h2>7.5 現在の設定を確認する二つのコマンド</h2>
+
+<h3><code>--dump-config</code> ── 実効設定の全体を見る</h3>
+
+<p>階層をたどった結果、最終的にどんな設定になっているかを YAML で出力します。<strong>解析対象のファイルを指定して実行する</strong> のがポイントです（ファイルごとに設定が違いうるため）。</p>
+
+<pre class="term"><code><span class="p">&gt;</span> clang-tidy --dump-config config_loader.cpp --
+<span class="o">---
+Checks:              '-*,bugprone-*,clang-analyzer-*,performance-*'
+WarningsAsErrors:    ''
+HeaderFileExtensions:         ['', 'h','hh','hpp','hxx']
+ImplementationFileExtensions: ['c','cc','cpp','cxx']
+HeaderFilterRegex:   '.*'
+FormatStyle:         none
+InheritParentConfig: true
+User:                user
+CheckOptions:
+  bugprone-argument-comment.CommentBoolLiterals: '0'
+  ...
+...</span></code></pre>
+
+<p>注目すべきは <code>CheckOptions</code> です。ここに <strong>有効なチェックが持つ全オプションの現在値</strong> が並びます。第8章で使う情報源はこれです。</p>
+
+<h3><code>--explain-config</code> ── なぜ有効なのかを知る</h3>
+
+<p>設定ファイルが階層になっていると、「このチェックはどこで有効になったのか」が分からなくなります。そのときに使います。</p>
+
+<pre class="term"><code><span class="p">&gt;</span> clang-tidy --explain-config config_loader.cpp --
+<span class="o">'bugprone-use-after-move' is enabled in the C:\dev\TidyLab\.clang-tidy.
+'performance-move-const-arg' is enabled in the C:\dev\TidyLab\src\.clang-tidy.</span></code></pre>
+
+<h2>7.6 【ハンズオン】設定を移行する</h2>
+
+<div class="hands">
+<div class="hd">HANDS-ON 7-A　プロパティから設定ファイルへ</div>
+<div class="bd">
+<ol>
+  <li><strong>ソリューション直下の <code>.clang-tidy</code> を書き換える。</strong> 第3章で <code>Checks: '-*'</code> とだけ書いたファイルを、次の内容にします。
+<pre><code>---
+# TidyLab 全体の基本設定
+Checks: &gt;
+  -*,
+  bugprone-*,
+  clang-analyzer-*,
+  performance-*
+
+HeaderFilterRegex: '.*'
+WarningsAsErrors: ''
+FormatStyle: none
+...</code></pre>
+    <span style="font-size:.92rem;color:#5a6b7a">YAML の <code>&gt;</code>（折りたたみスカラー）を使うと複数行に分けて書けます。読みやすさのために、チェックが増えてきたらこの形にします。改行は空白1個に畳まれるので、各行の末尾にカンマを忘れないでください。</span></li>
+
+  <li><strong>プロパティ側を空にする。</strong> <code>構成プロパティ &gt; コード分析 &gt; Clang-Tidy &gt; Clang-Tidy チェック</code> の値を<strong>削除して空</strong>にします。これで設定の出どころが1か所になります。</li>
+
+  <li><strong>ビルドして、第6章と同じ警告が出ることを確認する。</strong> 出なければ、<code>.clang-tidy</code> の位置が正しいか（<code>.txt</code> が付いていないか）を確認します。</li>
+
+  <li><strong>実効設定を確認する。</strong> 開発者コマンドプロンプトで、
+<pre><code>cd C:\dev\TidyLab\TidyLab
+clang-tidy --dump-config config_loader.cpp -- -std=c++23</code></pre>
+    <code>Checks</code> の値が手順1で書いたものになっていることを確認します。</li>
+</ol>
+</div>
+</div>
+
+<div class="hands">
+<div class="hd">HANDS-ON 7-B　階層設定を体験する</div>
+<div class="bd">
+<ol>
+  <li><strong>サブディレクトリを作る。</strong> <code>TidyLab\TidyLab\legacy\</code> を作り、そこに <code>old_util.cpp</code> を置きます（中身は何でもよいので、警告が出る古めのコードにします）。</li>
+
+  <li><strong>置き換え型の設定を試す。</strong> <code>legacy\.clang-tidy</code> を次の内容で作ります。
+<pre><code>Checks: '-*'</code></pre>
+    <code>clang-tidy --dump-config legacy\old_util.cpp -- -std=c++23</code> を実行し、親の <code>bugprone-*</code> などが<strong>消えている</strong>ことを確認します。</li>
+
+  <li><strong>継承型に変える。</strong> 同じファイルを次の内容に書き換えます。
+<pre><code>InheritParentConfig: true
+Checks: '-performance-*'</code></pre>
+    もう一度 <code>--dump-config</code> を実行し、親の設定を引き継いだうえで <code>performance-*</code> だけが外れていることを確認します。</li>
+
+  <li><strong>どこで有効になったかを見る。</strong>
+<pre><code>clang-tidy --explain-config legacy\old_util.cpp -- -std=c++23</code></pre>
+    親の <code>.clang-tidy</code> のパスが表示されることを確認します。</li>
+
+  <li><strong>後片付け。</strong> 実験が済んだら <code>legacy\</code> は削除するか、<code>third_party\</code> の用途に転用してください。</li>
+</ol>
+</div>
+</div>
+
+<div class="warn">
+<span class="t">YAML の落とし穴</span>
+<p>設定ファイルは YAML です。次の3つが典型的なミスです。</p>
+<ul style="margin-top:.5rem">
+  <li><strong>タブ文字</strong>：YAML はインデントにタブを使えません。必ず空白で。</li>
+  <li><strong>クォートの欠落</strong>：<code>Checks: -*,bugprone-*</code> のように書くと、先頭の <code>-</code> がリストの記号と解釈されて壊れます。<code>'…'</code> で囲むか <code>&gt;</code> を使ってください。</li>
+  <li><strong>パースエラーが静かに起こる</strong>：設定ファイルが壊れていても、実行が止まらず「チェック0件」になることがあります。<code>--dump-config</code> で確認する習慣をつけてください。</li>
+</ul>
+</div>
+
+<h2>7.7 設定ファイルの全体像</h2>
+
+<p>この先の章で扱うキーも含め、<code>.clang-tidy</code> で使う主なオプションを一覧にしておきます。</p>
+
+<table>
+<tr><th>キー</th><th>意味</th><th>扱う章</th></tr>
+<tr><td><code>Checks</code></td><td>有効にするチェックのグロブ列</td><td>第6章</td></tr>
+<tr><td><code>CheckOptions</code></td><td>チェックごとのオプション</td><td>第8章</td></tr>
+<tr><td><code>HeaderFilterRegex</code></td><td>診断を出すヘッダの正規表現</td><td>第10章</td></tr>
+<tr><td><code>ExcludeHeaderFilterRegex</code></td><td>除外するヘッダの正規表現</td><td>第10章</td></tr>
+<tr><td><code>SystemHeaders</code></td><td>システムヘッダの診断を出すか</td><td>第10章</td></tr>
+<tr><td><code>FormatStyle</code></td><td>自動修正後の整形スタイル</td><td>第11章</td></tr>
+<tr><td><code>WarningsAsErrors</code></td><td>エラー扱いにするチェック</td><td>第40章</td></tr>
+<tr><td><code>InheritParentConfig</code></td><td>親設定を引き継ぐか</td><td>本章</td></tr>
+<tr><td><code>ExtraArgs</code> / <code>ExtraArgsBefore</code></td><td>コンパイラへの追加引数</td><td>第12章</td></tr>
+<tr><td><strong><code>CustomChecks</code></strong></td><td><strong>Query Based Custom Check の定義</strong></td><td><strong>第29〜38章</strong></td></tr>
+</table>
+
+<div class="summary">
+<h2>この章のまとめ</h2>
+<ul>
+  <li>設定は <code>.clang-tidy</code> に一本化する。Query Based Custom Check はこのファイルにしか書けない。</li>
+  <li>設定ファイルは <strong>ソースファイルの位置から親をたどって探され、最初に見つかった1つ</strong> が使われる。</li>
+  <li><code>InheritParentConfig: true</code> で親を引き継げる。<code>Checks</code> は連結され、子側が後に来るので子が勝つ。</li>
+  <li>優先順位は バイナリ既定 → 親設定 → 最も近い設定 → コマンドライン → <code>--config</code>。</li>
+  <li><code>--dump-config &lt;file&gt; --</code> で実効設定を、<code>--explain-config</code> でチェックの出どころを確認する。</li>
+  <li>YAML のタブ・クォート漏れに注意。壊れていても静かに「0件」になることがある。</li>
+</ul>
+</div>
+
+<p class="next"><strong>次章：</strong> 第8章「チェックのオプションを変える」では、<code>--dump-config</code> で見えた <code>CheckOptions</code> に手を入れます。しきい値や命名規則を、自分のプロジェクトに合わせて調整できるようにします。</p>
+
+</div>
+</body>
+</html>

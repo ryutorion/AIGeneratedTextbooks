@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第19章 performance-* ── 余計なコピーを消す ─ Clang-Tidy入門</title>
+<style>
+  :root{
+    --ink:#1f2933; --sub:#5a6b7a; --line:#d8dee4; --bg:#ffffff;
+    --code-bg:#f6f8fa; --code-line:#e2e8ee;
+    --accent:#2f6f9f; --accent-bg:#eef4f9;
+    --warn:#b4661a; --warn-bg:#fbf4ea;
+    --ok:#3d7a52; --ok-bg:#eef5f0;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0; background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Noto Sans JP","Meiryo",sans-serif;
+    font-size:16px; line-height:1.95; font-feature-settings:"palt" 1;}
+  .page{max-width:47rem; margin:0 auto; padding:3.5rem 1.6rem 6rem}
+  .chap-no{font-size:.8rem; letter-spacing:.22em; color:var(--accent); font-weight:700; margin:0 0 .5rem}
+  h1{font-size:1.85rem; line-height:1.5; margin:0 0 .6rem; letter-spacing:.01em}
+  .lede{color:var(--sub); font-size:1rem; margin:0 0 2.2rem; padding-bottom:1.6rem; border-bottom:2px solid var(--ink)}
+  h2{font-size:1.28rem; margin:3rem 0 1rem; padding-left:.7rem; border-left:4px solid var(--accent); line-height:1.6}
+  h3{font-size:1.05rem; margin:2.2rem 0 .7rem}
+  h3::before{content:"◆ "; color:var(--accent); font-size:.8em}
+  p{margin:0 0 1.1rem}
+  ul,ol{margin:0 0 1.2rem; padding-left:1.6rem}
+  li{margin:.35rem 0}
+  code{font-family:"Cascadia Mono","Consolas","SFMono-Regular",monospace; font-size:.9em;
+       background:var(--code-bg); border:1px solid var(--code-line); border-radius:4px; padding:.08em .35em}
+  pre{background:var(--code-bg); border:1px solid var(--code-line); border-radius:8px;
+      padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.7}
+  pre code{background:none; border:none; padding:0; font-size:.86rem}
+  pre.term{background:#1f2933; border-color:#1f2933; color:#e6edf3}
+  pre.term code{color:#e6edf3}
+  pre.term .p{color:#7fb2d6}
+  pre.term .o{color:#9fb3c0}
+  .cap{font-size:.82rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+  figure{margin:2rem 0 2.2rem}
+  figure svg{display:block; width:100%; height:auto; border:1px solid var(--line); border-radius:8px; background:#fff}
+  figcaption{font-size:.85rem; color:var(--sub); margin-top:.6rem}
+  figcaption b{color:var(--ink)}
+  .box{border-radius:8px; padding:1rem 1.2rem; margin:1.6rem 0; font-size:.94rem}
+  .box p:last-child{margin-bottom:0}
+  .box .t{font-weight:700; display:block; margin-bottom:.35rem; font-size:.88rem; letter-spacing:.04em}
+  .note{background:var(--accent-bg); border-left:4px solid var(--accent)} .note .t{color:var(--accent)}
+  .warn{background:var(--warn-bg); border-left:4px solid var(--warn)} .warn .t{color:var(--warn)}
+  .tip{background:var(--ok-bg); border-left:4px solid var(--ok)} .tip .t{color:var(--ok)}
+  .hands{border:1px solid var(--line); border-radius:10px; margin:2rem 0; overflow:hidden}
+  .hands>.hd{background:var(--ink); color:#fff; padding:.55rem 1.1rem; font-size:.85rem; letter-spacing:.1em; font-weight:700}
+  .hands>.bd{padding:1.3rem 1.3rem .4rem}
+  .hands ol{counter-reset:step; list-style:none; padding-left:0}
+  .hands ol>li{counter-increment:step; position:relative; padding-left:2.4rem; margin:0 0 1.2rem}
+  .hands ol>li::before{content:counter(step); position:absolute; left:0; top:.25rem;
+    width:1.7rem; height:1.7rem; border-radius:50%; background:var(--accent); color:#fff;
+    font-size:.82rem; font-weight:700; display:flex; align-items:center; justify-content:center; line-height:1}
+  table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+  th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+  th{background:var(--code-bg); font-weight:700}
+  .summary{border:2px solid var(--ink); border-radius:10px; padding:1.3rem 1.5rem; margin:3rem 0 1rem}
+  .summary h2{margin:0 0 .8rem; border:none; padding:0; font-size:1.1rem}
+  .summary ul{margin-bottom:0}
+  .next{color:var(--sub); font-size:.94rem; border-top:1px solid var(--line); padding-top:1.2rem; margin-top:2.5rem}
+  @media (max-width:600px){ body{font-size:15px} .page{padding:2.2rem 1.1rem 4rem} h1{font-size:1.5rem} }
+</style>
+</head>
+<body>
+<div class="page">
+
+<p class="chap-no">第 19 章</p>
+<h1><code>performance-*</code> ── 余計なコピーを消す</h1>
+<p class="lede">このモジュールは「無駄」を見つけます。ただし <strong>無駄を消すことと速くなることは同じではありません</strong>。ホットパスでない場所のコピーを100個消しても、実行時間は1ミリ秒も変わらないことがあります。それでも入れる価値はある ── その理由と、正しい期待値を最初に定めます。</p>
+
+<h2>19.1 このモジュールが本当に言っていること</h2>
+
+<p><code>performance-*</code> の警告は、「ここは遅い」ではありません。<strong>「ここに、なくても済む仕事がある」</strong>です。この違いが分かっていないと、二種類の失敗をします。</p>
+
+<table>
+<tr><th>失敗</th><th>中身</th></tr>
+<tr><td>過大評価</td><td>警告を全部潰して「最適化した」と考える。実際は測っていないので、速くなったかどうか分からない</td></tr>
+<tr><td>過小評価</td><td>「どうせ測ってないなら意味がない」と全部無視する。ホットパスの無駄も見逃す</td></tr>
+</table>
+
+<p>正しい使い方は、<strong>「無駄の一覧」として受け取り、そのうちホットパスにあるものを優先して潰す</strong>ことです。ホットパスがどこかは、静的解析では分かりません。プロファイラの仕事です。</p>
+
+<figure>
+<svg viewBox="0 0 760 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="静的解析と実測の役割分担">
+  <defs>
+    <marker id="a19" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5a6b7a"/>
+    </marker>
+  </defs>
+  <g font-family="sans-serif">
+
+  <rect x="24" y="30" width="210" height="96" rx="10" fill="#eef4f9" stroke="#2f6f9f" stroke-width="1.6"/>
+  <text x="129" y="56" text-anchor="middle" font-size="13" font-weight="bold" fill="#2f6f9f">performance-*</text>
+  <text x="129" y="80" text-anchor="middle" font-size="11.5" fill="#1f2933">「どこに無駄があるか」</text>
+  <text x="129" y="100" text-anchor="middle" font-size="11" fill="#5a6b7a">網羅的・実行不要</text>
+  <text x="129" y="118" text-anchor="middle" font-size="11" fill="#a04a34">重要度は分からない</text>
+
+  <line x1="234" y1="78" x2="272" y2="78" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#a19)"/>
+
+  <rect x="276" y="30" width="210" height="96" rx="10" fill="#fbf4ea" stroke="#b4661a" stroke-width="1.6"/>
+  <text x="381" y="56" text-anchor="middle" font-size="13" font-weight="bold" fill="#b4661a">プロファイラ</text>
+  <text x="381" y="80" text-anchor="middle" font-size="11.5" fill="#1f2933">「どこが遅いか」</text>
+  <text x="381" y="100" text-anchor="middle" font-size="11" fill="#5a6b7a">実測・実行が必要</text>
+  <text x="381" y="118" text-anchor="middle" font-size="11" fill="#a04a34">通らない経路は測れない</text>
+
+  <line x1="486" y1="78" x2="524" y2="78" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#a19)"/>
+
+  <rect x="528" y="30" width="208" height="96" rx="10" fill="#eef5f0" stroke="#3d7a52" stroke-width="2"/>
+  <text x="632" y="56" text-anchor="middle" font-size="13" font-weight="bold" fill="#3d7a52">交差点を直す</text>
+  <text x="632" y="80" text-anchor="middle" font-size="11.5" fill="#1f2933">無駄 ∩ ホットパス</text>
+  <text x="632" y="104" text-anchor="middle" font-size="11" fill="#5a6b7a">ここだけが「効く修正」</text>
+
+  <rect x="24" y="152" width="712" height="60" rx="8" fill="#1f2933"/>
+  <text x="380" y="176" text-anchor="middle" fill="#fff" font-size="12.5" font-weight="bold">それでも「無駄のない書き方」を既定にする価値はある</text>
+  <text x="380" y="196" text-anchor="middle" fill="#b8c4cd" font-size="11">後からホットパスになった箇所が、最初から無駄なく書かれている状態になる</text>
+
+  <rect x="24" y="228" width="712" height="60" rx="8" fill="#fbf4ea" stroke="#b4661a" stroke-width="1.5"/>
+  <text x="46" y="252" font-size="12" font-weight="bold" fill="#b4661a">やってはいけないこと</text>
+  <text x="46" y="274" font-size="11.5" fill="#1f2933">測らずに大規模な書き換えをする。<tspan font-weight="bold">第11章の pass-by-value のように、かえって遅くなる修正もある</tspan></text>
+  </g>
+</svg>
+<figcaption><b>図19-1</b>　静的解析と実測の役割分担。performance-* は候補を出すところまでで、優先順位を決めるのは実測。</figcaption>
+</figure>
+
+<h2>19.2 コピーの三つの発生源</h2>
+
+<p>このモジュールの中核は「不要なコピー」の検出です。C++ でコピーが暗黙に起きる場所は、大きく3か所です。</p>
+
+<figure>
+<svg viewBox="0 0 760 400" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="不要なコピーが生まれる三つの場所">
+  <g font-family="sans-serif">
+
+  <!-- 1 -->
+  <rect x="24" y="20" width="712" height="112" rx="10" fill="#eef4f9" stroke="#2f6f9f" stroke-width="1.6"/>
+  <text x="44" y="46" font-size="13" font-weight="bold" fill="#2f6f9f">① 引数の受け取り　<tspan font-family="monospace" font-size="11">performance-unnecessary-value-param</tspan></text>
+  <rect x="44" y="56" width="330" height="60" rx="6" fill="#1f2933"/>
+  <text x="58" y="78" font-size="11" font-family="monospace" fill="#e08a74">void save(std::vector&lt;Entry&gt; v) {</text>
+  <text x="58" y="96" font-size="11" font-family="monospace" fill="#e6edf3">    write(v);   // 読むだけ</text>
+  <text x="58" y="112" font-size="11" font-family="monospace" fill="#e08a74">}</text>
+  <text x="390" y="82" font-size="20" fill="#5a6b7a">→</text>
+  <rect x="416" y="56" width="304" height="60" rx="6" fill="#1f2933"/>
+  <text x="430" y="78" font-size="11" font-family="monospace" fill="#a3d9a5">void save(const std::vector&lt;Entry&gt;&amp; v) {</text>
+  <text x="430" y="96" font-size="11" font-family="monospace" fill="#e6edf3">    write(v);</text>
+  <text x="430" y="112" font-size="11" font-family="monospace" fill="#a3d9a5">}</text>
+
+  <!-- 2 -->
+  <rect x="24" y="144" width="712" height="112" rx="10" fill="#fbf4ea" stroke="#b4661a" stroke-width="1.6"/>
+  <text x="44" y="170" font-size="13" font-weight="bold" fill="#b4661a">② 初期化　<tspan font-family="monospace" font-size="11">performance-unnecessary-copy-initialization</tspan></text>
+  <rect x="44" y="180" width="330" height="60" rx="6" fill="#1f2933"/>
+  <text x="58" y="202" font-size="11" font-family="monospace" fill="#e08a74">auto v = loader.entries();</text>
+  <text x="58" y="220" font-size="11" font-family="monospace" fill="#e6edf3">for (auto&amp; e : v) { ... }</text>
+  <text x="58" y="236" font-size="10.5" fill="#9fb3c0">// v は読むだけ</text>
+  <text x="390" y="206" font-size="20" fill="#5a6b7a">→</text>
+  <rect x="416" y="180" width="304" height="60" rx="6" fill="#1f2933"/>
+  <text x="430" y="202" font-size="11" font-family="monospace" fill="#a3d9a5">const auto&amp; v = loader.entries();</text>
+  <text x="430" y="220" font-size="11" font-family="monospace" fill="#e6edf3">for (auto&amp; e : v) { ... }</text>
+  <text x="430" y="236" font-size="10.5" fill="#9fb3c0">// 参照で受ける</text>
+
+  <!-- 3 -->
+  <rect x="24" y="268" width="712" height="112" rx="10" fill="#eef5f0" stroke="#3d7a52" stroke-width="1.6"/>
+  <text x="44" y="294" font-size="13" font-weight="bold" fill="#3d7a52">③ 範囲 for の変数　<tspan font-family="monospace" font-size="11">performance-for-range-copy</tspan></text>
+  <rect x="44" y="304" width="330" height="60" rx="6" fill="#1f2933"/>
+  <text x="58" y="326" font-size="11" font-family="monospace" fill="#e08a74">for (auto e : entries) {</text>
+  <text x="58" y="344" font-size="11" font-family="monospace" fill="#e6edf3">    print(e.name);</text>
+  <text x="58" y="360" font-size="11" font-family="monospace" fill="#e08a74">}</text>
+  <text x="390" y="330" font-size="20" fill="#5a6b7a">→</text>
+  <rect x="416" y="304" width="304" height="60" rx="6" fill="#1f2933"/>
+  <text x="430" y="326" font-size="11" font-family="monospace" fill="#a3d9a5">for (const auto&amp; e : entries) {</text>
+  <text x="430" y="344" font-size="11" font-family="monospace" fill="#e6edf3">    print(e.name);</text>
+  <text x="430" y="360" font-size="11" font-family="monospace" fill="#a3d9a5">}</text>
+  </g>
+</svg>
+<figcaption><b>図19-2</b>　不要なコピーの三大発生源。どれも自動修正が付いており、変換は機械的。</figcaption>
+</figure>
+
+<div class="tip">
+<span class="t">③ は特に効く</span>
+<p><code>for-range-copy</code> は、ループの回数だけコピーが起きます。要素が重い型なら、これだけで目に見える差になることがあります。<strong>そして修正が <code>&amp;</code> と <code>const</code> を足すだけで、意味も変わらない。</strong> 費用対効果が最も高いチェックの一つです。</p>
+</div>
+
+<h2>19.3 ムーブ関連</h2>
+
+<table>
+<tr><th>チェック</th><th>指摘内容</th></tr>
+<tr><td><code>performance-move-const-arg</code></td><td><code>const</code> なオブジェクトに <code>std::move</code> を掛けている（ムーブにならずコピーになる）</td></tr>
+<tr><td><code>performance-move-constructor-init</code></td><td>ムーブコンストラクタなのにメンバをコピー初期化している</td></tr>
+<tr><td><code>performance-no-automatic-move</code></td><td><code>const</code> ローカル変数を返しているため、自動的なムーブが効かない</td></tr>
+<tr><td><code>performance-noexcept-move-constructor</code></td><td>ムーブコンストラクタに <code>noexcept</code> がない</td></tr>
+<tr><td><code>performance-noexcept-destructor</code> / <code>-swap</code></td><td>同上（デストラクタ、swap）</td></tr>
+</table>
+
+<div class="note">
+<span class="t"><code>noexcept</code> の有無が性能に効く理由</span>
+<p><code>std::vector</code> は再確保のとき、要素のムーブコンストラクタが <code>noexcept</code> なら<strong>ムーブ</strong>し、そうでなければ例外安全性を保つために<strong>コピー</strong>します。<code>noexcept</code> を1つ書き忘れただけで、コンテナの成長のたびに全要素がコピーされる ── これは「実測しないと気づけないが、静的解析なら一発で分かる」典型例です。</p>
+</div>
+
+<h2>19.4 文字列とコンテナ</h2>
+
+<table>
+<tr><th>チェック</th><th>指摘内容</th></tr>
+<tr><td><code>performance-faster-string-find</code></td><td><code>s.find("x")</code> のような1文字の文字列検索 → <code>s.find('x')</code></td></tr>
+<tr><td><code>performance-inefficient-string-concatenation</code></td><td>ループ内で <code>a = a + b</code> のように連結している（<code>+=</code> にする）</td></tr>
+<tr><td><code>performance-inefficient-vector-operation</code></td><td>ループで <code>push_back</code> する前に <code>reserve</code> していない</td></tr>
+<tr><td><code>performance-inefficient-algorithm</code></td><td>連想コンテナに <code>std::find</code> を使っている（メンバ関数の <code>find</code> を使う）</td></tr>
+<tr><td><code>performance-implicit-conversion-in-loop</code></td><td>範囲 for の要素型が実際の型と違い、毎回一時オブジェクトができている</td></tr>
+</table>
+
+<p><code>inefficient-algorithm</code> は特に価値があります。<code>std::set</code> に対する <code>std::find</code> は O(n)、メンバの <code>find</code> は O(log n) です。<strong>計算量が変わる指摘</strong>なので、無駄というより誤りに近い。</p>
+
+<h2>19.5 その他</h2>
+
+<table>
+<tr><th>チェック</th><th>指摘内容</th></tr>
+<tr><td><code>performance-avoid-endl</code></td><td><code>std::endl</code> → <code>'\n'</code>（<code>endl</code> は毎回フラッシュする）</td></tr>
+<tr><td><code>performance-enum-size</code></td><td>列挙型の基底型が値域に対して大きすぎる</td></tr>
+<tr><td><code>performance-type-promotion-in-math-fn</code></td><td><code>float</code> に対して <code>double</code> 版の数学関数を使っている</td></tr>
+<tr><td><code>performance-trivially-destructible</code></td><td>不要なデストラクタ定義があり、自明破棄でなくなっている</td></tr>
+<tr><td><code>performance-no-int-to-ptr</code></td><td>整数からポインタへの変換（最適化を阻害しうる）</td></tr>
+</table>
+
+<h2>19.6 【ハンズオン】題材コードのコピーを消す</h2>
+
+<div class="hands">
+<div class="hd">HANDS-ON 19　コピーを見つけ、消し、測る</div>
+<div class="bd">
+<ol>
+  <li><strong>現状を見る。</strong> 題材コードの <code>entries()</code> は <code>std::vector&lt;Entry&gt;</code> を値で返しています。呼び出し側の <code>main.cpp</code> と合わせて解析します。
+<pre><code>clang-tidy --checks="-*,performance-*" config_loader.cpp main.cpp -- -std=c++23</code></pre>
+  </li>
+
+  <li><strong>呼び出し側を悪化させて確認する。</strong> <code>main.cpp</code> を一時的に次のように書き換え、①②③のすべてが出る状態を作ります。
+<pre><code>#include "config_loader.h"
+#include &lt;print&gt;
+
+static void dump(std::vector&lt;Entry&gt; v) {          // ① 値渡し
+    for (auto e : v) {                            // ③ 範囲 for のコピー
+        std::println("{} = {}", e.name, e.value);
+    }
+}
+
+int main() {
+    ConfigLoader loader("app.ini");
+    if (!loader.load()) return 1;
+    auto entries = loader.entries();              // ② 初期化でのコピー
+    dump(entries);
+    return 0;
+}</code></pre>
+    解析して、3種類の警告が出ることを確認します。</li>
+
+  <li><strong>自動修正を当てる。</strong> 第11章の手順です。作業ツリーをきれいにしてから、
+<pre><code>clang-tidy --checks="-*,performance-for-range-copy,performance-unnecessary-value-param,performance-unnecessary-copy-initialization" --fix main.cpp -- -std=c++23
+git diff</code></pre>
+    <code>const auto&amp;</code> が付くだけの、意味を変えない修正であることを差分で確認します。</li>
+
+  <li><strong>根本を直す。</strong> 自動修正は呼び出し側を直しましたが、<code>entries()</code> が値返しであること自体は残っています。<code>config_loader.h</code> を変更します。
+<pre><code>-    std::vector&lt;Entry&gt; entries();
++    const std::vector&lt;Entry&gt;&amp; entries() const;</code></pre>
+    <code>.cpp</code> 側も合わせて修正し、ビルドが通ることを確認します。<strong>静的解析が指摘するのは症状であって、原因は設計にあることが多い</strong>という例です。</li>
+
+  <li><strong><code>noexcept</code> の効果を見る。</strong> 検証用に、ムーブコンストラクタを持つ型を作ります。
+<pre><code>struct Buffer {
+    std::vector&lt;char&gt; data;
+    Buffer(Buffer&amp;&amp; other) { data = std::move(other.data); }   // noexcept なし
+};</code></pre>
+    <code>performance-noexcept-move-constructor</code> が反応することを確認し、<code>noexcept</code> を付けて消えることを確認します。</li>
+
+  <li><strong>計算量が変わる指摘を見る。</strong>
+<pre><code>#include &lt;set&gt;
+#include &lt;algorithm&gt;
+bool has(const std::set&lt;int&gt;&amp; s, int v) {
+    return std::find(s.begin(), s.end(), v) != s.end();
+}</code></pre>
+    <code>performance-inefficient-algorithm</code> が反応することを確認します。<strong>これは「無駄」ではなく計算量の誤りです。</strong></li>
+
+  <li><strong>測る。</strong> 手順4の修正について、実際に速くなったかを確認します。<code>app.ini</code> のエントリ数を数万件に増やし、<code>entries()</code> を繰り返し呼ぶループを書いて時間を測ってください。<strong>「エントリが3件のときは差がない」ことも同時に確認してください。</strong> これが 19.1 節の主張の実証です。</li>
+
+  <li><strong>後片付けと方針決定。</strong> 検証用コードを整理し、<code>.clang-tidy</code> に <code>performance-*</code> を加えます。全部入れて問題が少ないモジュールなので、除外は必要になってから考えます。</li>
+</ol>
+</div>
+</div>
+
+<div class="warn">
+<span class="t">参照を返すときの寿命に注意</span>
+<p>手順4で <code>entries()</code> を参照返しに変えました。これは <code>ConfigLoader</code> が生きている限り有効な参照です。呼び出し側が <code>ConfigLoader</code> より長く参照を保持すると、ダングリング参照になります。<strong>コピーを消すと、代わりに寿命の管理という責任が生まれます。</strong> ここは <code>bugprone-dangling-handle</code>（第16章）や <code>clang-analyzer-*</code>（第17章）の守備範囲でもあります。性能と安全性はしばしばトレードオフになる、という点を意識してください。</p>
+</div>
+
+<div class="summary">
+<h2>この章のまとめ</h2>
+<ul>
+  <li><code>performance-*</code> が言っているのは「遅い」ではなく<strong>「なくても済む仕事がある」</strong>。優先順位はプロファイラが決める。</li>
+  <li>不要なコピーの発生源は3つ。①引数の値渡し、②初期化、③範囲 for の変数。どれも自動修正がある。</li>
+  <li><code>for-range-copy</code> は費用対効果が最も高い。<code>&amp;</code> と <code>const</code> を足すだけで意味も変わらない。</li>
+  <li><code>noexcept</code> の欠落は、コンテナ再確保時にムーブがコピーに落ちる原因になる。実測では気づきにくく、静的解析が得意な領域。</li>
+  <li><code>inefficient-algorithm</code> は無駄ではなく<strong>計算量の誤り</strong>。優先度は高い。</li>
+  <li>静的解析が指摘するのは症状。原因が設計にあることは多い（値返しの API など）。</li>
+  <li>コピーを消すと寿命管理の責任が生まれる。性能と安全性はトレードオフになりうる。</li>
+</ul>
+</div>
+
+<p class="next"><strong>次章：</strong> 第20章「<code>readability-*</code> と命名規則」では、チームの合意が前提になるモジュールを扱います。第8章で触れた <code>readability-identifier-naming</code> を本格的に設計し、命名規約を機械化します。</p>
+
+</div>
+</body>
+</html>

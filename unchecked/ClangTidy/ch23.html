@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第23章 Clang AST を覗く ─ Clang-Tidy入門</title>
+<style>
+  :root{
+    --ink:#1f2933; --sub:#5a6b7a; --line:#d8dee4; --bg:#ffffff;
+    --code-bg:#f6f8fa; --code-line:#e2e8ee;
+    --accent:#2f6f9f; --accent-bg:#eef4f9;
+    --warn:#b4661a; --warn-bg:#fbf4ea;
+    --ok:#3d7a52; --ok-bg:#eef5f0;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0; background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Noto Sans JP","Meiryo",sans-serif;
+    font-size:16px; line-height:1.95; font-feature-settings:"palt" 1;}
+  .page{max-width:47rem; margin:0 auto; padding:3.5rem 1.6rem 6rem}
+  .chap-no{font-size:.8rem; letter-spacing:.22em; color:var(--accent); font-weight:700; margin:0 0 .5rem}
+  h1{font-size:1.85rem; line-height:1.5; margin:0 0 .6rem; letter-spacing:.01em}
+  .lede{color:var(--sub); font-size:1rem; margin:0 0 2.2rem; padding-bottom:1.6rem; border-bottom:2px solid var(--ink)}
+  h2{font-size:1.28rem; margin:3rem 0 1rem; padding-left:.7rem; border-left:4px solid var(--accent); line-height:1.6}
+  h3{font-size:1.05rem; margin:2.2rem 0 .7rem}
+  h3::before{content:"◆ "; color:var(--accent); font-size:.8em}
+  p{margin:0 0 1.1rem}
+  ul,ol{margin:0 0 1.2rem; padding-left:1.6rem}
+  li{margin:.35rem 0}
+  code{font-family:"Cascadia Mono","Consolas","SFMono-Regular",monospace; font-size:.9em;
+       background:var(--code-bg); border:1px solid var(--code-line); border-radius:4px; padding:.08em .35em}
+  pre{background:var(--code-bg); border:1px solid var(--code-line); border-radius:8px;
+      padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.7}
+  pre code{background:none; border:none; padding:0; font-size:.86rem}
+  pre.term{background:#1f2933; border-color:#1f2933; color:#e6edf3}
+  pre.term code{color:#e6edf3}
+  pre.term .p{color:#7fb2d6}
+  pre.term .o{color:#9fb3c0}
+  pre.term .k{color:#a3d9a5}
+  pre.term .y{color:#e8b075}
+  .cap{font-size:.82rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+  figure{margin:2rem 0 2.2rem}
+  figure svg{display:block; width:100%; height:auto; border:1px solid var(--line); border-radius:8px; background:#fff}
+  figcaption{font-size:.85rem; color:var(--sub); margin-top:.6rem}
+  figcaption b{color:var(--ink)}
+  .box{border-radius:8px; padding:1rem 1.2rem; margin:1.6rem 0; font-size:.94rem}
+  .box p:last-child{margin-bottom:0}
+  .box .t{font-weight:700; display:block; margin-bottom:.35rem; font-size:.88rem; letter-spacing:.04em}
+  .note{background:var(--accent-bg); border-left:4px solid var(--accent)} .note .t{color:var(--accent)}
+  .warn{background:var(--warn-bg); border-left:4px solid var(--warn)} .warn .t{color:var(--warn)}
+  .tip{background:var(--ok-bg); border-left:4px solid var(--ok)} .tip .t{color:var(--ok)}
+  .hands{border:1px solid var(--line); border-radius:10px; margin:2rem 0; overflow:hidden}
+  .hands>.hd{background:var(--ink); color:#fff; padding:.55rem 1.1rem; font-size:.85rem; letter-spacing:.1em; font-weight:700}
+  .hands>.bd{padding:1.3rem 1.3rem .4rem}
+  .hands ol{counter-reset:step; list-style:none; padding-left:0}
+  .hands ol>li{counter-increment:step; position:relative; padding-left:2.4rem; margin:0 0 1.2rem}
+  .hands ol>li::before{content:counter(step); position:absolute; left:0; top:.25rem;
+    width:1.7rem; height:1.7rem; border-radius:50%; background:var(--accent); color:#fff;
+    font-size:.82rem; font-weight:700; display:flex; align-items:center; justify-content:center; line-height:1}
+  table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+  th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+  th{background:var(--code-bg); font-weight:700}
+  .summary{border:2px solid var(--ink); border-radius:10px; padding:1.3rem 1.5rem; margin:3rem 0 1rem}
+  .summary h2{margin:0 0 .8rem; border:none; padding:0; font-size:1.1rem}
+  .summary ul{margin-bottom:0}
+  .next{color:var(--sub); font-size:.94rem; border-top:1px solid var(--line); padding-top:1.2rem; margin-top:2.5rem}
+  @media (max-width:600px){ body{font-size:15px} .page{padding:2.2rem 1.1rem 4rem} h1{font-size:1.5rem} }
+</style>
+</head>
+<body>
+<div class="page">
+
+<p class="chap-no">第 23 章</p>
+<h1>Clang AST を覗く</h1>
+<p class="lede">第5部が始まります。ここからは「自分でルールを書く」ための土台作りです。第2章で「Clang-Tidy は AST を見ている」と説明しました。その AST を、いま実際に自分の目で見ます。<strong>これから書くクエリは、この木構造に対する問い合わせです。</strong> 木の形が見えていないと、クエリは書けません。</p>
+
+<h2>23.1 ここからの道筋</h2>
+
+<figure>
+<svg viewBox="0 0 760 190" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="第5部から第6部への道筋">
+  <defs>
+    <marker id="a23" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5a6b7a"/>
+    </marker>
+  </defs>
+  <g font-family="sans-serif">
+
+  <rect x="24" y="44" width="150" height="70" rx="8" fill="#b4661a"/>
+  <text x="99" y="70" text-anchor="middle" fill="#fff" font-size="12.5" font-weight="bold">第23章</text>
+  <text x="99" y="90" text-anchor="middle" fill="#fde9d0" font-size="11">AST を見る</text>
+  <text x="99" y="106" text-anchor="middle" fill="#fde9d0" font-size="10.5">木の形を知る</text>
+  <line x1="174" y1="79" x2="200" y2="79" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#a23)"/>
+
+  <rect x="204" y="44" width="150" height="70" rx="8" fill="#2f6f9f"/>
+  <text x="279" y="70" text-anchor="middle" fill="#fff" font-size="12.5" font-weight="bold">第24〜27章</text>
+  <text x="279" y="90" text-anchor="middle" fill="#d6e6f2" font-size="11">clang-query</text>
+  <text x="279" y="106" text-anchor="middle" fill="#d6e6f2" font-size="10.5">木に問い合わせる</text>
+  <line x1="354" y1="79" x2="380" y2="79" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#a23)"/>
+
+  <rect x="384" y="44" width="150" height="70" rx="8" fill="#3d7a52"/>
+  <text x="459" y="70" text-anchor="middle" fill="#fff" font-size="12.5" font-weight="bold">第28章</text>
+  <text x="459" y="90" text-anchor="middle" fill="#d5e6da" font-size="11">レシピを揃える</text>
+  <text x="459" y="106" text-anchor="middle" fill="#d5e6da" font-size="10.5">よく使う型を持つ</text>
+  <line x1="534" y1="79" x2="560" y2="79" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#a23)"/>
+
+  <rect x="564" y="30" width="172" height="98" rx="8" fill="#1f2933"/>
+  <text x="650" y="58" text-anchor="middle" fill="#fff" font-size="12.5" font-weight="bold">第6部</text>
+  <text x="650" y="78" text-anchor="middle" fill="#e8b075" font-size="11" font-weight="bold">Query Based</text>
+  <text x="650" y="94" text-anchor="middle" fill="#e8b075" font-size="11" font-weight="bold">Custom Check</text>
+  <text x="650" y="114" text-anchor="middle" fill="#b8c4cd" font-size="10.5">.clang-tidy に書く</text>
+
+  <text x="380" y="160" text-anchor="middle" font-size="11.5" fill="#5a6b7a">クエリは「AST に対する問い合わせ」。だから木を知らずにクエリは書けない</text>
+  </g>
+</svg>
+<figcaption><b>図23-1</b>　第5部から第6部への道筋。第23〜28章はすべて、第6部で書くクエリのための準備。</figcaption>
+</figure>
+
+<h2>23.2 <code>-ast-dump</code> で木を出す</h2>
+
+<p>Clang には、構築した AST をテキストで出力する機能があります。</p>
+
+<pre class="term"><code><span class="p">&gt;</span> clang++ -Xclang -ast-dump -fsyntax-only -std=c++23 tiny.cpp</code></pre>
+
+<table>
+<tr><th>オプション</th><th>意味</th></tr>
+<tr><td><code>-Xclang -ast-dump</code></td><td>AST をテキストで出力する（<code>-Xclang</code> は「次の引数をフロントエンドに渡す」）</td></tr>
+<tr><td><code>-fsyntax-only</code></td><td>コード生成をせず、構文・意味解析まででやめる</td></tr>
+<tr><td><code>-Xclang -ast-dump=json</code></td><td>JSON 形式で出す（機械処理向け）</td></tr>
+<tr><td><code>-Xclang -ast-dump-filter=&lt;名前&gt;</code></td><td><strong>名前が一致する宣言だけ出す</strong>（これがないと実用にならない）</td></tr>
+</table>
+
+<div class="warn">
+<span class="t">まず小さなファイルで練習する</span>
+<p><code>#include &lt;string&gt;</code> が1行あるだけで、AST は数万行になります。標準ライブラリの中身がすべて木になるからです。<strong>AST を学ぶ段階では、インクルードを一切含まない小さなファイルを使ってください。</strong> 実プロジェクトのファイルを dump するのは、<code>-ast-dump-filter</code> の使い方を覚えてからです。</p>
+<p style="margin-top:.5rem">なお Windows で MSVC のヘッダを読ませる必要が出たら、開発者コマンドプロンプトから <code>clang-cl</code> ドライバを使うか、第12章の <code>--driver-mode=cl</code> と互換オプションを併用してください。</p>
+</div>
+
+<h2>23.3 ソースと木の対応</h2>
+
+<p>次の小さなファイルを用意します。インクルードはありません。</p>
+
+<pre><code>// tiny.cpp
+int add(int a, int b) {
+    return a + b;
+}</code></pre>
+
+<pre class="term"><code><span class="p">&gt;</span> clang++ -Xclang -ast-dump -fsyntax-only -std=c++23 tiny.cpp
+<span class="o">TranslationUnitDecl</span> <span class="y">0x1a2b3c0 &lt;&lt;invalid sloc&gt;&gt; &lt;invalid sloc&gt;</span>
+<span class="o">|-TypedefDecl</span> <span class="y">…（コンパイラ組み込みの宣言が数十行続く）</span>
+<span class="o">…</span>
+<span class="o">`-<span class="k">FunctionDecl</span></span> <span class="y">0x1a2b8f0 &lt;tiny.cpp:2:1, line:4:1&gt; line:2:5</span> <span class="k">add</span> <span class="y">'int (int, int)'</span>
+<span class="o">  |-<span class="k">ParmVarDecl</span></span> <span class="y">0x1a2b7d0 &lt;col:9, col:13&gt; col:13</span> <span class="k">used a</span> <span class="y">'int'</span>
+<span class="o">  |-<span class="k">ParmVarDecl</span></span> <span class="y">0x1a2b850 &lt;col:16, col:20&gt; col:20</span> <span class="k">used b</span> <span class="y">'int'</span>
+<span class="o">  `-<span class="k">CompoundStmt</span></span> <span class="y">0x1a2ba10 &lt;col:23, line:4:1&gt;</span>
+<span class="o">    `-<span class="k">ReturnStmt</span></span> <span class="y">0x1a2b9f8 &lt;line:3:5, col:16&gt;</span>
+<span class="o">      `-<span class="k">BinaryOperator</span></span> <span class="y">0x1a2b9d8 &lt;col:12, col:16&gt; 'int' '+'</span>
+<span class="o">        |-<span class="k">ImplicitCastExpr</span></span> <span class="y">0x1a2b9a8 &lt;col:12&gt; 'int' &lt;LValueToRValue&gt;</span>
+<span class="o">        | `-<span class="k">DeclRefExpr</span></span> <span class="y">0x1a2b968 &lt;col:12&gt; 'int' lvalue ParmVar 'a' 'int'</span>
+<span class="o">        `-<span class="k">ImplicitCastExpr</span></span> <span class="y">0x1a2b9c0 &lt;col:16&gt; 'int' &lt;LValueToRValue&gt;</span>
+<span class="o">          `-<span class="k">DeclRefExpr</span></span> <span class="y">0x1a2b988 &lt;col:16&gt; 'int' lvalue ParmVar 'b' 'int'</span></code></pre>
+
+<figure>
+<svg viewBox="0 0 760 360" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="ソースコードと AST の対応">
+  <g font-family="sans-serif">
+
+  <rect x="24" y="20" width="240" height="120" rx="8" fill="#1f2933"/>
+  <text x="42" y="48" font-size="12" font-family="monospace" fill="#a3d9a5">int add(int a, int b) {</text>
+  <text x="42" y="72" font-size="12" font-family="monospace" fill="#e6edf3">    return a + b;</text>
+  <text x="42" y="96" font-size="12" font-family="monospace" fill="#a3d9a5">}</text>
+  <text x="144" y="126" text-anchor="middle" font-size="10.5" fill="#8fa3b2">tiny.cpp</text>
+
+  <text x="290" y="82" font-size="22" fill="#5a6b7a">⇒</text>
+
+  <!-- tree -->
+  <g>
+    <rect x="330" y="20" width="150" height="28" rx="5" fill="#2f6f9f"/>
+    <text x="405" y="39" text-anchor="middle" font-size="11" fill="#fff" font-family="monospace" font-weight="bold">FunctionDecl "add"</text>
+
+    <line x1="360" y1="48" x2="360" y2="66" stroke="#c5d6e4" stroke-width="1.3"/>
+    <line x1="360" y1="66" x2="376" y2="66" stroke="#c5d6e4" stroke-width="1.3"/>
+    <rect x="380" y="54" width="120" height="24" rx="5" fill="#eef4f9" stroke="#2f6f9f"/>
+    <text x="440" y="71" text-anchor="middle" font-size="10.5" fill="#1f2933" font-family="monospace">ParmVarDecl a</text>
+
+    <line x1="360" y1="66" x2="360" y2="98" stroke="#c5d6e4" stroke-width="1.3"/>
+    <line x1="360" y1="98" x2="376" y2="98" stroke="#c5d6e4" stroke-width="1.3"/>
+    <rect x="380" y="86" width="120" height="24" rx="5" fill="#eef4f9" stroke="#2f6f9f"/>
+    <text x="440" y="103" text-anchor="middle" font-size="10.5" fill="#1f2933" font-family="monospace">ParmVarDecl b</text>
+
+    <line x1="360" y1="98" x2="360" y2="130" stroke="#c5d6e4" stroke-width="1.3"/>
+    <line x1="360" y1="130" x2="376" y2="130" stroke="#c5d6e4" stroke-width="1.3"/>
+    <rect x="380" y="118" width="130" height="24" rx="5" fill="#b4661a"/>
+    <text x="445" y="135" text-anchor="middle" font-size="10.5" fill="#fff" font-family="monospace" font-weight="bold">CompoundStmt</text>
+
+    <line x1="410" y1="142" x2="410" y2="166" stroke="#e6d5bd" stroke-width="1.3"/>
+    <line x1="410" y1="166" x2="426" y2="166" stroke="#e6d5bd" stroke-width="1.3"/>
+    <rect x="430" y="154" width="110" height="24" rx="5" fill="#fbf4ea" stroke="#b4661a"/>
+    <text x="485" y="171" text-anchor="middle" font-size="10.5" fill="#1f2933" font-family="monospace">ReturnStmt</text>
+
+    <line x1="460" y1="178" x2="460" y2="202" stroke="#e6d5bd" stroke-width="1.3"/>
+    <line x1="460" y1="202" x2="476" y2="202" stroke="#e6d5bd" stroke-width="1.3"/>
+    <rect x="480" y="190" width="160" height="24" rx="5" fill="#3d7a52"/>
+    <text x="560" y="207" text-anchor="middle" font-size="10.5" fill="#fff" font-family="monospace" font-weight="bold">BinaryOperator '+'</text>
+
+    <line x1="510" y1="214" x2="510" y2="238" stroke="#c9dfd1" stroke-width="1.3"/>
+    <line x1="510" y1="238" x2="526" y2="238" stroke="#c9dfd1" stroke-width="1.3"/>
+    <rect x="530" y="226" width="140" height="24" rx="5" fill="#f4f6f8" stroke="#5a6b7a" stroke-dasharray="3 2"/>
+    <text x="600" y="243" text-anchor="middle" font-size="10" fill="#5a6b7a" font-family="monospace">ImplicitCastExpr</text>
+
+    <line x1="560" y1="250" x2="560" y2="272" stroke="#d8dee4" stroke-width="1.3"/>
+    <line x1="560" y1="272" x2="576" y2="272" stroke="#d8dee4" stroke-width="1.3"/>
+    <rect x="580" y="260" width="130" height="24" rx="5" fill="#eef5f0" stroke="#3d7a52"/>
+    <text x="645" y="277" text-anchor="middle" font-size="10.5" fill="#1f2933" font-family="monospace">DeclRefExpr a</text>
+
+    <line x1="510" y1="238" x2="510" y2="296" stroke="#c9dfd1" stroke-width="1.3"/>
+    <line x1="510" y1="296" x2="526" y2="296" stroke="#c9dfd1" stroke-width="1.3"/>
+    <rect x="530" y="284" width="140" height="24" rx="5" fill="#f4f6f8" stroke="#5a6b7a" stroke-dasharray="3 2"/>
+    <text x="600" y="301" text-anchor="middle" font-size="10" fill="#5a6b7a" font-family="monospace">ImplicitCastExpr</text>
+
+    <line x1="560" y1="308" x2="560" y2="330" stroke="#d8dee4" stroke-width="1.3"/>
+    <line x1="560" y1="330" x2="576" y2="330" stroke="#d8dee4" stroke-width="1.3"/>
+    <rect x="580" y="318" width="130" height="24" rx="5" fill="#eef5f0" stroke="#3d7a52"/>
+    <text x="645" y="335" text-anchor="middle" font-size="10.5" fill="#1f2933" font-family="monospace">DeclRefExpr b</text>
+  </g>
+
+  <rect x="24" y="160" width="240" height="180" rx="8" fill="#f4f6f8" stroke="#5a6b7a" stroke-dasharray="4 3"/>
+  <text x="144" y="186" text-anchor="middle" font-size="12" font-weight="bold" fill="#5a6b7a">破線のノードに注目</text>
+  <text x="42" y="212" font-size="11" fill="#1f2933">ソースに書かれていない</text>
+  <text x="42" y="232" font-size="11" fill="#1f2933"><tspan font-family="monospace">ImplicitCastExpr</tspan> が</text>
+  <text x="42" y="252" font-size="11" fill="#1f2933">勝手に挟まっている</text>
+  <text x="42" y="280" font-size="11" fill="#a04a34" font-weight="bold">これが Matcher を書くときの</text>
+  <text x="42" y="300" font-size="11" fill="#a04a34" font-weight="bold">最大のつまずきどころ</text>
+  <text x="42" y="324" font-size="10.5" fill="#5a6b7a">→ 第27章で対処する</text>
+  </g>
+</svg>
+<figcaption><b>図23-2</b>　ソースコードと AST の対応。<code>a + b</code> の <code>a</code> は <code>DeclRefExpr</code> だが、その上に <code>ImplicitCastExpr</code> が挟まっている。</figcaption>
+</figure>
+
+<h2>23.4 ノード名の読み方</h2>
+
+<p>ノード名には規則があります。末尾を見れば、そのノードが何の仲間か分かります。</p>
+
+<figure>
+<svg viewBox="0 0 760 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="AST ノード名の命名規則">
+  <g font-family="sans-serif">
+
+  <rect x="24" y="16" width="712" height="34" rx="8" fill="#1f2933"/>
+  <text x="380" y="39" text-anchor="middle" fill="#fff" font-size="13" font-weight="bold">ノード名は「接頭辞 ＋ 系統名」でできている</text>
+
+  <rect x="24" y="62" width="228" height="112" rx="10" fill="#eef4f9" stroke="#2f6f9f" stroke-width="1.8"/>
+  <text x="138" y="88" text-anchor="middle" font-size="13" font-weight="bold" fill="#2f6f9f">…Decl ── 宣言</text>
+  <g font-size="11" font-family="monospace" fill="#1f2933">
+  <text x="42" y="112">FunctionDecl / VarDecl</text>
+  <text x="42" y="132">ParmVarDecl / FieldDecl</text>
+  <text x="42" y="152">CXXRecordDecl / EnumDecl</text>
+  </g>
+  <text x="138" y="168" text-anchor="middle" font-size="10.5" fill="#5a6b7a">「何かに名前を与えるもの」</text>
+
+  <rect x="266" y="62" width="228" height="112" rx="10" fill="#fbf4ea" stroke="#b4661a" stroke-width="1.8"/>
+  <text x="380" y="88" text-anchor="middle" font-size="13" font-weight="bold" fill="#b4661a">…Stmt ── 文</text>
+  <g font-size="11" font-family="monospace" fill="#1f2933">
+  <text x="284" y="112">CompoundStmt / IfStmt</text>
+  <text x="284" y="132">ForStmt / WhileStmt</text>
+  <text x="284" y="152">ReturnStmt / DeclStmt</text>
+  </g>
+  <text x="380" y="168" text-anchor="middle" font-size="10.5" fill="#5a6b7a">「実行の単位」</text>
+
+  <rect x="508" y="62" width="228" height="112" rx="10" fill="#eef5f0" stroke="#3d7a52" stroke-width="1.8"/>
+  <text x="622" y="88" text-anchor="middle" font-size="13" font-weight="bold" fill="#3d7a52">…Expr ── 式</text>
+  <g font-size="11" font-family="monospace" fill="#1f2933">
+  <text x="526" y="112">CallExpr / DeclRefExpr</text>
+  <text x="526" y="132">BinaryOperator ※</text>
+  <text x="526" y="152">CXXNewExpr / MemberExpr</text>
+  </g>
+  <text x="622" y="168" text-anchor="middle" font-size="10.5" fill="#5a6b7a">「値を持つもの」（Stmt の一種）</text>
+
+  <rect x="24" y="188" width="712" height="60" rx="10" fill="#f4f6f8" stroke="#d8dee4"/>
+  <text x="46" y="212" font-size="12" font-weight="bold" fill="#1f2933">接頭辞 <tspan font-family="monospace">CXX</tspan> は「C++ 固有」の印</text>
+  <text x="46" y="234" font-size="11.5" fill="#5a6b7a"><tspan font-family="monospace">CXXRecordDecl</tspan>（クラス）、<tspan font-family="monospace">CXXMethodDecl</tspan>（メンバ関数）、<tspan font-family="monospace">CXXNewExpr</tspan>（new 式）、<tspan font-family="monospace">CXXMemberCallExpr</tspan>（メンバ呼び出し）</text>
+
+  <rect x="24" y="260" width="712" height="48" rx="10" fill="#fbf4ea" stroke="#b4661a" stroke-width="1.6"/>
+  <text x="46" y="282" font-size="12" font-weight="bold" fill="#b4661a">Matcher 名は、このノード名の先頭を小文字にしたもの</text>
+  <text x="46" y="300" font-size="11.5" font-family="monospace" fill="#1f2933">FunctionDecl → functionDecl( )　　CXXRecordDecl → cxxRecordDecl( )　　CallExpr → callExpr( )</text>
+  </g>
+</svg>
+<figcaption><b>図23-3</b>　命名規則。<strong>最後の一行が重要</strong>。AST dump で見えたノード名を小文字始まりにすれば、そのまま Matcher の名前になる。</figcaption>
+</figure>
+
+<div class="tip">
+<span class="t">これが「AST を見る」ことの実利</span>
+<p>ルールを作りたいコードを <code>-ast-dump</code> して、<strong>目当ての箇所のノード名を読む。それを小文字始まりにすれば Matcher の出発点になる。</strong> 第25章以降でやることは、この出発点に条件を足していく作業です。</p>
+</div>
+
+<h2>23.5 巨大な出力と付き合う</h2>
+
+<p>実プロジェクトのファイルを dump すると数万行になります。<code>-ast-dump-filter</code> で絞ります。</p>
+
+<pre class="term"><code><span class="p">&gt;</span> clang++ -Xclang -ast-dump -Xclang -ast-dump-filter=ConfigLoader -fsyntax-only -std=c++23 config_loader.cpp</code></pre>
+
+<p>これで <code>ConfigLoader</code> という名前を含む宣言だけが出力されます。それでもメンバ関数の中身は全部出るので、さらに絞りたければ関数名を指定します。</p>
+
+<pre class="term"><code><span class="p">&gt;</span> clang++ -Xclang -ast-dump -Xclang -ast-dump-filter=load -fsyntax-only -std=c++23 config_loader.cpp</code></pre>
+
+<div class="note">
+<span class="t">次章の予告：もっと良い方法がある</span>
+<p><code>-ast-dump</code> は「全部出して目で探す」道具です。第24章で扱う <code>clang-query</code> は「<strong>条件に合うノードだけを出す</strong>」道具で、しかも対話的に条件を変えられます。実際の作業では clang-query が主役になります。<br>
+それでも <code>-ast-dump</code> を先にやる理由は、<strong>木の全体像を一度は見ておかないと、clang-query で何を探せばよいか分からない</strong>からです。</p>
+</div>
+
+<h2>23.6 【ハンズオン】木を読む</h2>
+
+<div class="hands">
+<div class="hd">HANDS-ON 23　AST の形を目で確かめる</div>
+<div class="bd">
+<ol>
+  <li><strong>最小のファイルを作る。</strong> <code>samples\tiny.cpp</code> を 23.3 節の内容で作ります。<strong>インクルードは書かないでください。</strong></li>
+
+  <li><strong>dump する。</strong>
+<pre><code>clang++ -Xclang -ast-dump -fsyntax-only -std=c++23 tiny.cpp</code></pre>
+    出力の末尾（<code>FunctionDecl add</code> 以降）を、図23-2 と見比べます。</li>
+
+  <li><strong>暗黙ノードを確認する。</strong> <code>ImplicitCastExpr</code> がどこに挟まっているか、<strong>ソースコードのどこにも書かれていない</strong>ことを確認してください。<code>&lt;LValueToRValue&gt;</code> という注記も読みます。</li>
+
+  <li><strong>コードを変えて木の変化を見る。</strong> 次の順に <code>tiny.cpp</code> を書き換え、そのたびに dump します。
+    <ul>
+      <li><code>return a + b;</code> → <code>return a;</code>（<code>BinaryOperator</code> が消える）</li>
+      <li>引数を <code>const int&amp; a</code> にする（<code>ImplicitCastExpr</code> の種類が変わる）</li>
+      <li>関数をクラスのメンバにする（<code>CXXRecordDecl</code> と <code>CXXMethodDecl</code> が現れる）</li>
+    </ul>
+  </li>
+
+  <li><strong>ノード名を Matcher 名に変換する。</strong> 出てきたノード名を、図23-3 の規則に従って小文字始まりに直し、一覧にします。この一覧が第25章の出発点になります。
+<pre><code>FunctionDecl   → functionDecl
+ParmVarDecl    → parmVarDecl
+CompoundStmt   → compoundStmt
+ReturnStmt     → returnStmt
+BinaryOperator → binaryOperator
+DeclRefExpr    → declRefExpr
+CXXMethodDecl  → cxxMethodDecl</code></pre>
+  </li>
+
+  <li><strong>題材コードで <code>-ast-dump-filter</code> を使う。</strong>
+<pre><code>clang++ -Xclang -ast-dump -Xclang -ast-dump-filter=load -fsyntax-only -std=c++23 config_loader.cpp</code></pre>
+    ヘッダを含むためエラーが出る場合は、第12章の <code>-I</code> や互換オプションを足してください。<strong>出力の行数を数え、フィルタなしとの差を確認します。</strong></li>
+
+  <li><strong>探したい形を特定する。</strong> 出力の中から <code>strcpy</code> の呼び出しに対応する部分を探し、そこにどんなノードが並んでいるかを書き出します。おそらく <code>CallExpr</code> と、その下の <code>ImplicitCastExpr</code> → <code>DeclRefExpr</code> という形になっているはずです。<strong>これが第28章のレシピ1の元ネタです。</strong></li>
+
+  <li><strong>JSON でも出してみる（任意）。</strong>
+<pre><code>clang++ -Xclang -ast-dump=json -fsyntax-only -std=c++23 tiny.cpp &gt; tiny-ast.json</code></pre>
+    テキスト形式と同じ情報が構造化されて入っていることを確認します。ツールを自作するときに使えます。</li>
+</ol>
+</div>
+</div>
+
+<div class="summary">
+<h2>この章のまとめ</h2>
+<ul>
+  <li><code>clang++ -Xclang -ast-dump -fsyntax-only</code> で AST をテキスト出力できる。</li>
+  <li><strong>学習段階ではインクルードのない小さなファイルを使う。</strong> <code>#include</code> が1行あるだけで数万行になる。</li>
+  <li>実ファイルでは <code>-Xclang -ast-dump-filter=&lt;名前&gt;</code> で絞る。</li>
+  <li>ノード名は系統で分かれる。<code>…Decl</code>（宣言）、<code>…Stmt</code>（文）、<code>…Expr</code>（式）。接頭辞 <code>CXX</code> は C++ 固有。</li>
+  <li><strong>ノード名の先頭を小文字にすれば、そのまま Matcher の名前になる。</strong> <code>FunctionDecl</code> → <code>functionDecl()</code>。</li>
+  <li>ソースに書かれていない <code>ImplicitCastExpr</code> などの暗黙ノードが挟まる。これが Matcher を書くときの最大のつまずきどころで、第27章で対処する。</li>
+</ul>
+</div>
+
+<p class="next"><strong>次章：</strong> 第24章「<code>clang-query</code> を起動する」では、「全部出して探す」から「条件に合うものだけ出す」へ移ります。ここからが実作業の道具です。</p>
+
+</div>
+</body>
+</html>

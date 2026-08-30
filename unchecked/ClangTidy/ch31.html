@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第31章 フィールドを正確に理解する ─ Clang-Tidy入門</title>
+<style>
+  :root{
+    --ink:#1f2933; --sub:#5a6b7a; --line:#d8dee4; --bg:#ffffff;
+    --code-bg:#f6f8fa; --code-line:#e2e8ee;
+    --accent:#2f6f9f; --accent-bg:#eef4f9;
+    --warn:#b4661a; --warn-bg:#fbf4ea;
+    --ok:#3d7a52; --ok-bg:#eef5f0;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0; background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Noto Sans JP","Meiryo",sans-serif;
+    font-size:16px; line-height:1.95; font-feature-settings:"palt" 1;}
+  .page{max-width:47rem; margin:0 auto; padding:3.5rem 1.6rem 6rem}
+  .chap-no{font-size:.8rem; letter-spacing:.22em; color:var(--accent); font-weight:700; margin:0 0 .5rem}
+  h1{font-size:1.85rem; line-height:1.5; margin:0 0 .6rem; letter-spacing:.01em}
+  .lede{color:var(--sub); font-size:1rem; margin:0 0 2.2rem; padding-bottom:1.6rem; border-bottom:2px solid var(--ink)}
+  h2{font-size:1.28rem; margin:3rem 0 1rem; padding-left:.7rem; border-left:4px solid var(--accent); line-height:1.6}
+  h3{font-size:1.05rem; margin:2.2rem 0 .7rem}
+  h3::before{content:"◆ "; color:var(--accent); font-size:.8em}
+  p{margin:0 0 1.1rem}
+  ul,ol{margin:0 0 1.2rem; padding-left:1.6rem}
+  li{margin:.35rem 0}
+  code{font-family:"Cascadia Mono","Consolas","SFMono-Regular",monospace; font-size:.9em;
+       background:var(--code-bg); border:1px solid var(--code-line); border-radius:4px; padding:.08em .35em}
+  pre{background:var(--code-bg); border:1px solid var(--code-line); border-radius:8px;
+      padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.7}
+  pre code{background:none; border:none; padding:0; font-size:.86rem}
+  pre.term{background:#1f2933; border-color:#1f2933; color:#e6edf3}
+  pre.term code{color:#e6edf3}
+  pre.term .p{color:#7fb2d6}
+  pre.term .o{color:#9fb3c0}
+  pre.term .e{color:#e08a74}
+  pre.term .n{color:#8fb8d0}
+  .cap{font-size:.82rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+  figure{margin:2rem 0 2.2rem}
+  figure svg{display:block; width:100%; height:auto; border:1px solid var(--line); border-radius:8px; background:#fff}
+  figcaption{font-size:.85rem; color:var(--sub); margin-top:.6rem}
+  figcaption b{color:var(--ink)}
+  .box{border-radius:8px; padding:1rem 1.2rem; margin:1.6rem 0; font-size:.94rem}
+  .box p:last-child{margin-bottom:0}
+  .box .t{font-weight:700; display:block; margin-bottom:.35rem; font-size:.88rem; letter-spacing:.04em}
+  .note{background:var(--accent-bg); border-left:4px solid var(--accent)} .note .t{color:var(--accent)}
+  .warn{background:var(--warn-bg); border-left:4px solid var(--warn)} .warn .t{color:var(--warn)}
+  .tip{background:var(--ok-bg); border-left:4px solid var(--ok)} .tip .t{color:var(--ok)}
+  .hands{border:1px solid var(--line); border-radius:10px; margin:2rem 0; overflow:hidden}
+  .hands>.hd{background:var(--ink); color:#fff; padding:.55rem 1.1rem; font-size:.85rem; letter-spacing:.1em; font-weight:700}
+  .hands>.bd{padding:1.3rem 1.3rem .4rem}
+  .hands ol{counter-reset:step; list-style:none; padding-left:0}
+  .hands ol>li{counter-increment:step; position:relative; padding-left:2.4rem; margin:0 0 1.2rem}
+  .hands ol>li::before{content:counter(step); position:absolute; left:0; top:.25rem;
+    width:1.7rem; height:1.7rem; border-radius:50%; background:var(--accent); color:#fff;
+    font-size:.82rem; font-weight:700; display:flex; align-items:center; justify-content:center; line-height:1}
+  table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+  th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+  th{background:var(--code-bg); font-weight:700}
+  .summary{border:2px solid var(--ink); border-radius:10px; padding:1.3rem 1.5rem; margin:3rem 0 1rem}
+  .summary h2{margin:0 0 .8rem; border:none; padding:0; font-size:1.1rem}
+  .summary ul{margin-bottom:0}
+  .next{color:var(--sub); font-size:.94rem; border-top:1px solid var(--line); padding-top:1.2rem; margin-top:2.5rem}
+  @media (max-width:600px){ body{font-size:15px} .page{padding:2.2rem 1.1rem 4rem} h1{font-size:1.5rem} }
+</style>
+</head>
+<body>
+<div class="page">
+
+<p class="chap-no">第 31 章</p>
+<h1>フィールドを正確に理解する</h1>
+<p class="lede">前章で動くものは作れました。この章では、各フィールドの意味と制約を一つずつ正確に押さえます。特に <code>Warning</code> と <code>Note</code> の使い分けは、<strong>診断が読み手に届くかどうか</strong>を左右します。仕組みが分かっている警告と、分からない警告では、直してもらえる確率がまったく違います。</p>
+
+<h2>31.1 全体構造</h2>
+
+<figure>
+<svg viewBox="0 0 760 400" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="カスタムチェックのフィールド構造と対応関係">
+  <defs>
+    <marker id="a31" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#b4661a"/>
+    </marker>
+  </defs>
+  <g font-family="sans-serif">
+
+  <rect x="24" y="20" width="712" height="200" rx="10" fill="#1f2933"/>
+  <g font-size="11.5" font-family="monospace">
+  <text x="46" y="46" fill="#9fb3c0">CustomChecks:</text>
+  <text x="46" y="68" fill="#9fb3c0">  - </text>
+  <text x="70" y="68" fill="#7fb2d6">Name</text><text x="106" y="68" fill="#9fb3c0">: </text><text x="122" y="68" fill="#e6edf3">no-raw-new</text>
+  <text x="70" y="90" fill="#7fb2d6">Query</text><text x="115" y="90" fill="#9fb3c0">: |</text>
+  <text x="90" y="112" fill="#a3d9a5">match varDecl(</text>
+  <text x="110" y="132" fill="#a3d9a5">hasType(pointerType()),</text>
+  <text x="110" y="152" fill="#a3d9a5">hasInitializer(ignoringImplicit(cxxNewExpr().bind(</text>
+  <text x="560" y="152" fill="#e8b075">"alloc"</text><text x="614" y="152" fill="#a3d9a5">)))</text>
+  <text x="90" y="172" fill="#a3d9a5">).bind(</text><text x="152" y="172" fill="#e8b075">"var"</text><text x="192" y="172" fill="#a3d9a5">)</text>
+  <text x="70" y="196" fill="#7fb2d6">Diagnostic</text><text x="160" y="196" fill="#9fb3c0">:</text>
+  </g>
+
+  <rect x="24" y="234" width="712" height="152" rx="10" fill="#1f2933"/>
+  <g font-size="11.5" font-family="monospace">
+  <text x="70" y="260" fill="#9fb3c0">  - </text><text x="94" y="260" fill="#7fb2d6">BindName</text><text x="166" y="260" fill="#9fb3c0">: </text><text x="182" y="260" fill="#e8b075">var</text>
+  <text x="94" y="282" fill="#7fb2d6">Message</text><text x="157" y="282" fill="#9fb3c0">: </text><text x="173" y="282" fill="#e6edf3">"生ポインタへの new は禁止です"</text>
+  <text x="94" y="304" fill="#7fb2d6">Level</text><text x="139" y="304" fill="#9fb3c0">: </text><text x="155" y="304" fill="#e08a74">Warning</text>
+  <text x="70" y="330" fill="#9fb3c0">  - </text><text x="94" y="330" fill="#7fb2d6">BindName</text><text x="166" y="330" fill="#9fb3c0">: </text><text x="182" y="330" fill="#e8b075">alloc</text>
+  <text x="94" y="352" fill="#7fb2d6">Message</text><text x="157" y="352" fill="#9fb3c0">: </text><text x="173" y="352" fill="#e6edf3">"ここで確保されています"</text>
+  <text x="94" y="374" fill="#7fb2d6">Level</text><text x="139" y="374" fill="#9fb3c0">: </text><text x="155" y="374" fill="#8fb8d0">Note</text>
+  </g>
+
+  <path d="M186,178 C186,200 186,230 186,252" fill="none" stroke="#b4661a" stroke-width="1.8" marker-end="url(#a31)"/>
+  <path d="M600,158 C660,180 300,300 210,324" fill="none" stroke="#b4661a" stroke-width="1.8" marker-end="url(#a31)"/>
+  </g>
+</svg>
+<figcaption><b>図31-1</b>　フィールドの対応関係。<strong>Query の <code>.bind()</code> の文字列と、Diagnostic の <code>BindName</code> が一致していなければならない。</strong></figcaption>
+</figure>
+
+<h2>31.2 <code>Name</code></h2>
+
+<p>公式の説明は「<code>-checks</code> オプションで使えるチェック名」です。<code>custom-</code> 接頭辞は自動で付きます（第30章）。</p>
+
+<h3>命名の指針</h3>
+
+<p>標準チェックの命名に倣うと、チーム内での一貫性が保てます。</p>
+
+<table>
+<tr><th>形</th><th>例</th><th>使いどころ</th></tr>
+<tr><td><code>no-〜</code></td><td><code>no-raw-new</code>, <code>no-goto</code></td><td>禁止するルール</td></tr>
+<tr><td><code>use-〜</code></td><td><code>use-safe-copy</code></td><td>代替を促すルール</td></tr>
+<tr><td><code>〜-naming</code></td><td><code>component-naming</code></td><td>命名規約</td></tr>
+<tr><td><code>prefer-〜</code></td><td><code>prefer-span</code></td><td>推奨するルール</td></tr>
+</table>
+
+<div class="tip">
+<span class="t">名前は警告の一部として表示される</span>
+<p>警告の末尾に <code>[custom-no-raw-new]</code> と出ます。<strong>この名前だけで「何を怒られているか」が分かるように付けてください。</strong> <code>custom-check1</code> のような名前は、半年後に誰も意味を思い出せません。</p>
+</div>
+
+<h2>31.3 <code>Query</code></h2>
+
+<p>公式の説明は「clang-query の文字列」です。押さえるべき点は3つです。</p>
+
+<h3>① <code>match</code> から始める</h3>
+
+<p>公式の例も <code>match callExpr(...)</code> となっています。前章で扱ったとおり、対話中の略記 <code>m</code> ではなく正式名で書きます。</p>
+
+<h3>② 必ず <code>.bind()</code> する</h3>
+
+<p><code>Diagnostic</code> は <code>BindName</code> でノードを指定します。<strong>bind していないノードは指せません。</strong> 診断を出したい位置には、必ず名前を付けてください。</p>
+
+<h3>③ セッション設定は書けない</h3>
+
+<p><code>set traversal</code> などは <code>clang-query</code> のセッションを設定するコマンドであって、Matcher 式ではありません。<strong>走査モードに依存するクエリは、<code>ignoringImplicit()</code> などを使って式の中で解決してください</strong>（第27章 27.2 節）。</p>
+
+<div class="warn">
+<span class="t">実験的機能であることの反映</span>
+<p>公式ドキュメントは「機能は完全に AST マッチャーライブラリに依存しているため、クエリの記述は AST マッチャーの更新に伴って変わりうる」と述べています。<strong>設定ファイルに書ける記法の範囲も、バージョンによって変わる可能性があります。</strong> 本書の記述と挙動が食い違ったら、まず自分のバージョンのドキュメントを確認してください。</p>
+</div>
+
+<h2>31.4 <code>Diagnostic</code></h2>
+
+<p>公式の説明は「報告する診断のリスト」です。<strong>リストである</strong>ことが重要で、1つのマッチに対して複数の診断を出せます。</p>
+
+<h3><code>BindName</code></h3>
+
+<p>「Query の中で bind されたノードの名前」です。ここで指定した名前のノードの<strong>ソース位置</strong>に、診断が出ます。</p>
+
+<h3><code>Message</code></h3>
+
+<p>「報告するメッセージ」です。書き方が診断の価値を決めます。</p>
+
+<figure>
+<svg viewBox="0 0 760 330" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="メッセージの書き方の良し悪し">
+  <g font-family="sans-serif">
+
+  <rect x="24" y="20" width="712" height="32" rx="6" fill="#1f2933"/>
+  <text x="380" y="41" text-anchor="middle" fill="#fff" font-size="12.5" font-weight="bold">メッセージは「次に何をすればよいか」まで書く</text>
+
+  <rect x="24" y="66" width="350" height="112" rx="10" fill="#f7e9e5" stroke="#a04a34" stroke-width="1.8"/>
+  <text x="199" y="90" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#a04a34">✕ 事実だけ</text>
+  <rect x="42" y="102" width="314" height="30" rx="5" fill="#1f2933"/>
+  <text x="199" y="122" text-anchor="middle" font-size="10.5" font-family="monospace" fill="#e6edf3">"strcpy が使われています"</text>
+  <text x="199" y="152" text-anchor="middle" font-size="11" fill="#1f2933">見れば分かる。読み手は</text>
+  <text x="199" y="170" text-anchor="middle" font-size="11" fill="#a04a34" font-weight="bold">「で、どうすれば？」で止まる</text>
+
+  <rect x="386" y="66" width="350" height="112" rx="10" fill="#eef5f0" stroke="#3d7a52" stroke-width="2"/>
+  <text x="561" y="90" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#3d7a52">○ 理由と代替を書く</text>
+  <rect x="404" y="102" width="314" height="46" rx="5" fill="#1f2933"/>
+  <text x="561" y="120" text-anchor="middle" font-size="10" font-family="monospace" fill="#e6edf3">"strcpy は境界チェックがないため禁止です。</text>
+  <text x="561" y="138" text-anchor="middle" font-size="10" font-family="monospace" fill="#a3d9a5"> util::SafeCopy() を使ってください"</text>
+  <text x="561" y="168" text-anchor="middle" font-size="11" fill="#3d7a52" font-weight="bold">読んだ人がそのまま直せる</text>
+
+  <rect x="24" y="194" width="712" height="120" rx="10" fill="#f4f6f8" stroke="#d8dee4"/>
+  <text x="46" y="218" font-size="12.5" font-weight="bold" fill="#1f2933">メッセージに入れるべき3要素</text>
+  <g font-size="11.5" fill="#1f2933">
+  <text x="46" y="244">① <tspan font-weight="bold">何が問題か</tspan>　　　「境界チェックがない」</text>
+  <text x="46" y="268">② <tspan font-weight="bold">どうすればよいか</tspan>　「util::SafeCopy() を使う」</text>
+  <text x="46" y="292">③ <tspan font-weight="bold">例外があるならその条件</tspan>　「長さが定数で保証できる場合は NOLINT に理由を添えて可」</text>
+  </g>
+  </g>
+</svg>
+<figcaption><b>図31-2</b>　メッセージの書き方。<strong>自作チェックには公式ドキュメントがありません。</strong> メッセージがドキュメントを兼ねます。</figcaption>
+</figure>
+
+<div class="note">
+<span class="t">自作チェックにはドキュメントページがない</span>
+<p>標準チェックなら、警告名で検索すれば公式の解説ページが出ます。自作チェックにはそれがありません。<strong>チェック名とメッセージだけが、読み手に与えられる情報のすべてです。</strong> だからメッセージには、詳しい説明への導線（社内 Wiki の項目名など）を書き添える価値があります。</p>
+</div>
+
+<h3><code>Level</code></h3>
+
+<p>取りうる値は <code>Warning</code> と <code>Note</code> の2つです。</p>
+
+<figure>
+<svg viewBox="0 0 760 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Warning と Note の使い分け">
+  <g font-family="sans-serif">
+
+  <rect x="24" y="20" width="350" height="130" rx="10" fill="#fbf4ea" stroke="#b4661a" stroke-width="2"/>
+  <text x="199" y="46" text-anchor="middle" font-size="13" font-weight="bold" fill="#b4661a">Warning</text>
+  <g font-size="11.5" fill="#1f2933">
+  <text x="44" y="72">・問題の<tspan font-weight="bold">主たる位置</tspan>を指す</text>
+  <text x="44" y="94">・エラー一覧に1行として並ぶ</text>
+  <text x="44" y="116">・NOLINT の対象になる</text>
+  <text x="44" y="138">・WarningsAsErrors で昇格できる</text>
+  </g>
+
+  <rect x="386" y="20" width="350" height="130" rx="10" fill="#eef4f9" stroke="#2f6f9f" stroke-width="1.8"/>
+  <text x="561" y="46" text-anchor="middle" font-size="13" font-weight="bold" fill="#2f6f9f">Note</text>
+  <g font-size="11.5" fill="#1f2933">
+  <text x="406" y="72">・Warning に<tspan font-weight="bold">付随する補足</tspan></text>
+  <text x="406" y="94">・「なぜそうなるか」の根拠を示す</text>
+  <text x="406" y="116">・単独では意味を持たない</text>
+  <text x="406" y="138">・別のファイル・行を指してよい</text>
+  </g>
+
+  <rect x="24" y="166" width="712" height="120" rx="10" fill="#1f2933"/>
+  <text x="46" y="190" font-size="12" font-weight="bold" fill="#e8b075">出力される形</text>
+  <g font-size="11" font-family="monospace">
+  <text x="46" y="216" fill="#e08a74">alloc.cpp:12:11: warning:</text>
+  <text x="256" y="216" fill="#e6edf3">生ポインタへの new は禁止です [custom-no-raw-new]</text>
+  <text x="46" y="238" fill="#e6edf3">    int* raw = new int(1);</text>
+  <text x="46" y="254" fill="#e8b075">         ^</text>
+  <text x="46" y="276" fill="#8fb8d0">alloc.cpp:12:16: note: ここで確保されています</text>
+  </g>
+  </g>
+</svg>
+<figcaption><b>図31-3</b>　<code>Warning</code> と <code>Note</code>。<code>Note</code> は第17章で読んだフロー解析の note と同じ役割を、自作チェックで再現するもの。</figcaption>
+</figure>
+
+<h2>31.5 <code>Warning</code> と <code>Note</code> の設計</h2>
+
+<p>公式の例（リスト30-1）を思い出してください。<code>Note</code> が先、<code>Warning</code> が後に書かれていました。順序と役割を整理します。</p>
+
+<table>
+<tr><th>状況</th><th>設計</th></tr>
+<tr><td>問題が1か所で完結する</td><td><code>Warning</code> 1つだけ。<code>Note</code> は不要</td></tr>
+<tr><td>原因が別の場所にある</td><td>問題の場所に <code>Warning</code>、原因の場所に <code>Note</code></td></tr>
+<tr><td>規約違反で、根拠が別にある</td><td>違反箇所に <code>Warning</code>、基底クラスの宣言などに <code>Note</code></td></tr>
+</table>
+
+<div class="tip">
+<span class="t"><code>Note</code> を付けるべきか迷ったら</span>
+<p>基準は「<strong>読み手が Warning だけを見て、直す場所を特定できるか</strong>」です。特定できるなら <code>Note</code> は不要で、むしろノイズになります。<code>new[]</code> と <code>delete</code> の不一致のように、<strong>2か所の関係が問題である場合</strong>にだけ <code>Note</code> を付けてください。第35章で本格的に扱います。</p>
+</div>
+
+<h2>31.6 よくある間違い</h2>
+
+<table>
+<tr><th>間違い</th><th>症状</th></tr>
+<tr><td><code>BindName</code> が Query の <code>.bind()</code> と綴りが違う</td><td>その診断が出ない</td></tr>
+<tr><td><code>.bind()</code> を書き忘れた</td><td>同上</td></tr>
+<tr><td><code>Level</code> に <code>Error</code> と書いた</td><td>受け付けられない（値は <code>Warning</code> / <code>Note</code>）。エラーにしたければ <code>WarningsAsErrors</code> を使う</td></tr>
+<tr><td><code>Diagnostic</code> に <code>Note</code> しか書かなかった</td><td>主たる警告がないため、意図した形にならない</td></tr>
+<tr><td><code>Checks</code> に <code>custom-</code> を付け忘れた</td><td>何も起きない（第30章の図30-1）</td></tr>
+<tr><td>YAML のインデントがずれている</td><td>設定が読まれない。<code>--dump-config</code> で確認する</td></tr>
+</table>
+
+<h2>31.7 【ハンズオン】フィールドを一つずつ壊す</h2>
+
+<div class="hands">
+<div class="hd">HANDS-ON 31　各フィールドの効果を確かめる</div>
+<div class="bd">
+<ol>
+  <li><strong>基準となるチェックを作る。</strong> <code>samples\.clang-tidy</code> に、第28章のルール2（生ポインタへの <code>new</code>）を書きます。
+<pre><code>---
+Checks: '-*,custom-*'
+
+CustomChecks:
+  - Name: no-raw-new
+    Query: |
+      match varDecl(
+        hasType(pointerType()),
+        hasInitializer(ignoringImplicit(cxxNewExpr().bind("alloc"))),
+        isExpansionInMainFile()
+      ).bind("var")
+    Diagnostic:
+      - BindName: var
+        Message: "生ポインタへの new は禁止です。std::unique_ptr を使ってください"
+        Level: Warning
+      - BindName: alloc
+        Message: "ここで確保されています"
+        Level: Note
+...</code></pre>
+    <code>ch28_rules.cpp</code> に対して実行し、<code>raw</code> だけが検出されることを確認します。</li>
+
+  <li><strong>Warning と Note の位置を確認する。</strong> 出力を読み、
+    <ul>
+      <li><code>warning:</code> の行が <code>int* raw</code> の位置を指している</li>
+      <li><code>note:</code> の行が <code>new int(1)</code> の位置を指している</li>
+    </ul>
+    ことを確認します。<strong>列番号まで見てください。</strong></li>
+
+  <li><strong>BindName を間違える。</strong> <code>BindName: var</code> を <code>BindName: vars</code> に変えて実行します。<strong>どうなるかを観察してください。</strong> 診断が消えるのか、エラーになるのかを記録します。確認したら戻します。</li>
+
+  <li><strong>bind を消す。</strong> Query の <code>.bind("alloc")</code> を削除し、<code>Diagnostic</code> はそのままにして実行します。同様に挙動を記録します。</li>
+
+  <li><strong>Level を変えてみる。</strong>
+    <ul>
+      <li>両方を <code>Warning</code> にする → エラー一覧に2行出ることを確認</li>
+      <li>両方を <code>Note</code> にする → 主たる警告がない状態を確認</li>
+      <li><code>Error</code> と書いてみる → 受け付けられないことを確認</li>
+    </ul>
+    確認したら元に戻します。</li>
+
+  <li><strong>エラー化する正しい方法を確認する。</strong> 設定に次を足し、警告がエラーになることを確認します。
+<pre><code>WarningsAsErrors: 'custom-no-raw-new'</code></pre>
+    <strong><code>Level: Error</code> ではなく、こちらが正解です。</strong></li>
+
+  <li><strong>メッセージを改善する。</strong> 図31-2 の3要素を意識して、メッセージを書き直します。
+<pre><code>        Message: "生ポインタへの new は所有権が不明確になるため禁止です。std::unique_ptr / std::make_unique を使ってください（詳細: 社内Wiki「メモリ管理規約」）"</code></pre>
+    実際に出力してみて、<strong>長すぎて読みにくくないか</strong>を確認してください。エラー一覧では1行に表示されます。</li>
+
+  <li><strong>YAML を壊す。</strong> <code>Diagnostic</code> のインデントを1つずらして実行し、<strong>どんなエラーが出るか、あるいは静かに無視されるか</strong>を記録します。
+<pre><code>clang-tidy --experimental-custom-checks --dump-config ch28_rules.cpp -- -std=c++23</code></pre>
+    <code>--dump-config</code> で <code>CustomChecks</code> がどう見えるかも確認してください。<strong>第36章のデバッグ手順で、この確認が主力になります。</strong></li>
+
+  <li><strong>記録する。</strong> 手順3〜5・8 で観察した挙動を、<code>tests\custom-checks\README.md</code> に書き留めます。<strong>「間違えたときにどうなるか」を知っていることが、デバッグ速度を決めます。</strong></li>
+</ol>
+</div>
+</div>
+
+<div class="summary">
+<h2>この章のまとめ</h2>
+<ul>
+  <li><code>Name</code> は <code>-checks</code> で使う名前（<code>custom-</code> は自動で付く）。<strong>名前だけで何を怒られているか分かるように付ける。</strong></li>
+  <li><code>Query</code> は clang-query 文字列。<code>match</code> から始め、診断を出したいノードは<strong>必ず <code>.bind()</code> する</strong>。セッション設定は書けない。</li>
+  <li><code>Diagnostic</code> はリスト。1つのマッチに複数の診断を出せる。</li>
+  <li><code>BindName</code> は Query の <code>.bind()</code> の文字列と<strong>一致していなければならない</strong>。</li>
+  <li><code>Message</code> には <strong>①何が問題か ②どうすればよいか ③例外の条件</strong> を書く。<strong>自作チェックにはドキュメントページがないので、メッセージがドキュメントを兼ねる。</strong></li>
+  <li><code>Level</code> は <code>Warning</code> と <code>Note</code> の2つだけ。エラーにしたいときは <code>WarningsAsErrors</code> を使う。</li>
+  <li><code>Note</code> は「2か所の関係が問題」のときだけ付ける。Warning だけで直す場所が分かるならノイズになる。</li>
+</ul>
+</div>
+
+<p class="next"><strong>次章：</strong> ここから実践編に入ります。第32章「実践1：禁止 API を検出する」では、最も需要の多いルールを、実運用に耐える形まで作り込みます。</p>
+
+</div>
+</body>
+</html>

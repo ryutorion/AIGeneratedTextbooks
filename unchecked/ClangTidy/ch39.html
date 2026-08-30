@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第39章 既存コードベースへ段階導入する ─ Clang-Tidy入門</title>
+<style>
+  :root{
+    --ink:#1f2933; --sub:#5a6b7a; --line:#d8dee4; --bg:#ffffff;
+    --code-bg:#f6f8fa; --code-line:#e2e8ee;
+    --accent:#2f6f9f; --accent-bg:#eef4f9;
+    --warn:#b4661a; --warn-bg:#fbf4ea;
+    --ok:#3d7a52; --ok-bg:#eef5f0;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0; background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Noto Sans JP","Meiryo",sans-serif;
+    font-size:16px; line-height:1.95; font-feature-settings:"palt" 1;}
+  .page{max-width:47rem; margin:0 auto; padding:3.5rem 1.6rem 6rem}
+  .chap-no{font-size:.8rem; letter-spacing:.22em; color:var(--accent); font-weight:700; margin:0 0 .5rem}
+  h1{font-size:1.85rem; line-height:1.5; margin:0 0 .6rem; letter-spacing:.01em}
+  .lede{color:var(--sub); font-size:1rem; margin:0 0 2.2rem; padding-bottom:1.6rem; border-bottom:2px solid var(--ink)}
+  h2{font-size:1.28rem; margin:3rem 0 1rem; padding-left:.7rem; border-left:4px solid var(--accent); line-height:1.6}
+  h3{font-size:1.05rem; margin:2.2rem 0 .7rem}
+  h3::before{content:"◆ "; color:var(--accent); font-size:.8em}
+  p{margin:0 0 1.1rem}
+  ul,ol{margin:0 0 1.2rem; padding-left:1.6rem}
+  li{margin:.35rem 0}
+  code{font-family:"Cascadia Mono","Consolas","SFMono-Regular",monospace; font-size:.9em;
+       background:var(--code-bg); border:1px solid var(--code-line); border-radius:4px; padding:.08em .35em}
+  pre{background:var(--code-bg); border:1px solid var(--code-line); border-radius:8px;
+      padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.7}
+  pre code{background:none; border:none; padding:0; font-size:.86rem}
+  pre.term{background:#1f2933; border-color:#1f2933; color:#e6edf3}
+  pre.term code{color:#e6edf3}
+  pre.term .p{color:#7fb2d6}
+  pre.term .o{color:#9fb3c0}
+  .cap{font-size:.82rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+  figure{margin:2rem 0 2.2rem}
+  figure svg{display:block; width:100%; height:auto; border:1px solid var(--line); border-radius:8px; background:#fff}
+  figcaption{font-size:.85rem; color:var(--sub); margin-top:.6rem}
+  figcaption b{color:var(--ink)}
+  .box{border-radius:8px; padding:1rem 1.2rem; margin:1.6rem 0; font-size:.94rem}
+  .box p:last-child{margin-bottom:0}
+  .box .t{font-weight:700; display:block; margin-bottom:.35rem; font-size:.88rem; letter-spacing:.04em}
+  .note{background:var(--accent-bg); border-left:4px solid var(--accent)} .note .t{color:var(--accent)}
+  .warn{background:var(--warn-bg); border-left:4px solid var(--warn)} .warn .t{color:var(--warn)}
+  .tip{background:var(--ok-bg); border-left:4px solid var(--ok)} .tip .t{color:var(--ok)}
+  .hands{border:1px solid var(--line); border-radius:10px; margin:2rem 0; overflow:hidden}
+  .hands>.hd{background:var(--ink); color:#fff; padding:.55rem 1.1rem; font-size:.85rem; letter-spacing:.1em; font-weight:700}
+  .hands>.bd{padding:1.3rem 1.3rem .4rem}
+  .hands ol{counter-reset:step; list-style:none; padding-left:0}
+  .hands ol>li{counter-increment:step; position:relative; padding-left:2.4rem; margin:0 0 1.2rem}
+  .hands ol>li::before{content:counter(step); position:absolute; left:0; top:.25rem;
+    width:1.7rem; height:1.7rem; border-radius:50%; background:var(--accent); color:#fff;
+    font-size:.82rem; font-weight:700; display:flex; align-items:center; justify-content:center; line-height:1}
+  table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+  th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+  th{background:var(--code-bg); font-weight:700}
+  .summary{border:2px solid var(--ink); border-radius:10px; padding:1.3rem 1.5rem; margin:3rem 0 1rem}
+  .summary h2{margin:0 0 .8rem; border:none; padding:0; font-size:1.1rem}
+  .summary ul{margin-bottom:0}
+  .next{color:var(--sub); font-size:.94rem; border-top:1px solid var(--line); padding-top:1.2rem; margin-top:2.5rem}
+  @media (max-width:600px){ body{font-size:15px} .page{padding:2.2rem 1.1rem 4rem} h1{font-size:1.5rem} }
+</style>
+</head>
+<body>
+<div class="page">
+
+<p class="chap-no">第 39 章</p>
+<h1>既存コードベースへ段階導入する</h1>
+<p class="lede">第7部です。ここまでで道具は揃いました。残るは、それを<strong>すでに動いている実プロジェクト</strong>に入れる作業です。新規プロジェクトなら初日から全部有効にすればよい。難しいのは、10年分のコードがあって、有効にした瞬間に警告が3000件出るケースです。この章は、そこを通り抜けるための地図です。</p>
+
+<h2>39.1 なぜ導入は失敗するのか</h2>
+
+<figure>
+<svg viewBox="0 0 760 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="静的解析導入の典型的な失敗パターン">
+  <defs>
+    <marker id="a39" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#a04a34"/>
+    </marker>
+  </defs>
+  <g font-family="sans-serif">
+
+  <rect x="24" y="20" width="712" height="32" rx="6" fill="#a04a34"/>
+  <text x="380" y="41" text-anchor="middle" fill="#fff" font-size="12.5" font-weight="bold">よくある失敗の道筋</text>
+
+  <g font-size="11">
+  <rect x="24" y="66" width="160" height="56" rx="8" fill="#f7e9e5" stroke="#a04a34"/>
+  <text x="104" y="90" text-anchor="middle" fill="#1f2933" font-weight="bold">全部有効にする</text>
+  <text x="104" y="108" text-anchor="middle" fill="#5a6b7a">「まず現状を知ろう」</text>
+  <line x1="184" y1="94" x2="208" y2="94" stroke="#a04a34" stroke-width="1.5" marker-end="url(#a39)"/>
+
+  <rect x="212" y="66" width="160" height="56" rx="8" fill="#f7e9e5" stroke="#a04a34"/>
+  <text x="292" y="90" text-anchor="middle" fill="#1f2933" font-weight="bold">3000 件出る</text>
+  <text x="292" y="108" text-anchor="middle" fill="#5a6b7a">エラー一覧が埋まる</text>
+  <line x1="372" y1="94" x2="396" y2="94" stroke="#a04a34" stroke-width="1.5" marker-end="url(#a39)"/>
+
+  <rect x="400" y="66" width="160" height="56" rx="8" fill="#f7e9e5" stroke="#a04a34"/>
+  <text x="480" y="90" text-anchor="middle" fill="#1f2933" font-weight="bold">後回しにする</text>
+  <text x="480" y="108" text-anchor="middle" fill="#5a6b7a">「今は時間がない」</text>
+  <line x1="560" y1="94" x2="584" y2="94" stroke="#a04a34" stroke-width="1.5" marker-end="url(#a39)"/>
+
+  <rect x="588" y="66" width="148" height="56" rx="8" fill="#a04a34"/>
+  <text x="662" y="90" text-anchor="middle" fill="#fff" font-weight="bold">誰も見なくなる</text>
+  <text x="662" y="108" text-anchor="middle" fill="#f0d5cf">解析は形骸化</text>
+  </g>
+
+  <rect x="24" y="142" width="712" height="66" rx="10" fill="#1f2933"/>
+  <text x="46" y="166" font-size="12.5" font-weight="bold" fill="#e8b075">失敗の本質</text>
+  <text x="46" y="190" font-size="11.5" fill="#cfd8de">「大量に出た警告」は情報ではなくノイズになる。<tspan fill="#fff" font-weight="bold">一度ノイズと認識されたものは、二度と読まれない。</tspan></text>
+
+  <rect x="24" y="222" width="712" height="66" rx="10" fill="#eef5f0" stroke="#3d7a52" stroke-width="1.8"/>
+  <text x="46" y="246" font-size="12.5" font-weight="bold" fill="#3d7a52">導入の目標は「全部直す」ではない</text>
+  <text x="46" y="270" font-size="11.5" fill="#1f2933">目標は <tspan font-weight="bold">「これ以上悪化させない」</tspan>。既存の負債は、触るついでに少しずつ返す。</text>
+  </g>
+</svg>
+<figcaption><b>図39-1</b>　典型的な失敗の道筋。<strong>件数を管理せずに導入すると、必ずここに落ちます。</strong></figcaption>
+</figure>
+
+<h2>39.2 四つの戦略</h2>
+
+<figure>
+<svg viewBox="0 0 760 400" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="既存コードへの導入戦略の比較">
+  <g font-family="sans-serif">
+
+  <rect x="24" y="16" width="712" height="30" rx="6" fill="#1f2933"/>
+  <text x="380" y="36" text-anchor="middle" fill="#fff" font-size="12.5" font-weight="bold">既存の警告をどう扱うか ── 4つの選択肢</text>
+
+  <rect x="24" y="58" width="350" height="160" rx="10" fill="#eef4f9" stroke="#2f6f9f" stroke-width="1.6"/>
+  <text x="199" y="82" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#2f6f9f">① 一括修正</text>
+  <text x="199" y="102" text-anchor="middle" font-size="11" fill="#5a6b7a">自動修正を当てて全部消す</text>
+  <g font-size="11" fill="#1f2933">
+  <text x="44" y="128">向く：modernize-* など自動修正が確実なもの</text>
+  <text x="44" y="150">利点：一度で終わる</text>
+  <text x="44" y="172">欠点：巨大な差分。レビュー不能</text>
+  </g>
+  <rect x="44" y="184" width="310" height="24" rx="4" fill="#fff" stroke="#c5d6e4"/>
+  <text x="199" y="201" text-anchor="middle" font-size="10.5" fill="#2f6f9f">→ 第11章の手順を厳守すること</text>
+
+  <rect x="386" y="58" width="350" height="160" rx="10" fill="#eef5f0" stroke="#3d7a52" stroke-width="2.4"/>
+  <text x="561" y="82" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#3d7a52">② 差分のみ（推奨）</text>
+  <text x="561" y="102" text-anchor="middle" font-size="11" fill="#5a6b7a">変更した行だけをチェック</text>
+  <g font-size="11" fill="#1f2933">
+  <text x="406" y="128">向く：ほぼすべてのチェック</text>
+  <text x="406" y="150">利点：初日から CI を緑にできる</text>
+  <text x="406" y="172">欠点：既存の負債は残り続ける</text>
+  </g>
+  <rect x="406" y="184" width="310" height="24" rx="4" fill="#3d7a52"/>
+  <text x="561" y="201" text-anchor="middle" font-size="10.5" fill="#fff" font-weight="bold">→ 第15章の clang-tidy-diff</text>
+
+  <rect x="24" y="230" width="350" height="160" rx="10" fill="#fbf4ea" stroke="#b4661a" stroke-width="1.6"/>
+  <text x="199" y="254" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#b4661a">③ ベースライン</text>
+  <text x="199" y="274" text-anchor="middle" font-size="11" fill="#5a6b7a">現在の警告一覧を記録し、増加のみ検出</text>
+  <g font-size="11" fill="#1f2933">
+  <text x="44" y="300">向く：既存件数が多く、差分だけでは漏れる場合</text>
+  <text x="44" y="322">利点：既存も可視化される</text>
+  <text x="44" y="344">欠点：ベースラインの保守が要る</text>
+  </g>
+  <rect x="44" y="356" width="310" height="24" rx="4" fill="#fff" stroke="#e6d5bd"/>
+  <text x="199" y="373" text-anchor="middle" font-size="10.5" fill="#b4661a">行番号がずれると崩れる。運用に注意</text>
+
+  <rect x="386" y="230" width="350" height="160" rx="10" fill="#f4f6f8" stroke="#5a6b7a" stroke-width="1.6"/>
+  <text x="561" y="254" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#5a6b7a">④ ファイル単位</text>
+  <text x="561" y="274" text-anchor="middle" font-size="11" fill="#5a6b7a">きれいにしたディレクトリから順に有効化</text>
+  <g font-size="11" fill="#1f2933">
+  <text x="406" y="300">向く：モジュール境界が明確なプロジェクト</text>
+  <text x="406" y="322">利点：進捗がディレクトリ構造で見える</text>
+  <text x="406" y="344">欠点：ディレクトリごとの設定が増える</text>
+  </g>
+  <rect x="406" y="356" width="310" height="24" rx="4" fill="#fff" stroke="#d8dee4"/>
+  <text x="561" y="373" text-anchor="middle" font-size="10.5" fill="#5a6b7a">→ 第7章の InheritParentConfig</text>
+  </g>
+</svg>
+<figcaption><b>図39-2</b>　四つの戦略。<strong>②を基本にし、①③④を必要に応じて組み合わせる</strong>のが実践的です。</figcaption>
+</figure>
+
+<h2>39.3 「新規コードだけ厳しく」を実装する</h2>
+
+<p>第15章で作った差分解析が、ここで本領を発揮します。仕組みを整理します。</p>
+
+<figure>
+<svg viewBox="0 0 760 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="差分解析による段階導入の仕組み">
+  <defs>
+    <marker id="b39" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5a6b7a"/>
+    </marker>
+  </defs>
+  <g font-family="sans-serif">
+
+  <rect x="24" y="24" width="180" height="70" rx="8" fill="#1f2933"/>
+  <text x="114" y="50" text-anchor="middle" fill="#fff" font-size="12.5" font-weight="bold">プルリクエスト</text>
+  <text x="114" y="70" text-anchor="middle" fill="#b8c4cd" font-size="10.5">変更 40 行</text>
+  <text x="114" y="86" text-anchor="middle" fill="#b8c4cd" font-size="10.5">対象ファイル 3 本</text>
+
+  <line x1="204" y1="59" x2="236" y2="59" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#b39)"/>
+
+  <rect x="240" y="24" width="200" height="70" rx="8" fill="#3d7a52"/>
+  <text x="340" y="50" text-anchor="middle" fill="#fff" font-size="12.5" font-weight="bold">差分解析</text>
+  <text x="340" y="70" text-anchor="middle" fill="#d5e6da" font-size="10.5">git diff -U0 | clang-tidy-diff</text>
+  <text x="340" y="86" text-anchor="middle" fill="#d5e6da" font-size="10.5">→ 変更 40 行だけを検査</text>
+
+  <line x1="440" y1="59" x2="472" y2="59" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#b39)"/>
+
+  <rect x="476" y="24" width="260" height="70" rx="8" fill="#b4661a"/>
+  <text x="606" y="50" text-anchor="middle" fill="#fff" font-size="12.5" font-weight="bold">結果は 0〜数件</text>
+  <text x="606" y="70" text-anchor="middle" fill="#fde9d0" font-size="10.5">読める量。直せる量。</text>
+  <text x="606" y="86" text-anchor="middle" fill="#fde9d0" font-size="10.5">CI を落としても文句が出ない</text>
+
+  <rect x="24" y="116" width="712" height="76" rx="10" fill="#f4f6f8" stroke="#d8dee4"/>
+  <text x="46" y="140" font-size="12.5" font-weight="bold" fill="#1f2933">同じファイルの既存 200 件は？</text>
+  <text x="46" y="164" font-size="11.5" fill="#1f2933">・触っていない行なので<tspan font-weight="bold">報告されない</tspan></text>
+  <text x="46" y="184" font-size="11.5" fill="#1f2933">・その行を編集したときに初めて報告される　→ <tspan font-weight="bold">触るついでに直る</tspan></text>
+
+  <rect x="24" y="206" width="712" height="80" rx="10" fill="#eef5f0" stroke="#3d7a52" stroke-width="1.8"/>
+  <text x="46" y="230" font-size="12.5" font-weight="bold" fill="#3d7a52">この方式の三つの効果</text>
+  <g font-size="11.5" fill="#1f2933">
+  <text x="46" y="252">① 導入初日から CI が緑。心理的な抵抗が最小</text>
+  <text x="46" y="272">② 新しく書くコードは最初から規約に従う ── <tspan font-weight="bold">これ以上悪化しない</tspan></text>
+  </g>
+  </g>
+</svg>
+<figcaption><b>図39-3</b>　差分解析による段階導入。<strong>「触ったところは直す」が自動的に強制される</strong>のが要点。</figcaption>
+</figure>
+
+<pre class="term"><code><span class="p">&gt;</span> git diff -U0 origin/main... | python clang-tidy-diff.py -p1 -path out\build\ninja ^
+    -config-file tools\clang-tidy-diff.yml -j 8</code></pre>
+
+<div class="note">
+<span class="t">比較対象を <code>origin/main...</code> にする</span>
+<p>ドット3つ（<code>...</code>）を使うと、分岐点からの差分になります。ドット2つだと、main 側の変更まで差分に含まれ、<strong>自分が触っていない行まで検査対象になります。</strong> CI の設定では特に注意してください。</p>
+</div>
+
+<h2>39.4 90日の導入計画</h2>
+
+<p>実際の順序を、期間つきで示します。<strong>これは「守るべきスケジュール」ではなく「順序の型」</strong>として読んでください。</p>
+
+<table>
+<tr><th>期間</th><th>やること</th><th>本書の該当章</th></tr>
+<tr><td><strong>第1〜2週</strong><br>準備</td><td>LLVM のバージョンを揃える／<code>.clang-tidy</code> を作る／全体件数を測る（<strong>まだ CI には入れない</strong>）</td><td>第4・7・22章</td></tr>
+<tr><td><strong>第3〜4週</strong><br>合意形成</td><td>件数を見せて Tier を決める／命名規約を確定する／判断記録を作る</td><td>第20・22章</td></tr>
+<tr><td><strong>第5〜6週</strong><br>一括修正</td><td>安全な <code>modernize-*</code> と <code>readability-*</code> を全体に適用（1チェックずつコミット）</td><td>第11・18・20章</td></tr>
+<tr><td><strong>第7〜8週</strong><br>差分解析の導入</td><td>CI に差分解析を追加。<strong>最初は警告のみで、落とさない</strong></td><td>第15・40章</td></tr>
+<tr><td><strong>第9〜10週</strong><br>ゲート化</td><td>Tier 0 のチェックで CI を落とすようにする</td><td>第22・40章</td></tr>
+<tr><td><strong>第11〜12週</strong><br>カスタムチェック</td><td>自作チェックを1つ導入。回帰テストも同時に</td><td>第32・37章</td></tr>
+<tr><td><strong>継続</strong></td><td>件数の監視／Tier の昇格／不要チェックの引退</td><td>第22・37章</td></tr>
+</table>
+
+<div class="tip">
+<span class="t">最初の6週間、CI には何も入れない</span>
+<p>これが最も重要な点です。<strong>合意ができていない状態で CI を落とすようにすると、静的解析そのものが敵になります。</strong> 最初はローカルでの警告表示だけにして、「便利だ」と思ってもらう期間を作ってください。ゲート化はその後です。</p>
+</div>
+
+<h2>39.5 人が関わる部分</h2>
+
+<p>技術的な仕組みだけでは導入は進みません。</p>
+
+<table>
+<tr><th>場面</th><th>やること</th></tr>
+<tr><td>提案するとき</td><td><strong>件数を示す。</strong>「bugprone-* で 23 件出ました。うち 5 件は実際のバグです」── 抽象論ではなく具体例で</td></tr>
+<tr><td>規約を決めるとき</td><td>既存コードの<strong>多数派に合わせる</strong>（第20章）。理想を持ち込むと移行コストが跳ね上がる</td></tr>
+<tr><td>反対されたとき</td><td>そのチェックを Tier 3 にして<strong>理由を記録</strong>する。押し切らない（第22章）</td></tr>
+<tr><td>周知するとき</td><td>「何が変わるか」より<strong>「あなたのプルリクエストで何が起きるか」</strong>を書く</td></tr>
+<tr><td>ゲート化するとき</td><td><strong>事前に予告する。</strong> ある日突然 CI が落ちるようにしない</td></tr>
+</table>
+
+<div class="warn">
+<span class="t">最初のチェックは「明らかなバグ」を選ぶ</span>
+<p>導入初期に <code>readability-*</code> のような好みの分かれるチェックを持ち込むと、議論が命名規約の話に流れて本題に到達しません。<strong>最初は <code>bugprone-use-after-move</code> のような、誰も反対しないものから始めてください。</strong> 「静的解析は役に立つ」という共通認識ができてから、可読性の話をします。</p>
+</div>
+
+<h2>39.6 進捗を可視化する</h2>
+
+<p>導入が進んでいることを、数字で見せられるようにします。</p>
+
+<pre><code># tools/count-warnings.cmd
+@echo off
+setlocal
+set LOG=%TEMP%\tidy-count.log
+call tools\analyze-all.cmd &gt; "%LOG%" 2&gt;&amp;1
+
+echo === %DATE% ===
+for %%c in (bugprone performance modernize readability custom) do (
+    for /f %%n in ('findstr /c:"[%%c-" "%LOG%" ^| find /c /v ""') do echo %%c: %%n
+)
+endlocal</code></pre>
+
+<p>これを週次で実行し、記録を残します。<strong>数字が減っていくグラフは、次のチェックを導入する提案の最良の材料になります。</strong></p>
+
+<h2>39.7 【ハンズオン】導入計画を作る</h2>
+
+<div class="hands">
+<div class="hd">HANDS-ON 39　自分のプロジェクトの導入計画を立てる</div>
+<div class="bd">
+<ol>
+  <li><strong>現状を測る。</strong> 実際のプロジェクト（<code>TidyLab</code> でも、お手元の実プロジェクトでも）に対して、モジュール別の件数を出します。
+<pre><code>tools\count-warnings.cmd</code></pre>
+    <strong>この数字が計画の出発点です。</strong></li>
+
+  <li><strong>件数から戦略を選ぶ。</strong> 図39-2 の4戦略から、チェックごとに選びます。
+    <ul>
+      <li>自動修正が確実で件数が多い → ① 一括修正</li>
+      <li>それ以外の大半 → ② 差分のみ</li>
+      <li>モジュール境界が明確 → ④ ファイル単位も併用</li>
+    </ul>
+  </li>
+
+  <li><strong>最初の1つを選ぶ。</strong> 「誰も反対しない」チェックを1つ選びます。<code>bugprone-use-after-move</code> や <code>bugprone-undefined-memory-manipulation</code> が候補です。<strong>件数が0〜数件であることを確認してください。</strong></li>
+
+  <li><strong>差分解析を試す。</strong> 適当なブランチを切り、数行変更してから、
+<pre><code>git diff -U0 origin/main... | python clang-tidy-diff.py -p1 -path out\build\ninja</code></pre>
+    を実行します。<strong>既存の警告が出ず、変更行だけが検査される</strong>ことを確認してください。</li>
+
+  <li><strong><code>...</code> と <code>..</code> の違いを確認する。</strong> <code>origin/main..</code>（ドット2つ）で同じことを実行し、<strong>差分の範囲が変わる</strong>ことを確認します。</li>
+
+  <li><strong>一括修正を1チェック分やる。</strong> <code>modernize-use-nullptr</code> など安全なものを選び、第11章の手順（作業ツリーをきれいに → 書き出し → 適用 → 差分を全部読む → ビルド → コミット）で実行します。<strong>差分の行数を記録してください。</strong> これがレビュー可能な量かどうかの判断材料になります。</li>
+
+  <li><strong>90日計画を書く。</strong> 39.4 節の表を、自分のプロジェクトの事情に合わせて書き直します。<code>docs\clang-tidy-rollout.md</code> として保存してください。<strong>「いつ CI を落とすようにするか」を明記する</strong>のが要点です。</li>
+
+  <li><strong>周知文を書く。</strong> チームに送る想定で、次の3点を書きます。
+    <ul>
+      <li>いつから、何が変わるか</li>
+      <li><strong>あなたのプルリクエストで何が起きるか</strong>（変更行に警告が出る／CI が落ちる場合の条件）</li>
+      <li>困ったときの参照先（<code>docs\clang-tidy-troubleshooting.md</code>）</li>
+    </ul>
+  </li>
+
+  <li><strong>記録の仕組みを作る。</strong> <code>tools\count-warnings.cmd</code> を実行し、結果を <code>docs\warning-history.md</code> に日付つきで追記します。<strong>週次で実行する担当を決めてください。</strong></li>
+</ol>
+</div>
+</div>
+
+<div class="summary">
+<h2>この章のまとめ</h2>
+<ul>
+  <li>導入の失敗は「大量の警告 → 後回し → 誰も見ない」の道筋で起きる。<strong>一度ノイズと認識されたものは二度と読まれない。</strong></li>
+  <li>導入の目標は「全部直す」ではなく <strong>「これ以上悪化させない」</strong>。</li>
+  <li>戦略は4つ。<strong>②差分のみを基本</strong>とし、①一括修正・③ベースライン・④ファイル単位を組み合わせる。</li>
+  <li>差分解析なら<strong>導入初日から CI が緑</strong>で、しかも「触ったところは直す」が自動的に強制される。</li>
+  <li><code>git diff</code> の比較対象は <code>origin/main...</code>（ドット3つ）。<code>..</code> だと自分が触っていない行まで対象になる。</li>
+  <li><strong>最初の6週間、CI には何も入れない。</strong> 合意ができる前にゲート化すると、静的解析が敵になる。</li>
+  <li>最初のチェックは<strong>「誰も反対しない明らかなバグ」</strong>を選ぶ。可読性の話は後。</li>
+  <li>件数を週次で記録する。<strong>減っていく数字が、次の提案の最良の材料。</strong></li>
+</ul>
+</div>
+
+<p class="next"><strong>次章：</strong> 第40章「CI で回す」では、この章の計画を実際の CI 設定として実装します。差分解析、カスタムチェックの回帰テスト、実行時間の管理を扱います。</p>
+
+</div>
+</body>
+</html>

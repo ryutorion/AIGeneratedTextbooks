@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第29章 Query Based Custom Check とは何か ─ Clang-Tidy入門</title>
+<style>
+  :root{
+    --ink:#1f2933; --sub:#5a6b7a; --line:#d8dee4; --bg:#ffffff;
+    --code-bg:#f6f8fa; --code-line:#e2e8ee;
+    --accent:#2f6f9f; --accent-bg:#eef4f9;
+    --warn:#b4661a; --warn-bg:#fbf4ea;
+    --ok:#3d7a52; --ok-bg:#eef5f0;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0; background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Noto Sans JP","Meiryo",sans-serif;
+    font-size:16px; line-height:1.95; font-feature-settings:"palt" 1;}
+  .page{max-width:47rem; margin:0 auto; padding:3.5rem 1.6rem 6rem}
+  .chap-no{font-size:.8rem; letter-spacing:.22em; color:var(--accent); font-weight:700; margin:0 0 .5rem}
+  h1{font-size:1.75rem; line-height:1.5; margin:0 0 .6rem; letter-spacing:.01em}
+  .lede{color:var(--sub); font-size:1rem; margin:0 0 2.2rem; padding-bottom:1.6rem; border-bottom:2px solid var(--ink)}
+  h2{font-size:1.28rem; margin:3rem 0 1rem; padding-left:.7rem; border-left:4px solid var(--accent); line-height:1.6}
+  h3{font-size:1.05rem; margin:2.2rem 0 .7rem}
+  h3::before{content:"◆ "; color:var(--accent); font-size:.8em}
+  p{margin:0 0 1.1rem}
+  ul,ol{margin:0 0 1.2rem; padding-left:1.6rem}
+  li{margin:.35rem 0}
+  code{font-family:"Cascadia Mono","Consolas","SFMono-Regular",monospace; font-size:.9em;
+       background:var(--code-bg); border:1px solid var(--code-line); border-radius:4px; padding:.08em .35em}
+  pre{background:var(--code-bg); border:1px solid var(--code-line); border-radius:8px;
+      padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.7}
+  pre code{background:none; border:none; padding:0; font-size:.86rem}
+  pre.term{background:#1f2933; border-color:#1f2933; color:#e6edf3}
+  pre.term code{color:#e6edf3}
+  pre.term .p{color:#7fb2d6}
+  pre.term .o{color:#9fb3c0}
+  pre.term .y{color:#e8b075}
+  .cap{font-size:.82rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+  figure{margin:2rem 0 2.2rem}
+  figure svg{display:block; width:100%; height:auto; border:1px solid var(--line); border-radius:8px; background:#fff}
+  figcaption{font-size:.85rem; color:var(--sub); margin-top:.6rem}
+  figcaption b{color:var(--ink)}
+  .box{border-radius:8px; padding:1rem 1.2rem; margin:1.6rem 0; font-size:.94rem}
+  .box p:last-child{margin-bottom:0}
+  .box .t{font-weight:700; display:block; margin-bottom:.35rem; font-size:.88rem; letter-spacing:.04em}
+  .note{background:var(--accent-bg); border-left:4px solid var(--accent)} .note .t{color:var(--accent)}
+  .warn{background:var(--warn-bg); border-left:4px solid var(--warn)} .warn .t{color:var(--warn)}
+  .tip{background:var(--ok-bg); border-left:4px solid var(--ok)} .tip .t{color:var(--ok)}
+  .hands{border:1px solid var(--line); border-radius:10px; margin:2rem 0; overflow:hidden}
+  .hands>.hd{background:var(--ink); color:#fff; padding:.55rem 1.1rem; font-size:.85rem; letter-spacing:.1em; font-weight:700}
+  .hands>.bd{padding:1.3rem 1.3rem .4rem}
+  .hands ol{counter-reset:step; list-style:none; padding-left:0}
+  .hands ol>li{counter-increment:step; position:relative; padding-left:2.4rem; margin:0 0 1.2rem}
+  .hands ol>li::before{content:counter(step); position:absolute; left:0; top:.25rem;
+    width:1.7rem; height:1.7rem; border-radius:50%; background:var(--accent); color:#fff;
+    font-size:.82rem; font-weight:700; display:flex; align-items:center; justify-content:center; line-height:1}
+  table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+  th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+  th{background:var(--code-bg); font-weight:700}
+  .summary{border:2px solid var(--ink); border-radius:10px; padding:1.3rem 1.5rem; margin:3rem 0 1rem}
+  .summary h2{margin:0 0 .8rem; border:none; padding:0; font-size:1.1rem}
+  .summary ul{margin-bottom:0}
+  .next{color:var(--sub); font-size:.94rem; border-top:1px solid var(--line); padding-top:1.2rem; margin-top:2.5rem}
+  @media (max-width:600px){ body{font-size:15px} .page{padding:2.2rem 1.1rem 4rem} h1{font-size:1.4rem} }
+</style>
+</head>
+<body>
+<div class="page">
+
+<p class="chap-no">第 29 章</p>
+<h1>Query Based Custom Check とは何か</h1>
+<p class="lede">本書の主題に到達しました。第4部で標準チェックを使い尽くし、第5部でクエリを書けるようになった。あとは、そのクエリを Clang-Tidy のチェックとして登録するだけです。C++ のコードは一行も書きません。<code>.clang-tidy</code> に数行足すだけで、あなたのチームにしか存在しないルールが警告として出るようになります。</p>
+
+<h2>29.1 標準チェックには存在しないもの</h2>
+
+<p>第4部を振り返ってください。数百のチェックを見てきましたが、次のようなルールは一つもありませんでした。</p>
+
+<figure>
+<svg viewBox="0 0 760 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="標準チェックがカバーしない領域">
+  <g font-family="sans-serif">
+
+  <rect x="24" y="20" width="712" height="34" rx="8" fill="#1f2933"/>
+  <text x="380" y="43" text-anchor="middle" fill="#fff" font-size="13" font-weight="bold">「言語の問題」と「あなたのチームの問題」</text>
+
+  <rect x="24" y="66" width="350" height="212" rx="10" fill="#eef4f9" stroke="#2f6f9f" stroke-width="1.8"/>
+  <text x="199" y="92" text-anchor="middle" font-size="13" font-weight="bold" fill="#2f6f9f">標準チェックが扱う領域</text>
+  <text x="199" y="112" text-anchor="middle" font-size="11" fill="#5a6b7a">誰が書いても問題になること</text>
+  <g font-size="11.5" fill="#1f2933">
+  <text x="44" y="140">・ムーブ後の使用</text>
+  <text x="44" y="164">・new[] と delete の不一致</text>
+  <text x="44" y="188">・不要なコピー</text>
+  <text x="44" y="212">・strcpy などの危険な C 関数</text>
+  <text x="44" y="236">・命名形式（CamelCase かどうか）</text>
+  </g>
+  <text x="199" y="264" text-anchor="middle" font-size="11" fill="#2f6f9f" font-weight="bold">数百のチェックが用意されている</text>
+
+  <rect x="386" y="66" width="350" height="212" rx="10" fill="#fbf4ea" stroke="#b4661a" stroke-width="2.2"/>
+  <text x="561" y="92" text-anchor="middle" font-size="13" font-weight="bold" fill="#b4661a">標準チェックが扱えない領域</text>
+  <text x="561" y="112" text-anchor="middle" font-size="11" fill="#5a6b7a">あなたのチームにしか存在しないこと</text>
+  <g font-size="11.5" fill="#1f2933">
+  <text x="406" y="140">・「うちでは LegacyCopy() を使わない」</text>
+  <text x="406" y="164">・「Component 派生は接尾辞を付ける」</text>
+  <text x="406" y="188">・「描画パスでは動的確保を禁止」</text>
+  <text x="406" y="212">・「この API は必ず戻り値を確認する」</text>
+  <text x="406" y="236">・「旧 SDK の型は新しい型に移行中」</text>
+  </g>
+  <text x="561" y="264" text-anchor="middle" font-size="11" fill="#b4661a" font-weight="bold">用意されているはずがない</text>
+  </g>
+</svg>
+<figcaption><b>図29-1</b>　標準チェックの守備範囲。右側は、あなたが書かない限り誰も書いてくれない。</figcaption>
+</figure>
+
+<p>右側のルールは、いまはコードレビューで人間が指摘しているはずです。しかし人間のレビューは、疲れるし、見落とすし、新しいメンバーは規約を知りません。<strong>機械にやらせるべき仕事です。</strong></p>
+
+<h2>29.2 拡張の二つの道</h2>
+
+<p>Clang-Tidy に独自チェックを追加する方法は2つあります。</p>
+
+<figure>
+<svg viewBox="0 0 760 340" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="C++ 実装とクエリベースの比較">
+  <g font-family="sans-serif">
+
+  <rect x="24" y="20" width="350" height="300" rx="10" fill="#f4f6f8" stroke="#5a6b7a" stroke-width="1.6"/>
+  <text x="199" y="46" text-anchor="middle" font-size="13" font-weight="bold" fill="#5a6b7a">従来：C++ で実装する</text>
+
+  <g font-size="11.5" fill="#1f2933">
+  <text x="44" y="76">1. LLVM のソースを取得</text>
+  <text x="44" y="100">2. add_new_check.py で雛形生成</text>
+  <text x="44" y="124">3. registerMatchers / check を実装</text>
+  <text x="44" y="148">4. clang-tidy 本体をビルド</text>
+  <text x="44" y="172">5. 全開発者に配布</text>
+  </g>
+
+  <rect x="44" y="192" width="310" height="52" rx="6" fill="#fff" stroke="#d8dee4"/>
+  <text x="199" y="214" text-anchor="middle" font-size="11" fill="#a04a34" font-weight="bold">ビルドに数時間、数十 GB</text>
+  <text x="199" y="232" text-anchor="middle" font-size="11" fill="#5a6b7a">ルール1個追加するたびに再ビルド</text>
+
+  <rect x="44" y="256" width="310" height="48" rx="6" fill="#5a6b7a"/>
+  <text x="199" y="278" text-anchor="middle" font-size="11" fill="#fff" font-weight="bold">できることは無制限</text>
+  <text x="199" y="295" text-anchor="middle" font-size="10.5" fill="#cfd8de">状態を持つ解析も書ける（第42章）</text>
+
+  <rect x="386" y="20" width="350" height="300" rx="10" fill="#fbf4ea" stroke="#b4661a" stroke-width="2.4"/>
+  <text x="561" y="46" text-anchor="middle" font-size="13" font-weight="bold" fill="#b4661a">本書：クエリで書く</text>
+
+  <g font-size="11.5" fill="#1f2933">
+  <text x="406" y="76">1. clang-query でクエリを確定（第5部）</text>
+  <text x="406" y="100">2. .clang-tidy に転記</text>
+  <text x="406" y="124">3. 終わり</text>
+  </g>
+
+  <rect x="406" y="146" width="310" height="52" rx="6" fill="#fff" stroke="#e6d5bd"/>
+  <text x="561" y="168" text-anchor="middle" font-size="11" fill="#3d7a52" font-weight="bold">ビルド不要・配布不要</text>
+  <text x="561" y="186" text-anchor="middle" font-size="11" fill="#5a6b7a">設定ファイルはリポジトリに入る</text>
+
+  <rect x="406" y="210" width="310" height="52" rx="6" fill="#fff" stroke="#e6d5bd"/>
+  <text x="561" y="232" text-anchor="middle" font-size="11" fill="#1f2933" font-weight="bold">ルール追加は数行</text>
+  <text x="561" y="250" text-anchor="middle" font-size="11" fill="#5a6b7a">プルリクエストでレビューできる</text>
+
+  <rect x="406" y="274" width="310" height="34" rx="6" fill="#b4661a"/>
+  <text x="561" y="296" text-anchor="middle" font-size="11" fill="#fff" font-weight="bold">できるのは AST の形の照合まで</text>
+  </g>
+</svg>
+<figcaption><b>図29-2</b>　二つの拡張手段。<strong>できることの範囲は狭いが、コストが桁違いに小さい。</strong> だから実際に使われる。</figcaption>
+</figure>
+
+<div class="tip">
+<span class="t">「できることが少ない」は欠点ではない</span>
+<p>第2章の図2-1 を思い出してください。Clang-Tidy のチェックには3方式あり、そのうち <strong>①AST Matcher 方式が大多数を占めていました</strong>。第2章のハンズオンでも、5つの問題のうち4つが AST の形だけで検出できました。<strong>実務のルールの大半は、形の照合で足ります。</strong> 足りない場合の話は第42章で扱います。</p>
+</div>
+
+<h2>29.3 仕組み</h2>
+
+<figure>
+<svg viewBox="0 0 760 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Query Based Custom Check の内部処理">
+  <defs>
+    <marker id="a29" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5a6b7a"/>
+    </marker>
+  </defs>
+  <g font-family="sans-serif">
+
+  <rect x="24" y="24" width="170" height="70" rx="8" fill="#2f6f9f"/>
+  <text x="109" y="50" text-anchor="middle" fill="#fff" font-size="12.5" font-weight="bold">.clang-tidy</text>
+  <text x="109" y="70" text-anchor="middle" fill="#d6e6f2" font-size="10.5">CustomChecks:</text>
+  <text x="109" y="86" text-anchor="middle" fill="#d6e6f2" font-size="10.5">Query: "match …"</text>
+
+  <line x1="194" y1="59" x2="224" y2="59" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#a29)"/>
+
+  <rect x="228" y="24" width="180" height="70" rx="8" fill="#b4661a"/>
+  <text x="318" y="50" text-anchor="middle" fill="#fff" font-size="12.5" font-weight="bold">クエリ文字列を解析</text>
+  <text x="318" y="70" text-anchor="middle" fill="#fde9d0" font-size="10.5">clang-query と同じパーサ</text>
+  <text x="318" y="86" text-anchor="middle" fill="#fde9d0" font-size="10.5">起動時に一度だけ</text>
+
+  <line x1="408" y1="59" x2="438" y2="59" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#a29)"/>
+
+  <rect x="442" y="24" width="180" height="70" rx="8" fill="#3d7a52"/>
+  <text x="532" y="50" text-anchor="middle" fill="#fff" font-size="12.5" font-weight="bold">Matcher を動的に生成</text>
+  <text x="532" y="70" text-anchor="middle" fill="#d5e6da" font-size="10.5">C++ で書いたチェックと</text>
+  <text x="532" y="86" text-anchor="middle" fill="#d5e6da" font-size="10.5">同じ仕組みに載る</text>
+
+  <line x1="532" y1="94" x2="532" y2="118" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#a29)"/>
+
+  <rect x="180" y="122" width="400" height="60" rx="8" fill="#1f2933"/>
+  <text x="380" y="146" text-anchor="middle" fill="#fff" font-size="12.5" font-weight="bold">custom モジュールに登録される</text>
+  <text x="380" y="166" text-anchor="middle" fill="#b8c4cd" font-size="11">Name: no-strcpy　→　チェック名は <tspan fill="#e8b075" font-family="monospace">custom-no-strcpy</tspan></text>
+
+  <line x1="380" y1="182" x2="380" y2="206" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#a29)"/>
+
+  <rect x="180" y="210" width="400" height="52" rx="8" fill="#2f6f9f"/>
+  <text x="380" y="232" text-anchor="middle" fill="#fff" font-size="12.5" font-weight="bold">以後は標準チェックとまったく同じ</text>
+  <text x="380" y="250" text-anchor="middle" fill="#d6e6f2" font-size="10.5">-checks で有効化／NOLINT で抑制／WarningsAsErrors でエラー化</text>
+
+  <rect x="24" y="278" width="712" height="34" rx="8" fill="#eef5f0" stroke="#3d7a52" stroke-width="1.5"/>
+  <text x="380" y="300" text-anchor="middle" font-size="11.5" fill="#3d7a52" font-weight="bold">第2部で学んだ運用の知識が、そのまま自作チェックにも効く</text>
+  </g>
+</svg>
+<figcaption><b>図29-3</b>　内部処理。<strong>登録されたあとは標準チェックと区別がない</strong>のが、この仕組みの優れた点。</figcaption>
+</figure>
+
+<p>公式ドキュメントはこう説明しています。「カスタムチェックは <strong>clang-query の構文に基づく</strong>。すべてのカスタムチェックは、名前の衝突を避けるため <strong>custom モジュールに登録される</strong>」。</p>
+
+<h2>29.4 実験的機能であることの意味</h2>
+
+<div class="warn">
+<span class="t">公式ドキュメントの明記事項</span>
+<p>「この機能は現在<strong>実験段階</strong>であるため、<code>--experimental-custom-checks</code> によって明示的に有効化する必要がある」<br>
+「設定の構造は将来変更される可能性がある（ただし将来の変更は前方互換性を目指している）」<br>
+「機能は完全に AST マッチャーライブラリに依存しているため、<strong>クエリの記述は AST マッチャーの更新に伴って変わりうる</strong>」</p>
+</div>
+
+<p>これを実務の言葉に翻訳すると、次の3つになります。</p>
+
+<table>
+<tr><th>ドキュメントの記述</th><th>実務上の対処</th></tr>
+<tr><td>明示的な有効化が必要</td><td>フラグを渡す経路を確保する（29.5 節）。渡せない環境では動かない</td></tr>
+<tr><td>設定の構造が変わりうる</td><td>LLVM 更新時にカスタムチェックが動くことを確認する手順を持つ（第22章の図22-3 に追加）</td></tr>
+<tr><td>クエリの記述が変わりうる</td><td><strong>回帰テスト用のソースを用意しておく</strong>（第37章）。「昨日まで動いていた」を検出できるようにする</td></tr>
+</table>
+
+<p>第4章で「バージョンを確認する習慣」を作ったのは、このためです。</p>
+
+<h2>29.5 有効化の経路 ── Visual Studio での制約</h2>
+
+<p>コマンドラインからは単純です。</p>
+
+<pre class="term"><code><span class="p">&gt;</span> clang-tidy --experimental-custom-checks config_loader.cpp -- -std=c++23</code></pre>
+
+<p>問題は Visual Studio です。第13章の図13-2 を思い出してください。プロパティページから渡せるのは次の3種類でした。</p>
+
+<table>
+<tr><th>プロパティ</th><th>渡り先</th><th><code>--experimental-custom-checks</code> を渡せるか</th></tr>
+<tr><td>Clang-Tidy チェック</td><td><code>--checks</code> の値</td><td>×（チェック名を書く欄）</td></tr>
+<tr><td>Clang-Tidy 追加オプション</td><td><code>--extra-args</code> → <strong>コンパイラへ</strong></td><td>×（clang-tidy 自身への引数ではない）</td></tr>
+<tr><td>Clang-Tidy 事前追加オプション</td><td><code>--extra-args-before</code> → <strong>コンパイラへ</strong></td><td>×（同上）</td></tr>
+</table>
+
+<div class="warn">
+<span class="t">プロパティページから直接は渡せない</span>
+<p><strong>Visual Studio の統合には、clang-tidy 本体に任意の引数を渡すための項目がありません。</strong> したがって、IDE のバックグラウンド解析でカスタムチェックを動かすには工夫が要ります。この制約は本書執筆時点のものです。将来のバージョンで対応が入る可能性はあるので、<code>--help</code> やプロパティページを確認してみてください。</p>
+</div>
+
+<h3>現実的な三つの経路</h3>
+
+<figure>
+<svg viewBox="0 0 760 330" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="カスタムチェックを動かす三つの経路">
+  <g font-family="sans-serif">
+
+  <rect x="24" y="20" width="230" height="290" rx="10" fill="#eef5f0" stroke="#3d7a52" stroke-width="2.2"/>
+  <text x="139" y="46" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#3d7a52">経路1：コマンドライン</text>
+  <text x="139" y="66" text-anchor="middle" font-size="11" fill="#5a6b7a">本書の標準</text>
+  <rect x="40" y="80" width="198" height="60" rx="6" fill="#1f2933"/>
+  <text x="52" y="100" font-size="9.5" font-family="monospace" fill="#e6edf3">clang-tidy</text>
+  <text x="52" y="116" font-size="9.5" font-family="monospace" fill="#a3d9a5">  --experimental-</text>
+  <text x="52" y="132" font-size="9.5" font-family="monospace" fill="#a3d9a5">  custom-checks</text>
+  <g font-size="11" fill="#1f2933">
+  <text x="40" y="164">・すぐ動く</text>
+  <text x="40" y="186">・run-clang-tidy も同様</text>
+  <text x="40" y="208">・差分解析にも使える</text>
+  </g>
+  <rect x="40" y="226" width="198" height="66" rx="6" fill="#3d7a52"/>
+  <text x="139" y="248" text-anchor="middle" font-size="11" fill="#fff" font-weight="bold">CI ではこれで十分</text>
+  <text x="139" y="268" text-anchor="middle" font-size="10.5" fill="#d5e6da">第40章の CI 設定に</text>
+  <text x="139" y="284" text-anchor="middle" font-size="10.5" fill="#d5e6da">そのまま組み込める</text>
+
+  <rect x="266" y="20" width="230" height="290" rx="10" fill="#eef4f9" stroke="#2f6f9f" stroke-width="1.8"/>
+  <text x="381" y="46" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#2f6f9f">経路2：ラッパー</text>
+  <text x="381" y="66" text-anchor="middle" font-size="11" fill="#5a6b7a">IDE でも動かしたい場合</text>
+  <rect x="282" y="80" width="198" height="76" rx="6" fill="#fff" stroke="#c5d6e4"/>
+  <text x="381" y="100" text-anchor="middle" font-size="10.5" fill="#1f2933">小さな中継用 exe を作り</text>
+  <text x="381" y="118" text-anchor="middle" font-size="10.5" fill="#1f2933">フラグを足して本体を呼ぶ</text>
+  <text x="381" y="140" text-anchor="middle" font-size="10.5" fill="#2f6f9f" font-weight="bold">ツール ディレクトリで指定</text>
+  <g font-size="11" fill="#1f2933">
+  <text x="282" y="180">・波線として出せる</text>
+  <text x="282" y="202">・全開発者に配る必要あり</text>
+  <text x="282" y="224">・保守対象が1つ増える</text>
+  </g>
+  <rect x="282" y="240" width="198" height="52" rx="6" fill="#fbf4ea" stroke="#b4661a"/>
+  <text x="381" y="262" text-anchor="middle" font-size="10.5" fill="#b4661a" font-weight="bold">実験的機能への依存を</text>
+  <text x="381" y="280" text-anchor="middle" font-size="10.5" fill="#b4661a" font-weight="bold">環境に埋め込むことになる</text>
+
+  <rect x="508" y="20" width="228" height="290" rx="10" fill="#f4f6f8" stroke="#5a6b7a" stroke-width="1.6"/>
+  <text x="622" y="46" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#5a6b7a">経路3：役割を分ける</text>
+  <text x="622" y="66" text-anchor="middle" font-size="11" fill="#5a6b7a">最も無理がない</text>
+  <rect x="524" y="80" width="196" height="76" rx="6" fill="#fff" stroke="#d8dee4"/>
+  <text x="622" y="102" text-anchor="middle" font-size="10.5" fill="#1f2933">IDE：標準チェックのみ</text>
+  <text x="622" y="124" text-anchor="middle" font-size="10.5" fill="#1f2933">（書きながらの気づき）</text>
+  <text x="622" y="146" text-anchor="middle" font-size="10.5" fill="#2f6f9f" font-weight="bold">CI：＋カスタムチェック</text>
+  <g font-size="11" fill="#1f2933">
+  <text x="524" y="180">・追加の仕掛けが不要</text>
+  <text x="524" y="202">・IDE の応答が速いまま</text>
+  <text x="524" y="224">・気づくのが遅れる</text>
+  </g>
+  <rect x="524" y="240" width="196" height="52" rx="6" fill="#5a6b7a"/>
+  <text x="622" y="262" text-anchor="middle" font-size="10.5" fill="#fff" font-weight="bold">第15章の差分解析と</text>
+  <text x="622" y="280" text-anchor="middle" font-size="10.5" fill="#fff" font-weight="bold">組み合わせると実用的</text>
+  </g>
+</svg>
+<figcaption><b>図29-4</b>　三つの経路。<strong>本書のハンズオンは経路1（コマンドライン）で進めます。</strong></figcaption>
+</figure>
+
+<h2>29.6 【ハンズオン】有効化を確認する</h2>
+
+<div class="hands">
+<div class="hd">HANDS-ON 29　自分の環境で機能が使えるかを確定させる</div>
+<div class="bd">
+<ol>
+  <li><strong>フラグの存在を再確認する。</strong> 第4章でやった確認を、もう一度行います。
+<pre><code>clang-tidy --help | findstr experimental-custom-checks</code></pre>
+    <ul>
+      <li><strong>出力あり</strong> → 次へ進みます。</li>
+      <li><strong>出力なし</strong> → 第4章 4.4 節に戻り、LLVM 22 以降を導入してください。<strong>ここが通らないと第6部は先に進めません。</strong></li>
+    </ul>
+  </li>
+
+  <li><strong>設定キーが認識されるか確かめる。</strong> <code>.clang-tidy</code> に空のカスタムチェック定義を書きます。
+<pre><code>CustomChecks: []</code></pre>
+    そのうえで、
+<pre><code>clang-tidy --experimental-custom-checks --dump-config config_loader.cpp -- -std=c++23</code></pre>
+    を実行し、出力に <code>CustomChecks</code> が含まれるかを確認します。</li>
+
+  <li><strong>フラグなしとの違いを見る。</strong> 同じコマンドから <code>--experimental-custom-checks</code> を外して実行し、出力を比較します。<strong>この差が「実験的機能が有効かどうか」の目印になります。</strong></li>
+
+  <li><strong>Visual Studio の制約を確認する。</strong> プロパティページ（<code>コード分析 &gt; Clang-Tidy</code>）を開き、<strong>clang-tidy 本体に任意の引数を渡す項目がない</strong>ことを自分の目で確認してください。もし本書執筆時点になかった項目が増えていれば、それが使えます。</li>
+
+  <li><strong>作業手順を決める。</strong> 図29-4 の3経路から選びます。本書は経路1（コマンドライン）で進めますが、最終的にどうするかを決めておいてください。<strong>第38章で配布方法を扱うとき、この選択が効いてきます。</strong></li>
+
+  <li><strong>クエリを準備する。</strong> 第28章のハンズオンで作った3つのクエリファイルを開き、内容を確認します。次章で、この最初の1つを <code>.clang-tidy</code> に移します。</li>
+
+  <li><strong>回帰テスト用のファイルを用意する。</strong> 第28章の <code>ch28_rules.cpp</code> を <code>tests\custom-checks\rules.cpp</code> にコピーします。<strong>29.4 節で述べたとおり、クエリの記述は将来変わりえます。</strong> 「以前は検出できていたものが検出されなくなった」を発見するための土台を、いま作っておきます。</li>
+</ol>
+</div>
+</div>
+
+<div class="summary">
+<h2>この章のまとめ</h2>
+<ul>
+  <li>標準チェックは「誰が書いても問題になること」を扱う。<strong>「あなたのチームにしか存在しないルール」は自分で書くしかない。</strong></li>
+  <li>拡張には C++ 実装とクエリベースの2つがある。クエリベースは<strong>できることが狭い代わりに、ビルドも配布も不要</strong>。</li>
+  <li>クエリは起動時に解析され、Matcher が動的に生成される。<strong>登録後は標準チェックと区別がない</strong>（<code>-checks</code>、<code>NOLINT</code>、<code>WarningsAsErrors</code> がそのまま効く）。</li>
+  <li>チェックは <code>custom</code> モジュールに登録される。<code>Name: no-strcpy</code> → <code>custom-no-strcpy</code>。</li>
+  <li><strong>実験的機能</strong>であり、<code>--experimental-custom-checks</code> による明示的な有効化が必要。設定構造もクエリの記述も将来変わりうる。</li>
+  <li><strong>Visual Studio のプロパティページからこのフラグは渡せない。</strong> コマンドライン／ラッパー／役割分担の3経路から選ぶ。</li>
+  <li>将来の変更に備え、<strong>回帰テスト用のソースを最初に用意する</strong>。</li>
+</ul>
+</div>
+
+<p class="next"><strong>次章：</strong> 第30章「最初のカスタムチェック」で、実際に <code>.clang-tidy</code> にクエリを書き、Visual Studio のエラー一覧に自作の警告を出します。</p>
+
+</div>
+</body>
+</html>

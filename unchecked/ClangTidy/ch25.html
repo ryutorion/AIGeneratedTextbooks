@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第25章 Matcher の三分類 ─ Clang-Tidy入門</title>
+<style>
+  :root{
+    --ink:#1f2933; --sub:#5a6b7a; --line:#d8dee4; --bg:#ffffff;
+    --code-bg:#f6f8fa; --code-line:#e2e8ee;
+    --accent:#2f6f9f; --accent-bg:#eef4f9;
+    --warn:#b4661a; --warn-bg:#fbf4ea;
+    --ok:#3d7a52; --ok-bg:#eef5f0;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0; background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Noto Sans JP","Meiryo",sans-serif;
+    font-size:16px; line-height:1.95; font-feature-settings:"palt" 1;}
+  .page{max-width:47rem; margin:0 auto; padding:3.5rem 1.6rem 6rem}
+  .chap-no{font-size:.8rem; letter-spacing:.22em; color:var(--accent); font-weight:700; margin:0 0 .5rem}
+  h1{font-size:1.85rem; line-height:1.5; margin:0 0 .6rem; letter-spacing:.01em}
+  .lede{color:var(--sub); font-size:1rem; margin:0 0 2.2rem; padding-bottom:1.6rem; border-bottom:2px solid var(--ink)}
+  h2{font-size:1.28rem; margin:3rem 0 1rem; padding-left:.7rem; border-left:4px solid var(--accent); line-height:1.6}
+  h3{font-size:1.05rem; margin:2.2rem 0 .7rem}
+  h3::before{content:"◆ "; color:var(--accent); font-size:.8em}
+  p{margin:0 0 1.1rem}
+  ul,ol{margin:0 0 1.2rem; padding-left:1.6rem}
+  li{margin:.35rem 0}
+  code{font-family:"Cascadia Mono","Consolas","SFMono-Regular",monospace; font-size:.9em;
+       background:var(--code-bg); border:1px solid var(--code-line); border-radius:4px; padding:.08em .35em}
+  pre{background:var(--code-bg); border:1px solid var(--code-line); border-radius:8px;
+      padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.7}
+  pre code{background:none; border:none; padding:0; font-size:.86rem}
+  pre.term{background:#1f2933; border-color:#1f2933; color:#e6edf3}
+  pre.term code{color:#e6edf3}
+  pre.term .p{color:#7fb2d6}
+  pre.term .o{color:#9fb3c0}
+  pre.term .y{color:#e8b075}
+  .cap{font-size:.82rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+  figure{margin:2rem 0 2.2rem}
+  figure svg{display:block; width:100%; height:auto; border:1px solid var(--line); border-radius:8px; background:#fff}
+  figcaption{font-size:.85rem; color:var(--sub); margin-top:.6rem}
+  figcaption b{color:var(--ink)}
+  .box{border-radius:8px; padding:1rem 1.2rem; margin:1.6rem 0; font-size:.94rem}
+  .box p:last-child{margin-bottom:0}
+  .box .t{font-weight:700; display:block; margin-bottom:.35rem; font-size:.88rem; letter-spacing:.04em}
+  .note{background:var(--accent-bg); border-left:4px solid var(--accent)} .note .t{color:var(--accent)}
+  .warn{background:var(--warn-bg); border-left:4px solid var(--warn)} .warn .t{color:var(--warn)}
+  .tip{background:var(--ok-bg); border-left:4px solid var(--ok)} .tip .t{color:var(--ok)}
+  .hands{border:1px solid var(--line); border-radius:10px; margin:2rem 0; overflow:hidden}
+  .hands>.hd{background:var(--ink); color:#fff; padding:.55rem 1.1rem; font-size:.85rem; letter-spacing:.1em; font-weight:700}
+  .hands>.bd{padding:1.3rem 1.3rem .4rem}
+  .hands ol{counter-reset:step; list-style:none; padding-left:0}
+  .hands ol>li{counter-increment:step; position:relative; padding-left:2.4rem; margin:0 0 1.2rem}
+  .hands ol>li::before{content:counter(step); position:absolute; left:0; top:.25rem;
+    width:1.7rem; height:1.7rem; border-radius:50%; background:var(--accent); color:#fff;
+    font-size:.82rem; font-weight:700; display:flex; align-items:center; justify-content:center; line-height:1}
+  table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+  th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+  th{background:var(--code-bg); font-weight:700}
+  .summary{border:2px solid var(--ink); border-radius:10px; padding:1.3rem 1.5rem; margin:3rem 0 1rem}
+  .summary h2{margin:0 0 .8rem; border:none; padding:0; font-size:1.1rem}
+  .summary ul{margin-bottom:0}
+  .next{color:var(--sub); font-size:.94rem; border-top:1px solid var(--line); padding-top:1.2rem; margin-top:2.5rem}
+  @media (max-width:600px){ body{font-size:15px} .page{padding:2.2rem 1.1rem 4rem} h1{font-size:1.5rem} }
+</style>
+</head>
+<body>
+<div class="page">
+
+<p class="chap-no">第 25 章</p>
+<h1>Matcher の三分類</h1>
+<p class="lede"><code>callExpr(callee(functionDecl(hasName("strcpy"))))</code>。前章の最後に打ったこの式は、暗号ではありません。<strong>三種類の Matcher が、決まった役割で組み合わさっているだけ</strong>です。公式リファレンスもこの三分類で整理されています。分類が分かれば、リファレンスを引けるようになり、クエリを自分で組み立てられるようになります。</p>
+
+<h2>25.1 三つの分類</h2>
+
+<p>AST Matcher Reference は、Matcher を次の3つに分類しています。</p>
+
+<figure>
+<svg viewBox="0 0 760 400" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Matcher の三分類とそれぞれの役割">
+  <defs>
+    <marker id="a25" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#3d7a52"/>
+    </marker>
+  </defs>
+  <g font-family="sans-serif">
+
+  <!-- 1 Node -->
+  <rect x="24" y="20" width="712" height="112" rx="10" fill="#eef4f9" stroke="#2f6f9f" stroke-width="2"/>
+  <text x="44" y="46" font-size="13.5" font-weight="bold" fill="#2f6f9f">① Node Matcher ── 「どの種類のノードか」</text>
+  <text x="44" y="68" font-size="11.5" fill="#5a6b7a">公式の定義：特定の種類の AST ノードにマッチする Matcher</text>
+
+  <g>
+    <rect x="44" y="80" width="120" height="34" rx="5" fill="#2f6f9f"/>
+    <text x="104" y="102" text-anchor="middle" font-size="11" font-family="monospace" fill="#fff">functionDecl()</text>
+    <rect x="174" y="80" width="110" height="34" rx="5" fill="#2f6f9f"/>
+    <text x="229" y="102" text-anchor="middle" font-size="11" font-family="monospace" fill="#fff">callExpr()</text>
+    <rect x="294" y="80" width="120" height="34" rx="5" fill="#2f6f9f"/>
+    <text x="354" y="102" text-anchor="middle" font-size="11" font-family="monospace" fill="#fff">cxxRecordDecl()</text>
+    <rect x="424" y="80" width="100" height="34" rx="5" fill="#2f6f9f"/>
+    <text x="474" y="102" text-anchor="middle" font-size="11" font-family="monospace" fill="#fff">varDecl()</text>
+  </g>
+  <text x="546" y="94" font-size="11" fill="#1f2933">必ず<tspan font-weight="bold">これから始める</tspan>。</text>
+  <text x="546" y="112" font-size="11" fill="#1f2933">木のどの種類を探すかの宣言</text>
+
+  <!-- 2 Narrowing -->
+  <rect x="24" y="144" width="712" height="112" rx="10" fill="#fbf4ea" stroke="#b4661a" stroke-width="2"/>
+  <text x="44" y="170" font-size="13.5" font-weight="bold" fill="#b4661a">② Narrowing Matcher ── 「その属性を持つか」</text>
+  <text x="44" y="192" font-size="11.5" fill="#5a6b7a">公式の定義：AST ノードの属性にマッチする Matcher</text>
+
+  <g>
+    <rect x="44" y="204" width="110" height="34" rx="5" fill="#b4661a"/>
+    <text x="99" y="226" text-anchor="middle" font-size="11" font-family="monospace" fill="#fff">hasName("x")</text>
+    <rect x="164" y="204" width="90" height="34" rx="5" fill="#b4661a"/>
+    <text x="209" y="226" text-anchor="middle" font-size="11" font-family="monospace" fill="#fff">isConst()</text>
+    <rect x="264" y="204" width="100" height="34" rx="5" fill="#b4661a"/>
+    <text x="314" y="226" text-anchor="middle" font-size="11" font-family="monospace" fill="#fff">isStatic()</text>
+    <rect x="374" y="204" width="140" height="34" rx="5" fill="#b4661a"/>
+    <text x="444" y="226" text-anchor="middle" font-size="11" font-family="monospace" fill="#fff">parameterCountIs(2)</text>
+  </g>
+  <text x="536" y="218" font-size="11" fill="#1f2933">その場に<tspan font-weight="bold">留まったまま</tspan></text>
+  <text x="536" y="236" font-size="11" fill="#1f2933">条件で絞る</text>
+
+  <!-- 3 Traversal -->
+  <rect x="24" y="268" width="712" height="116" rx="10" fill="#eef5f0" stroke="#3d7a52" stroke-width="2"/>
+  <text x="44" y="294" font-size="13.5" font-weight="bold" fill="#3d7a52">③ Traversal Matcher ── 「別のノードへ移る」</text>
+  <text x="44" y="316" font-size="11.5" fill="#5a6b7a">公式の定義：AST ノード間の移動を可能にする Matcher</text>
+
+  <g>
+    <rect x="44" y="328" width="90" height="34" rx="5" fill="#3d7a52"/>
+    <text x="89" y="350" text-anchor="middle" font-size="11" font-family="monospace" fill="#fff">callee(…)</text>
+    <rect x="144" y="328" width="130" height="34" rx="5" fill="#3d7a52"/>
+    <text x="209" y="350" text-anchor="middle" font-size="11" font-family="monospace" fill="#fff">hasArgument(0,…)</text>
+    <rect x="284" y="328" width="130" height="34" rx="5" fill="#3d7a52"/>
+    <text x="349" y="350" text-anchor="middle" font-size="11" font-family="monospace" fill="#fff">hasDescendant(…)</text>
+    <rect x="424" y="328" width="110" height="34" rx="5" fill="#3d7a52"/>
+    <text x="479" y="350" text-anchor="middle" font-size="11" font-family="monospace" fill="#fff">hasType(…)</text>
+  </g>
+  <path d="M548,345 L590,345" fill="none" stroke="#3d7a52" stroke-width="1.6" marker-end="url(#a25)"/>
+  <text x="600" y="340" font-size="11" fill="#1f2933"><tspan font-weight="bold">引数に別の Matcher を取る</tspan></text>
+  <text x="600" y="358" font-size="11" fill="#1f2933">＝ 入れ子になる理由</text>
+  </g>
+</svg>
+<figcaption><b>図25-1</b>　三分類の役割。<strong>③だけが引数に別の Matcher を取る。</strong> クエリが入れ子構造になるのはこのため。</figcaption>
+</figure>
+
+<h2>25.2 式を分解する</h2>
+
+<p>前章の式を、この三分類で色分けしてみます。</p>
+
+<figure>
+<svg viewBox="0 0 760 380" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="クエリ式の分解">
+  <defs>
+    <marker id="b25" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5a6b7a"/>
+    </marker>
+  </defs>
+  <g font-family="sans-serif">
+
+  <rect x="24" y="24" width="712" height="56" rx="8" fill="#1f2933"/>
+  <text x="46" y="60" font-size="15" font-family="monospace">
+    <tspan fill="#7fb2d6">callExpr</tspan><tspan fill="#9fb3c0">(</tspan><tspan fill="#a3d9a5">callee</tspan><tspan fill="#9fb3c0">(</tspan><tspan fill="#7fb2d6">functionDecl</tspan><tspan fill="#9fb3c0">(</tspan><tspan fill="#e8b075">hasName</tspan><tspan fill="#9fb3c0">(</tspan><tspan fill="#e6edf3">"strcpy"</tspan><tspan fill="#9fb3c0">)))</tspan><tspan fill="#9fb3c0">)</tspan>
+  </text>
+
+  <g font-size="11.5">
+  <line x1="76" y1="80" x2="76" y2="112" stroke="#2f6f9f" stroke-width="1.4"/>
+  <rect x="44" y="116" width="200" height="46" rx="6" fill="#eef4f9" stroke="#2f6f9f"/>
+  <text x="58" y="136" fill="#2f6f9f" font-weight="bold">① Node</text>
+  <text x="58" y="154" fill="#1f2933">「呼び出し式である」</text>
+
+  <line x1="180" y1="80" x2="180" y2="180" stroke="#3d7a52" stroke-width="1.4"/>
+  <rect x="264" y="116" width="220" height="46" rx="6" fill="#eef5f0" stroke="#3d7a52"/>
+  <text x="278" y="136" fill="#3d7a52" font-weight="bold">③ Traversal</text>
+  <text x="278" y="154" fill="#1f2933">「呼び出し先の宣言へ移る」</text>
+  <line x1="180" y1="139" x2="260" y2="139" stroke="#3d7a52" stroke-width="1.4" marker-end="url(#b25)"/>
+
+  <line x1="290" y1="80" x2="290" y2="196" stroke="#2f6f9f" stroke-width="1.4"/>
+  <rect x="44" y="180" width="200" height="46" rx="6" fill="#eef4f9" stroke="#2f6f9f"/>
+  <text x="58" y="200" fill="#2f6f9f" font-weight="bold">① Node</text>
+  <text x="58" y="218" fill="#1f2933">「移った先は関数宣言」</text>
+  <line x1="290" y1="203" x2="248" y2="203" stroke="#2f6f9f" stroke-width="1.4" marker-end="url(#b25)"/>
+
+  <line x1="410" y1="80" x2="410" y2="260" stroke="#b4661a" stroke-width="1.4"/>
+  <rect x="264" y="244" width="240" height="46" rx="6" fill="#fbf4ea" stroke="#b4661a"/>
+  <text x="278" y="264" fill="#b4661a" font-weight="bold">② Narrowing</text>
+  <text x="278" y="282" fill="#1f2933">「その名前が strcpy である」</text>
+  <line x1="410" y1="267" x2="508" y2="267" stroke="#b4661a" stroke-width="0" />
+  </g>
+
+  <rect x="24" y="310" width="712" height="58" rx="8" fill="#f4f6f8" stroke="#d8dee4"/>
+  <text x="46" y="334" font-size="12" font-weight="bold" fill="#1f2933">日本語に直すと：</text>
+  <text x="46" y="356" font-size="12.5" fill="#1f2933">「<tspan fill="#2f6f9f" font-weight="bold">呼び出し式</tspan>のうち、<tspan fill="#3d7a52" font-weight="bold">呼び出し先</tspan>が、<tspan fill="#2f6f9f" font-weight="bold">関数宣言</tspan>で、<tspan fill="#b4661a" font-weight="bold">名前が strcpy であるもの</tspan>」</text>
+  </g>
+</svg>
+<figcaption><b>図25-2</b>　クエリ式の分解。<strong>Node → Traversal → Node → Narrowing</strong> と交互に現れるのが典型的な形。</figcaption>
+</figure>
+
+<div class="tip">
+<span class="t">公式リファレンスの指摘</span>
+<p>AST Matcher Reference には「効果的な matcher 式は、通常 node matcher と narrowing / traversal matcher を交互に組み合わせることで、英語のように読める構造になる」という趣旨の説明があります。<strong>「英語として読めるか」が、クエリが正しく書けているかの目安になります。</strong></p>
+</div>
+
+<h2>25.3 入れ子は AND を意味する</h2>
+
+<p>Node Matcher の括弧の中に複数の条件をカンマで並べると、<strong>そのすべてを満たす</strong>という意味になります。</p>
+
+<pre><code>cxxMethodDecl(
+  hasName("load"),        // 名前が load で、
+  isConst(),              // かつ const で、
+  parameterCountIs(0)     // かつ引数が0個
+)</code></pre>
+
+<h3>論理演算</h3>
+
+<table>
+<tr><th>Matcher</th><th>意味</th></tr>
+<tr><td><code>allOf(A, B)</code></td><td>A かつ B（カンマ区切りと同じ。明示したいとき使う）</td></tr>
+<tr><td><code>anyOf(A, B)</code></td><td>A または B</td></tr>
+<tr><td><code>unless(A)</code></td><td>A でない</td></tr>
+<tr><td><code>eachOf(A, B)</code></td><td>A と B のそれぞれについてマッチを生成する</td></tr>
+<tr><td><code>optionally(A)</code></td><td>A にマッチすれば bind するが、しなくてもマッチ全体は成立する</td></tr>
+<tr><td><code>anything()</code></td><td>常に真</td></tr>
+</table>
+
+<pre><code># strcpy か strcat のどちらかの呼び出し
+callExpr(callee(functionDecl(anyOf(hasName("strcpy"), hasName("strcat")))))
+
+# 上と同じことを、専用の Matcher で簡潔に
+callExpr(callee(functionDecl(hasAnyName("strcpy", "strcat"))))
+
+# main 関数の中ではないもの
+callExpr(unless(hasAncestor(functionDecl(hasName("main")))))</code></pre>
+
+<h2>25.4 絞り込みは段階的に</h2>
+
+<p>クエリは一度に完成させません。<strong>広い Node Matcher から始めて、件数を見ながら条件を足していきます。</strong></p>
+
+<figure>
+<svg viewBox="0 0 760 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="段階的な絞り込みの過程">
+  <g font-family="sans-serif">
+
+  <text x="30" y="28" font-size="12.5" font-weight="bold" fill="#5a6b7a" letter-spacing="1.5">件数を見ながら条件を足していく</text>
+
+  <g font-size="11.5">
+  <rect x="30" y="44" width="500" height="34" rx="5" fill="#2f6f9f" opacity="0.95"/>
+  <text x="46" y="66" font-family="monospace" fill="#fff">m callExpr()</text>
+  <rect x="544" y="44" width="90" height="34" rx="5" fill="#eef4f9" stroke="#2f6f9f"/>
+  <text x="589" y="66" text-anchor="middle" fill="#2f6f9f" font-weight="bold">1204 件</text>
+  <text x="648" y="66" fill="#5a6b7a" font-size="10.5">広すぎる</text>
+
+  <rect x="30" y="88" width="380" height="34" rx="5" fill="#2f6f9f" opacity="0.9"/>
+  <text x="46" y="110" font-family="monospace" fill="#fff">m callExpr(callee(functionDecl()))</text>
+  <rect x="544" y="88" width="90" height="34" rx="5" fill="#eef4f9" stroke="#2f6f9f"/>
+  <text x="589" y="110" text-anchor="middle" fill="#2f6f9f" font-weight="bold">1102 件</text>
+  <text x="648" y="110" fill="#5a6b7a" font-size="10.5">まだ広い</text>
+
+  <rect x="30" y="132" width="200" height="34" rx="5" fill="#b4661a" opacity="0.9"/>
+  <text x="46" y="154" font-family="monospace" fill="#fff" font-size="10.5">… hasName("strcpy")</text>
+  <rect x="544" y="132" width="90" height="34" rx="5" fill="#fbf4ea" stroke="#b4661a"/>
+  <text x="589" y="154" text-anchor="middle" fill="#b4661a" font-weight="bold">3 件</text>
+  <text x="648" y="154" fill="#5a6b7a" font-size="10.5">見える範囲に</text>
+
+  <rect x="30" y="176" width="120" height="34" rx="5" fill="#3d7a52"/>
+  <text x="46" y="198" font-family="monospace" fill="#fff" font-size="10.5">… unless(…)</text>
+  <rect x="544" y="176" width="90" height="34" rx="5" fill="#eef5f0" stroke="#3d7a52"/>
+  <text x="589" y="198" text-anchor="middle" fill="#3d7a52" font-weight="bold">2 件</text>
+  <text x="648" y="198" fill="#3d7a52" font-size="10.5" font-weight="bold">目標に一致</text>
+  </g>
+
+  <rect x="30" y="226" width="700" height="76" rx="10" fill="#fbf4ea" stroke="#b4661a" stroke-width="1.6"/>
+  <text x="52" y="250" font-size="12" font-weight="bold" fill="#b4661a">件数が「0」になったときが最も危険</text>
+  <text x="52" y="272" font-size="11.5" fill="#1f2933">条件が正しくて本当に0件なのか、条件の書き方を間違えて0件なのか、区別がつかない。</text>
+  <text x="52" y="292" font-size="11.5" fill="#1f2933"><tspan font-weight="bold">必ず「マッチするはずのコード」を用意してから条件を足す。</tspan></text>
+  </g>
+</svg>
+<figcaption><b>図25-3</b>　段階的な絞り込み。一気に完成形を書くと、0件になったときに原因が特定できない。</figcaption>
+</figure>
+
+<h2>25.5 よく使う Matcher の地図</h2>
+
+<h3>Node Matcher（出発点）</h3>
+
+<table>
+<tr><th>宣言</th><th>文・式</th></tr>
+<tr><td><code>functionDecl()</code> 関数</td><td><code>callExpr()</code> 呼び出し</td></tr>
+<tr><td><code>cxxMethodDecl()</code> メンバ関数</td><td><code>cxxMemberCallExpr()</code> メンバ呼び出し</td></tr>
+<tr><td><code>cxxConstructorDecl()</code> コンストラクタ</td><td><code>cxxConstructExpr()</code> 構築</td></tr>
+<tr><td><code>cxxRecordDecl()</code> クラス・構造体</td><td><code>cxxNewExpr()</code> / <code>cxxDeleteExpr()</code></td></tr>
+<tr><td><code>varDecl()</code> 変数</td><td><code>declRefExpr()</code> 変数・関数の参照</td></tr>
+<tr><td><code>fieldDecl()</code> メンバ変数</td><td><code>memberExpr()</code> メンバアクセス</td></tr>
+<tr><td><code>parmVarDecl()</code> 引数</td><td><code>binaryOperator()</code> / <code>unaryOperator()</code></td></tr>
+<tr><td><code>namespaceDecl()</code> 名前空間</td><td><code>ifStmt()</code> / <code>forStmt()</code> / <code>returnStmt()</code></td></tr>
+<tr><td><code>enumDecl()</code> 列挙型</td><td><code>stringLiteral()</code> / <code>integerLiteral()</code></td></tr>
+</table>
+
+<h3>Narrowing Matcher（絞る）</h3>
+
+<table>
+<tr><th>Matcher</th><th>意味</th></tr>
+<tr><td><code>hasName("x")</code></td><td>名前が一致（<code>"::std::vector"</code> のように完全修飾も書ける）</td></tr>
+<tr><td><code>hasAnyName("a", "b")</code></td><td>いずれかの名前</td></tr>
+<tr><td><code>matchesName("正規表現")</code></td><td>名前が正規表現に一致</td></tr>
+<tr><td><code>isConst()</code> / <code>isStatic()</code> / <code>isVirtual()</code></td><td>修飾子</td></tr>
+<tr><td><code>isPublic()</code> / <code>isPrivate()</code> / <code>isProtected()</code></td><td>アクセス指定</td></tr>
+<tr><td><code>isDefinition()</code></td><td>宣言ではなく定義である</td></tr>
+<tr><td><code>isImplicit()</code></td><td>コンパイラが生成したもの</td></tr>
+<tr><td><code>parameterCountIs(n)</code> / <code>argumentCountIs(n)</code></td><td>引数の個数</td></tr>
+<tr><td><code>isExpansionInMainFile()</code></td><td>ヘッダではなく解析対象の <code>.cpp</code> にある</td></tr>
+<tr><td><code>isInStdNamespace()</code></td><td><code>std</code> 名前空間の中</td></tr>
+</table>
+
+<h3>Traversal Matcher（移動する）</h3>
+
+<table>
+<tr><th>Matcher</th><th>どこへ移るか</th></tr>
+<tr><td><code>callee(M)</code></td><td>呼び出し式 → 呼び出し先</td></tr>
+<tr><td><code>hasArgument(n, M)</code></td><td>呼び出し式 → n 番目の引数</td></tr>
+<tr><td><code>hasParameter(n, M)</code></td><td>関数宣言 → n 番目の仮引数</td></tr>
+<tr><td><code>hasType(M)</code></td><td>式・宣言 → その型</td></tr>
+<tr><td><code>hasDeclaration(M)</code></td><td>型・参照 → その宣言</td></tr>
+<tr><td><code>to(M)</code></td><td><code>declRefExpr</code> → 参照先の宣言</td></tr>
+<tr><td><code>hasInitializer(M)</code></td><td>変数宣言 → 初期化式</td></tr>
+<tr><td><code>hasBody(M)</code></td><td>関数・ループ → 本体</td></tr>
+<tr><td><code>hasDescendant(M)</code> / <code>hasAncestor(M)</code></td><td>子孫 / 祖先のどこか</td></tr>
+<tr><td><code>hasParent(M)</code></td><td>直接の親</td></tr>
+<tr><td><code>forEachDescendant(M)</code></td><td>子孫すべてについて<strong>個別に</strong>マッチを生成（第26章）</td></tr>
+<tr><td><code>isDerivedFrom(M)</code></td><td>クラス → 基底クラス</td></tr>
+</table>
+
+<div class="note">
+<span class="t">この表は覚えるものではない</span>
+<p>必要なのは<strong>三分類の考え方</strong>だけです。「ここで別のノードに移りたい」と思ったら Traversal を探し、「この属性で絞りたい」と思ったら Narrowing を探す。具体的な名前はリファレンスを引けば済みます。引き方は第28章 28.8 節で扱います。</p>
+</div>
+
+<h2>25.6 【ハンズオン】三分類で組み立てる</h2>
+
+<div class="hands">
+<div class="hd">HANDS-ON 25　クエリを段階的に育てる</div>
+<div class="bd">
+<ol>
+  <li><strong>検証用コードを用意する。</strong> <code>samples\ch25_match.cpp</code> を作ります。<strong>マッチするはずのコードを先に用意する</strong>のが要点です。
+<pre><code>#include &lt;cstring&gt;
+#include &lt;vector&gt;
+
+class Widget {
+public:
+    void draw() const {}
+    void resize(int w, int h) {}
+private:
+    int  width_ = 0;
+    int* data_ = nullptr;
+};
+
+void legacy(char* dst, const char* src) {
+    strcpy(dst, src);          // ← 目標1
+}
+
+void alloc() {
+    int* p = new int[10];      // ← 目標2
+    delete p;                  // ← 目標3（new[] に delete）
+}</code></pre>
+  </li>
+
+  <li><strong>Node Matcher だけで数える。</strong>
+<pre><code>clang-query ch25_match.cpp -- -std=c++23</code></pre>
+<pre><code>m callExpr()
+m functionDecl()
+m cxxRecordDecl()
+m varDecl()
+m cxxNewExpr()
+m cxxDeleteExpr()</code></pre>
+    それぞれの件数を記録します。<strong>ヘッダの中身が入るので、想像よりずっと多いはずです。</strong></li>
+
+  <li><strong>Narrowing で絞る。</strong>
+<pre><code>m functionDecl(hasName("legacy"))
+m cxxRecordDecl(hasName("Widget"))
+m cxxMethodDecl(isConst())
+m varDecl(hasType(isInteger()))</code></pre>
+    件数が減っていくことを確認します。</li>
+
+  <li><strong>Traversal で移動する。</strong>
+<pre><code>m callExpr(callee(functionDecl()))
+m callExpr(callee(functionDecl(hasName("strcpy"))))
+m cxxMethodDecl(hasParent(cxxRecordDecl(hasName("Widget"))))</code></pre>
+  </li>
+
+  <li><strong>三分類を意識して読む。</strong> 手順4の最後の式について、どこが Node・Narrowing・Traversal かを図25-2 の形式で分解してみてください。日本語に直すと「Widget というクラスを親に持つメンバ関数」です。</li>
+
+  <li><strong>論理演算を試す。</strong>
+<pre><code>m functionDecl(hasAnyName("legacy", "alloc"))
+m cxxMethodDecl(unless(isConst()))
+m callExpr(callee(functionDecl(anyOf(hasName("strcpy"), hasName("memcpy")))))</code></pre>
+  </li>
+
+  <li><strong>ヘッダを除外する。</strong> 手順2で件数が多かったのは、標準ライブラリのヘッダが含まれていたからです。
+<pre><code>m functionDecl(isExpansionInMainFile())
+m callExpr(isExpansionInMainFile())</code></pre>
+    件数が激減することを確認します。<strong>この Matcher は今後ほぼ毎回使います。</strong></li>
+
+  <li><strong>目標3のクエリを組み立てる。</strong> 「配列で確保したものを、配列でない <code>delete</code> で解放している」を探します。まず AST を見て、それから条件を足してください。
+<pre><code>set output dump
+m cxxDeleteExpr(isExpansionInMainFile())</code></pre>
+    出力を読み、<code>isArrayForm</code> のような属性がどう出ているかを確認してから、
+<pre><code>set output diag
+m cxxDeleteExpr(isExpansionInMainFile(), unless(isArrayForm()))</code></pre>
+    を試します。<strong>ここで「AST を見てから条件を決める」という第23章の流儀が効いてきます。</strong></li>
+
+  <li><strong>保存する。</strong> 完成したクエリを <code>queries\</code> に、コメント付きで保存します。</li>
+</ol>
+</div>
+</div>
+
+<div class="summary">
+<h2>この章のまとめ</h2>
+<ul>
+  <li>Matcher は3分類。<strong>① Node（どの種類のノードか）② Narrowing（その属性を持つか）③ Traversal（別のノードへ移る）</strong>。</li>
+  <li><strong>Traversal だけが引数に別の Matcher を取る。</strong> だからクエリは入れ子になる。</li>
+  <li>典型的な形は Node → Traversal → Node → Narrowing の交互。<strong>英語（日本語）として読めるかが正しさの目安。</strong></li>
+  <li>括弧内のカンマ区切りは AND。<code>anyOf</code> / <code>unless</code> / <code>allOf</code> で論理を組む。</li>
+  <li><strong>広い Node Matcher から始め、件数を見ながら条件を足す。</strong> 一気に完成形を書かない。</li>
+  <li>「0件」は最も危険な状態。マッチするはずのコードを先に用意しておく。</li>
+  <li><code>isExpansionInMainFile()</code> はヘッダを除外する常用の Matcher。</li>
+</ul>
+</div>
+
+<p class="next"><strong>次章：</strong> 第26章「<code>bind</code> で節点に名前を付ける」では、マッチした木の中の特定のノードに名前を付けます。これがないと、第6部で「どこに警告を出すか」を指定できません。</p>
+
+</div>
+</body>
+</html>

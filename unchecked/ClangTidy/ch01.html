@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第1章 静的解析でしか見つからないバグがある ─ Clang-Tidy入門</title>
+<style>
+  :root{
+    --ink:#1f2933; --sub:#5a6b7a; --line:#d8dee4; --bg:#ffffff;
+    --code-bg:#f6f8fa; --code-line:#e2e8ee;
+    --accent:#2f6f9f; --accent-bg:#eef4f9;
+    --warn:#b4661a; --warn-bg:#fbf4ea;
+    --ok:#3d7a52; --ok-bg:#eef5f0;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Noto Sans JP","Meiryo",sans-serif;
+    font-size:16px; line-height:1.95; font-feature-settings:"palt" 1;
+  }
+  .page{max-width:47rem; margin:0 auto; padding:3.5rem 1.6rem 6rem}
+  .chap-no{font-size:.8rem; letter-spacing:.22em; color:var(--accent); font-weight:700; margin:0 0 .5rem}
+  h1{font-size:1.85rem; line-height:1.5; margin:0 0 .6rem; letter-spacing:.01em}
+  .lede{color:var(--sub); font-size:1rem; margin:0 0 2.2rem; padding-bottom:1.6rem; border-bottom:2px solid var(--ink)}
+  h2{font-size:1.28rem; margin:3rem 0 1rem; padding-left:.7rem; border-left:4px solid var(--accent); line-height:1.6}
+  h3{font-size:1.05rem; margin:2.2rem 0 .7rem; color:var(--ink)}
+  h3::before{content:"◆ "; color:var(--accent); font-size:.8em}
+  p{margin:0 0 1.1rem}
+  ul,ol{margin:0 0 1.2rem; padding-left:1.6rem}
+  li{margin:.35rem 0}
+  code{font-family:"Cascadia Mono","Consolas","SFMono-Regular",monospace; font-size:.9em;
+       background:var(--code-bg); border:1px solid var(--code-line); border-radius:4px; padding:.08em .35em}
+  pre{background:var(--code-bg); border:1px solid var(--code-line); border-radius:8px;
+      padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.7}
+  pre code{background:none; border:none; padding:0; font-size:.86rem}
+  .cap{font-size:.82rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+  figure{margin:2rem 0 2.2rem}
+  figure svg{display:block; width:100%; height:auto; border:1px solid var(--line); border-radius:8px; background:#fff}
+  figcaption{font-size:.85rem; color:var(--sub); margin-top:.6rem; text-align:left}
+  figcaption b{color:var(--ink)}
+  .box{border-radius:8px; padding:1rem 1.2rem; margin:1.6rem 0; font-size:.94rem}
+  .box p:last-child{margin-bottom:0}
+  .box .t{font-weight:700; display:block; margin-bottom:.35rem; font-size:.88rem; letter-spacing:.04em}
+  .note{background:var(--accent-bg); border-left:4px solid var(--accent)}
+  .note .t{color:var(--accent)}
+  .warn{background:var(--warn-bg); border-left:4px solid var(--warn)}
+  .warn .t{color:var(--warn)}
+  .tip{background:var(--ok-bg); border-left:4px solid var(--ok)}
+  .tip .t{color:var(--ok)}
+  .hands{border:1px solid var(--line); border-radius:10px; margin:2rem 0; overflow:hidden}
+  .hands>.hd{background:var(--ink); color:#fff; padding:.55rem 1.1rem; font-size:.85rem; letter-spacing:.1em; font-weight:700}
+  .hands>.bd{padding:1.3rem 1.3rem .4rem}
+  .hands ol{counter-reset:step; list-style:none; padding-left:0}
+  .hands ol>li{counter-increment:step; position:relative; padding-left:2.4rem; margin:0 0 1.2rem}
+  .hands ol>li::before{content:counter(step); position:absolute; left:0; top:.25rem;
+    width:1.7rem; height:1.7rem; border-radius:50%; background:var(--accent); color:#fff;
+    font-size:.82rem; font-weight:700; display:flex; align-items:center; justify-content:center; line-height:1}
+  table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+  th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+  th{background:var(--code-bg); font-weight:700}
+  .summary{border:2px solid var(--ink); border-radius:10px; padding:1.3rem 1.5rem; margin:3rem 0 1rem}
+  .summary h2{margin:0 0 .8rem; border:none; padding:0; font-size:1.1rem}
+  .summary ul{margin-bottom:0}
+  .next{color:var(--sub); font-size:.94rem; border-top:1px solid var(--line); padding-top:1.2rem; margin-top:2.5rem}
+  @media (max-width:600px){ body{font-size:15px} .page{padding:2.2rem 1.1rem 4rem} h1{font-size:1.5rem} }
+</style>
+</head>
+<body>
+<div class="page">
+
+<p class="chap-no">第 1 章</p>
+<h1>静的解析でしか見つからないバグがある</h1>
+<p class="lede">コンパイルは通る。テストも通る。それでも壊れているコードがある。この章では本書を通して使う題材コードを用意し、コンパイラ・テスト・静的解析という三つの目がそれぞれ何を見ているのかを整理します。Clang-Tidy をまだ動かしません。「なぜ必要なのか」を先に腹落ちさせるための章です。</p>
+
+<h2>1.1 「動くコード」に潜むもの</h2>
+
+<p>次のコードは、テキスト形式の設定ファイルを読み込む小さなクラスです。C++ の実務経験がある方なら、5秒眺めればどこかムズムズするはずです。ただし、これは <strong>コンパイルが通り、手元のテストも通ってしまう</strong> コードです。</p>
+
+<pre><code>// config_loader.h
+#pragma once
+#include &lt;string&gt;
+#include &lt;vector&gt;
+
+struct Entry {
+    char name[32];
+    int  value;
+};
+
+class ConfigLoader {
+public:
+    ConfigLoader(const char* path);
+    ~ConfigLoader();
+
+    bool load();
+    std::vector&lt;Entry&gt; entries();
+
+private:
+    std::string        path_;
+    char*              buffer_ = nullptr;
+    std::vector&lt;Entry&gt; entries_;
+};</code></pre>
+
+<pre><code>// config_loader.cpp
+#include "config_loader.h"
+#include &lt;cstdio&gt;
+#include &lt;cstring&gt;
+#include &lt;cstdlib&gt;
+
+ConfigLoader::ConfigLoader(const char* path) {
+    path_ = path;
+}
+
+ConfigLoader::~ConfigLoader() {
+    delete buffer_;
+}
+
+bool ConfigLoader::load() {
+    FILE* fp = fopen(path_.c_str(), "r");
+
+    buffer_ = new char[4096];
+    size_t n = fread(buffer_, 1, 4095, fp);
+    buffer_[n] = '\0';
+
+    char* line = strtok(buffer_, "\n");
+    while (line != NULL) {
+        char* eq = strchr(line, '=');
+        if (eq) {
+            *eq = '\0';
+            Entry e;
+            strcpy(e.name, line);
+            e.value = atoi(eq + 1);
+            entries_.push_back(e);
+        }
+        line = strtok(NULL, "\n");
+    }
+    return true;
+}
+
+std::vector&lt;Entry&gt; ConfigLoader::entries() {
+    return entries_;
+}</code></pre>
+<p class="cap">リスト1-1　本書を通じて改善していく題材コード（<code>ConfigLoader</code>）</p>
+
+<p>このコードには、少なくとも次の問題が含まれています。</p>
+
+<table>
+<tr><th>箇所</th><th>問題</th><th>症状の出方</th></tr>
+<tr><td><code>fopen</code> の戻り値</td><td>NULL チェックがない</td><td>ファイルが無い環境でのみクラッシュ</td></tr>
+<tr><td><code>new char[4096]</code> / <code>delete buffer_</code></td><td><code>new[]</code> に <code>delete</code> を対応させている（未定義動作）</td><td>多くの環境では「動いてしまう」。ヒープが荒れる</td></tr>
+<tr><td><code>strcpy(e.name, line)</code></td><td>32 バイトを超えるキー名でバッファオーバーラン</td><td>長い設定キーを書いた顧客だけで発生</td></tr>
+<tr><td><code>load()</code> の二重呼び出し</td><td><code>buffer_</code> がリークする</td><td>症状として現れない。じわじわ増える</td></tr>
+<tr><td><code>entries()</code></td><td>呼ぶたびに <code>vector</code> をまるごとコピー</td><td>バグではないが、ループ内で呼ぶと致命的に遅い</td></tr>
+<tr><td>コンストラクタ</td><td>メンバ初期化子リストを使っていない／<code>explicit</code> がない</td><td>意図しない暗黙変換が通る</td></tr>
+</table>
+
+<p>重要なのは、<strong>これらがどれも「そのコードを読んだ人間なら指摘できる」種類の問題</strong> だという点です。天才的な洞察は要りません。ルールを知っていて、機械的に照合すればよい。だからこそ機械にやらせる価値があります。</p>
+
+<h2>1.2 三つの目 ── コンパイラ・テスト・静的解析</h2>
+
+<p>ソフトウェアの欠陥を捕まえる手段は一つではありません。それぞれ「見ている対象」が違います。</p>
+
+<figure>
+<svg viewBox="0 0 760 400" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="コンパイラ・静的解析・テストが見ている対象の違い">
+  <defs>
+    <marker id="ar1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5a6b7a"/>
+    </marker>
+  </defs>
+
+  <!-- source -->
+  <rect x="290" y="20" width="180" height="46" rx="8" fill="#1f2933"/>
+  <text x="380" y="49" text-anchor="middle" fill="#fff" font-size="15" font-family="sans-serif" font-weight="bold">ソースコード</text>
+
+  <line x1="380" y1="66" x2="380" y2="96" stroke="#5a6b7a" stroke-width="1.6" marker-end="url(#ar1)"/>
+
+  <!-- three lanes -->
+  <g>
+    <rect x="28" y="104" width="222" height="240" rx="10" fill="#eef4f9" stroke="#2f6f9f" stroke-width="1.5"/>
+    <text x="139" y="134" text-anchor="middle" fill="#2f6f9f" font-size="15" font-family="sans-serif" font-weight="bold">コンパイラ</text>
+    <text x="139" y="156" text-anchor="middle" fill="#5a6b7a" font-size="11.5" font-family="sans-serif">「規格に合っているか」</text>
+    <line x1="52" y1="170" x2="226" y2="170" stroke="#c5d6e4" stroke-width="1"/>
+    <text x="52" y="192" fill="#1f2933" font-size="12.5" font-family="sans-serif">・型の不一致</text>
+    <text x="52" y="214" fill="#1f2933" font-size="12.5" font-family="sans-serif">・未宣言の識別子</text>
+    <text x="52" y="236" fill="#1f2933" font-size="12.5" font-family="sans-serif">・明らかな未使用変数</text>
+    <text x="52" y="258" fill="#1f2933" font-size="12.5" font-family="sans-serif">・非推奨 API の使用</text>
+    <text x="52" y="296" fill="#b4661a" font-size="12" font-family="sans-serif" font-weight="bold">見ないもの:</text>
+    <text x="52" y="316" fill="#5a6b7a" font-size="11.5" font-family="sans-serif">「合法だが危ういコード」</text>
+  </g>
+
+  <g>
+    <rect x="269" y="104" width="222" height="240" rx="10" fill="#fbf4ea" stroke="#b4661a" stroke-width="2.2"/>
+    <text x="380" y="134" text-anchor="middle" fill="#b4661a" font-size="15" font-family="sans-serif" font-weight="bold">静的解析</text>
+    <text x="380" y="156" text-anchor="middle" fill="#5a6b7a" font-size="11.5" font-family="sans-serif">「怪しくないか」</text>
+    <line x1="293" y1="170" x2="467" y2="170" stroke="#e6d5bd" stroke-width="1"/>
+    <text x="293" y="192" fill="#1f2933" font-size="12.5" font-family="sans-serif">・new[] / delete の不一致</text>
+    <text x="293" y="214" fill="#1f2933" font-size="12.5" font-family="sans-serif">・戻り値の未チェック</text>
+    <text x="293" y="236" fill="#1f2933" font-size="12.5" font-family="sans-serif">・危険な API の呼び出し</text>
+    <text x="293" y="258" fill="#1f2933" font-size="12.5" font-family="sans-serif">・不要なコピー</text>
+    <text x="293" y="280" fill="#1f2933" font-size="12.5" font-family="sans-serif">・チーム独自の規約違反</text>
+    <text x="293" y="316" fill="#b4661a" font-size="12" font-family="sans-serif" font-weight="bold">実行しなくても分かる</text>
+  </g>
+
+  <g>
+    <rect x="510" y="104" width="222" height="240" rx="10" fill="#eef5f0" stroke="#3d7a52" stroke-width="1.5"/>
+    <text x="621" y="134" text-anchor="middle" fill="#3d7a52" font-size="15" font-family="sans-serif" font-weight="bold">テスト・実行</text>
+    <text x="621" y="156" text-anchor="middle" fill="#5a6b7a" font-size="11.5" font-family="sans-serif">「この入力で正しいか」</text>
+    <line x1="534" y1="170" x2="708" y2="170" stroke="#c9dfd1" stroke-width="1"/>
+    <text x="534" y="192" fill="#1f2933" font-size="12.5" font-family="sans-serif">・仕様との不一致</text>
+    <text x="534" y="214" fill="#1f2933" font-size="12.5" font-family="sans-serif">・計算結果の誤り</text>
+    <text x="534" y="236" fill="#1f2933" font-size="12.5" font-family="sans-serif">・性能の実測</text>
+    <text x="534" y="296" fill="#b4661a" font-size="12" font-family="sans-serif" font-weight="bold">見ないもの:</text>
+    <text x="534" y="316" fill="#5a6b7a" font-size="11.5" font-family="sans-serif">通らなかった経路</text>
+  </g>
+
+  <text x="380" y="374" text-anchor="middle" fill="#5a6b7a" font-size="12.5" font-family="sans-serif">三つは重ならない。どれか一つで代替はできない</text>
+</svg>
+<figcaption><b>図1-1</b>　コンパイラ・静的解析・テストが見ている対象。リスト1-1 の問題の大半は、真ん中の帯に落ちる。</figcaption>
+</figure>
+
+<p>リスト1-1 を MSVC の <code>/W4</code> でビルドすると、いくつかの警告は出ます。<code>fopen</code>、<code>strcpy</code>、<code>strtok</code> は Microsoft の安全版（<code>fopen_s</code> など）を推奨する非推奨警告 C4996 の対象なので、そこは引っかかります。</p>
+
+<p>しかし、<strong>次の問題はコンパイラからは何も言われません</strong>。</p>
+
+<ul>
+  <li><code>fopen</code> の戻り値を確かめずに <code>fread</code> に渡している</li>
+  <li><code>new[]</code> で確保したものを <code>delete</code> で解放している</li>
+  <li><code>load()</code> を2回呼ぶと前の <code>buffer_</code> が漏れる</li>
+  <li><code>entries()</code> が毎回コピーを返している</li>
+</ul>
+
+<p>どれも C++ の規格上は完全に合法です。コンパイラの仕事は「規格に適合しているか」の判定であって、「書いた人間が意図した通りか」の判定ではない。ここに、埋めるべき隙間があります。</p>
+
+<div class="note">
+<span class="t">補足：警告レベルを上げればいいのでは？</span>
+<p>それは正しい第一歩です。<code>/W4</code> や <code>/W4 /WX</code> は必ず有効にすべきで、静的解析はその代わりではありません。ただしコンパイラの警告は「コンパイルの副産物として安く出せるもの」に限られます。フロー解析やコーディング規約の照合まで背負わせると、ビルドが現実的でない速度になります。だから別のツールとして切り出されているのです。</p>
+</div>
+
+<h2>1.3 静的解析が得意なこと・苦手なこと</h2>
+
+<p>静的解析は万能ではありません。過剰な期待をすると「警告が多すぎて誰も見なくなる」という、よくある失敗に直行します。得意・不得意をあらかじめ言語化しておきます。</p>
+
+<h3>得意なこと</h3>
+<ul>
+  <li><strong>局所的なパターンの照合</strong>：「<code>new[]</code> のペアが <code>delete[]</code> でない」のように、コードの形だけで判定できるもの。</li>
+  <li><strong>網羅性</strong>：テストが通らなかった分岐にも等しく目を通す。稀にしか実行されない経路こそ、静的解析の主戦場です。</li>
+  <li><strong>規約の機械化</strong>：「この関数はうちのコードベースでは使わない」といったチーム固有のルール。人間のレビューで指摘し続けるのは消耗しますが、機械なら疲れません。<strong>これが本書の中心テーマである Query Based Custom Check の出番です。</strong></li>
+</ul>
+
+<h3>苦手なこと</h3>
+<ul>
+  <li><strong>実行時にしか決まらない値</strong>：ユーザー入力の長さ、ファイルの中身、スレッドの実行順序。</li>
+  <li><strong>仕様との照合</strong>：「この計算式が業務ルール上正しいか」は静的解析には分かりません。テストの領分です。</li>
+  <li><strong>偽陽性ゼロ</strong>：静的解析は必ず誤検出を出します。誤検出との付き合い方（第37章）まで含めて運用です。</li>
+</ul>
+
+<h2>1.4 早く見つけるほど安い</h2>
+
+<p>静的解析を導入する動機を一言でいえば「検出を左に寄せる」ことです。同じバグでも、見つかる場所によってコストが桁で変わります。</p>
+
+<figure>
+<svg viewBox="0 0 760 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="検出タイミングと修正コストの関係">
+  <defs>
+    <linearGradient id="grad1" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#eef5f0"/>
+      <stop offset="50%" stop-color="#fbf4ea"/>
+      <stop offset="100%" stop-color="#f7e9e5"/>
+    </linearGradient>
+    <marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1f2933"/>
+    </marker>
+  </defs>
+
+  <rect x="40" y="60" width="680" height="66" rx="8" fill="url(#grad1)" stroke="#d8dee4"/>
+
+  <!-- stages -->
+  <g font-family="sans-serif">
+    <line x1="176" y1="60" x2="176" y2="126" stroke="#d8dee4"/>
+    <line x1="312" y1="60" x2="312" y2="126" stroke="#d8dee4"/>
+    <line x1="448" y1="60" x2="448" y2="126" stroke="#d8dee4"/>
+    <line x1="584" y1="60" x2="584" y2="126" stroke="#d8dee4"/>
+
+    <text x="108" y="88" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#1f2933">エディタで</text>
+    <text x="108" y="107" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#1f2933">書いた瞬間</text>
+
+    <text x="244" y="97" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#1f2933">ローカルビルド</text>
+
+    <text x="380" y="97" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#1f2933">コードレビュー</text>
+
+    <text x="516" y="88" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#1f2933">CI / QA</text>
+    <text x="516" y="107" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#1f2933">テスト</text>
+
+    <text x="652" y="97" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#a04a34">本番で発覚</text>
+  </g>
+
+  <line x1="40" y1="152" x2="716" y2="152" stroke="#1f2933" stroke-width="1.6" marker-end="url(#ar2)"/>
+  <text x="40" y="176" font-size="12" fill="#5a6b7a" font-family="sans-serif">修正コスト：小</text>
+  <text x="716" y="176" font-size="12" fill="#a04a34" font-family="sans-serif" text-anchor="end" font-weight="bold">修正コスト：大（調査・再現・リリース）</text>
+
+  <!-- coverage bars -->
+  <rect x="40" y="206" width="272" height="26" rx="5" fill="#2f6f9f" opacity="0.85"/>
+  <text x="176" y="224" text-anchor="middle" fill="#fff" font-size="12" font-family="sans-serif" font-weight="bold">コンパイラ警告</text>
+
+  <rect x="40" y="238" width="544" height="26" rx="5" fill="#b4661a" opacity="0.9"/>
+  <text x="312" y="256" text-anchor="middle" fill="#fff" font-size="12" font-family="sans-serif" font-weight="bold">Clang-Tidy（エディタ・ビルド・レビュー・CI のどこにでも置ける）</text>
+
+  <rect x="448" y="270" width="272" height="26" rx="5" fill="#3d7a52" opacity="0.85"/>
+  <text x="584" y="288" text-anchor="middle" fill="#fff" font-size="12" font-family="sans-serif" font-weight="bold">テスト</text>
+</svg>
+<figcaption><b>図1-2</b>　検出タイミングと修正コスト。Clang-Tidy はエディタ内の即時解析から CI まで、同じルールを同じ設定ファイルで走らせられるのが強み。</figcaption>
+</figure>
+
+<p>ここで注目してほしいのは、Clang-Tidy の帯が長いことです。Visual Studio の中で書いている最中に波線として出すことも、ビルド時に警告として出すことも、CI で差分だけチェックすることもできます。しかも <strong>そのすべてが同じ <code>.clang-tidy</code> ファイル一つで制御される</strong>。「手元では出ないのに CI では落ちる」という一番つらい状況を避けられます。</p>
+
+<h2>1.5 【ハンズオン】題材コードを手元に置く</h2>
+
+<p>この章の作業は、リスト1-1 を実際にビルドして「コンパイラが何を言い、何を言わないか」を自分の目で確かめることです。環境構築の詳細は第3章で扱うので、ここでは既存の C++ プロジェクトがあればそれを使っても構いません。</p>
+
+<div class="hands">
+<div class="hd">HANDS-ON 1　コンパイラの沈黙を確認する</div>
+<div class="bd">
+<ol>
+  <li>Visual Studio 2026 で空の C++ コンソールアプリを作成し、<code>config_loader.h</code> と <code>config_loader.cpp</code> をリスト1-1 の内容で追加します。</li>
+  <li><code>main.cpp</code> に次のコードを書きます。
+<pre><code>#include "config_loader.h"
+#include &lt;print&gt;
+
+int main() {
+    ConfigLoader loader("app.ini");
+    loader.load();
+    for (const auto&amp; e : loader.entries()) {
+        std::println("{} = {}", e.name, e.value);
+    }
+}</code></pre>
+  </li>
+  <li>プロジェクトのプロパティで警告レベルを <strong>/W4</strong> に設定してビルドします（構成プロパティ &gt; C/C++ &gt; 全般 &gt; 警告レベル）。</li>
+  <li>出力ウィンドウとエラー一覧に何が出たかを書き出します。おそらく C4996（非推奨関数）が数件出るだけのはずです。</li>
+  <li>次に、1.1 節の表に挙げた6つの問題のうち、<strong>いくつがコンパイラに指摘されたか</strong> を数えます。</li>
+</ol>
+</div>
+</div>
+
+<div class="warn">
+<span class="t">C4996 が出ない場合</span>
+<p>プロジェクトに <code>_CRT_SECURE_NO_WARNINGS</code> が定義されていると非推奨警告は抑制されます。テンプレートによっては既定で入っていることがあるので、プリプロセッサ定義を確認してください。なお <code>&lt;print&gt;</code> と <code>std::println</code> は C++23 の機能なので、言語規格の設定が必要です。これも第3章で扱います。</p>
+</div>
+
+<h2>1.6 コンパイラが黙ったところから先へ</h2>
+
+<p>ハンズオンの結果、おそらく「6つのうち3つ」程度しか指摘されなかったはずです。残りは、コードを読んだ人間なら気づけるのに、機械は何も言わなかった問題です。</p>
+
+<p>この隙間を埋めるのが Clang-Tidy です。そして本書の主題は、その先にあります。上の表の問題は <strong>Clang-Tidy が標準で持っているチェック</strong> で拾えますが、実務で本当に効くのは「うちのコードベースでは <code>strcpy</code> ではなく <code>SafeCopy()</code> を使う」「この基底クラスを継承したら必ず接尾辞 <code>Component</code> を付ける」といった、<strong>あなたのチームにしか存在しないルール</strong> です。</p>
+
+<p>そうしたルールを、C++ を一行も書かずに <code>.clang-tidy</code> の設定だけで実装する仕組みが Query Based Custom Check です。第6部でそこに到達します。</p>
+
+<div class="summary">
+<h2>この章のまとめ</h2>
+<ul>
+  <li>コンパイラは「規格に合っているか」、テストは「この入力で正しいか」を見る。「合法だが危ういか」を見る目は別に必要。</li>
+  <li>リスト1-1 の <code>ConfigLoader</code> を本書の題材とする。<code>new[]</code>/<code>delete</code> の不一致、戻り値の未チェック、不要なコピーなど、コンパイラが黙る問題を意図的に含めてある。</li>
+  <li>静的解析は「局所的なパターンの照合」と「網羅性」が得意で、「実行時の値」と「仕様との照合」は苦手。偽陽性は必ず出る前提で運用する。</li>
+  <li>Clang-Tidy はエディタ・ビルド・CI のすべてを同一の設定ファイルで統一できる。</li>
+</ul>
+</div>
+
+<p class="next"><strong>次章：</strong> 第2章「Clang-Tidy とその仲間たち」では、Clang-Tidy が内部でソースコードをどう扱っているのか、そして <code>clang-query</code>、<code>run-clang-tidy</code>、<code>clang-apply-replacements</code> といった周辺ツールとの役割分担を、仕組みから押さえます。</p>
+
+</div>
+</body>
+</html>

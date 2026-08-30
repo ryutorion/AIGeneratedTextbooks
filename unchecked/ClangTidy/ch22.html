@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第22章 自分たちの .clang-tidy を育てる ─ Clang-Tidy入門</title>
+<style>
+  :root{
+    --ink:#1f2933; --sub:#5a6b7a; --line:#d8dee4; --bg:#ffffff;
+    --code-bg:#f6f8fa; --code-line:#e2e8ee;
+    --accent:#2f6f9f; --accent-bg:#eef4f9;
+    --warn:#b4661a; --warn-bg:#fbf4ea;
+    --ok:#3d7a52; --ok-bg:#eef5f0;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0; background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Noto Sans JP","Meiryo",sans-serif;
+    font-size:16px; line-height:1.95; font-feature-settings:"palt" 1;}
+  .page{max-width:47rem; margin:0 auto; padding:3.5rem 1.6rem 6rem}
+  .chap-no{font-size:.8rem; letter-spacing:.22em; color:var(--accent); font-weight:700; margin:0 0 .5rem}
+  h1{font-size:1.85rem; line-height:1.5; margin:0 0 .6rem; letter-spacing:.01em}
+  .lede{color:var(--sub); font-size:1rem; margin:0 0 2.2rem; padding-bottom:1.6rem; border-bottom:2px solid var(--ink)}
+  h2{font-size:1.28rem; margin:3rem 0 1rem; padding-left:.7rem; border-left:4px solid var(--accent); line-height:1.6}
+  h3{font-size:1.05rem; margin:2.2rem 0 .7rem}
+  h3::before{content:"◆ "; color:var(--accent); font-size:.8em}
+  p{margin:0 0 1.1rem}
+  ul,ol{margin:0 0 1.2rem; padding-left:1.6rem}
+  li{margin:.35rem 0}
+  code{font-family:"Cascadia Mono","Consolas","SFMono-Regular",monospace; font-size:.9em;
+       background:var(--code-bg); border:1px solid var(--code-line); border-radius:4px; padding:.08em .35em}
+  pre{background:var(--code-bg); border:1px solid var(--code-line); border-radius:8px;
+      padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.7}
+  pre code{background:none; border:none; padding:0; font-size:.86rem}
+  pre.term{background:#1f2933; border-color:#1f2933; color:#e6edf3}
+  pre.term code{color:#e6edf3}
+  pre.term .p{color:#7fb2d6}
+  pre.term .o{color:#9fb3c0}
+  .cap{font-size:.82rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+  figure{margin:2rem 0 2.2rem}
+  figure svg{display:block; width:100%; height:auto; border:1px solid var(--line); border-radius:8px; background:#fff}
+  figcaption{font-size:.85rem; color:var(--sub); margin-top:.6rem}
+  figcaption b{color:var(--ink)}
+  .box{border-radius:8px; padding:1rem 1.2rem; margin:1.6rem 0; font-size:.94rem}
+  .box p:last-child{margin-bottom:0}
+  .box .t{font-weight:700; display:block; margin-bottom:.35rem; font-size:.88rem; letter-spacing:.04em}
+  .note{background:var(--accent-bg); border-left:4px solid var(--accent)} .note .t{color:var(--accent)}
+  .warn{background:var(--warn-bg); border-left:4px solid var(--warn)} .warn .t{color:var(--warn)}
+  .tip{background:var(--ok-bg); border-left:4px solid var(--ok)} .tip .t{color:var(--ok)}
+  .hands{border:1px solid var(--line); border-radius:10px; margin:2rem 0; overflow:hidden}
+  .hands>.hd{background:var(--ink); color:#fff; padding:.55rem 1.1rem; font-size:.85rem; letter-spacing:.1em; font-weight:700}
+  .hands>.bd{padding:1.3rem 1.3rem .4rem}
+  .hands ol{counter-reset:step; list-style:none; padding-left:0}
+  .hands ol>li{counter-increment:step; position:relative; padding-left:2.4rem; margin:0 0 1.2rem}
+  .hands ol>li::before{content:counter(step); position:absolute; left:0; top:.25rem;
+    width:1.7rem; height:1.7rem; border-radius:50%; background:var(--accent); color:#fff;
+    font-size:.82rem; font-weight:700; display:flex; align-items:center; justify-content:center; line-height:1}
+  table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+  th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+  th{background:var(--code-bg); font-weight:700}
+  .summary{border:2px solid var(--ink); border-radius:10px; padding:1.3rem 1.5rem; margin:3rem 0 1rem}
+  .summary h2{margin:0 0 .8rem; border:none; padding:0; font-size:1.1rem}
+  .summary ul{margin-bottom:0}
+  .partend{background:#1f2933; color:#fff; border-radius:10px; padding:1.4rem 1.6rem; margin:2.5rem 0 1rem}
+  .partend h2{color:#fff; border-left-color:#e8b075; margin:0 0 .8rem; font-size:1.1rem}
+  .partend p{color:#cfd8de; margin-bottom:.6rem}
+  .partend ul{color:#cfd8de; margin-bottom:0}
+  .next{color:var(--sub); font-size:.94rem; border-top:1px solid var(--line); padding-top:1.2rem; margin-top:2.5rem}
+  @media (max-width:600px){ body{font-size:15px} .page{padding:2.2rem 1.1rem 4rem} h1{font-size:1.5rem} }
+</style>
+</head>
+<body>
+<div class="page">
+
+<p class="chap-no">第 22 章</p>
+<h1>自分たちの <code>.clang-tidy</code> を育てる</h1>
+<p class="lede">第4部の総仕上げです。ここまで6つのモジュールを見てきました。それぞれ性格が違い、扱い方も違う。この章では、それらを一つの設定ファイルにまとめ、<strong>運用に耐える形</strong>に組み上げます。同時に、「なぜこのチェックを採用し、なぜあれを外したのか」を記録に残す仕組みを作ります。これがないと、半年後に誰も設定を触れなくなります。</p>
+
+<h2>22.1 モジュールの性格・総まとめ</h2>
+
+<table>
+<tr><th>モジュール</th><th>目的</th><th>自動修正</th><th>速度</th><th>置き場所</th></tr>
+<tr><td><code>bugprone-</code></td><td>バグの温床</td><td>少ない</td><td>速い</td><td>常時（ローカル＋CI）</td></tr>
+<tr><td><code>clang-analyzer-</code></td><td>経路依存の欠陥</td><td>ほぼない</td><td><strong>遅い</strong></td><td>CI 中心</td></tr>
+<tr><td><code>modernize-</code></td><td>書き方の刷新</td><td><strong>ほぼ全部</strong></td><td>速い</td><td>移行時に一括、以後は少数</td></tr>
+<tr><td><code>performance-</code></td><td>無駄の除去</td><td>多い</td><td>速い</td><td>常時</td></tr>
+<tr><td><code>readability-</code></td><td>可読性・命名</td><td>多い</td><td>速い</td><td>合意した分だけ常時</td></tr>
+<tr><td><code>cppcoreguidelines-</code> ほか</td><td>規範の機械化</td><td>まちまち</td><td>速い</td><td>個別指定のみ</td></tr>
+</table>
+
+<h2>22.2 四つの層に分ける</h2>
+
+<p>チェックを「入れる／入れない」の二択で考えると行き詰まります。<strong>強さの段階</strong>を設けると、現実的な設計ができます。</p>
+
+<figure>
+<svg viewBox="0 0 760 440" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="チェックを四つの層に分けて運用する">
+  <g font-family="sans-serif">
+
+  <rect x="24" y="16" width="712" height="34" rx="8" fill="#1f2933"/>
+  <text x="380" y="39" text-anchor="middle" fill="#fff" font-size="13" font-weight="bold">同じチェック群を、強さの違う4つの層に配置する</text>
+
+  <!-- T0 -->
+  <rect x="24" y="60" width="712" height="82" rx="10" fill="#a04a34"/>
+  <text x="46" y="86" font-size="13.5" font-weight="bold" fill="#fff">Tier 0 ── ビルドを止める</text>
+  <text x="46" y="108" font-size="11.5" fill="#f0d5cf">WarningsAsErrors に指定。この違反はマージできない</text>
+  <text x="46" y="128" font-size="11" font-family="monospace" fill="#fff">bugprone-use-after-move, bugprone-unsafe-functions, cppcoreguidelines-special-member-functions …</text>
+  <rect x="596" y="72" width="120" height="56" rx="6" fill="#fff" opacity="0.15"/>
+  <text x="656" y="96" text-anchor="middle" font-size="11" fill="#fff" font-weight="bold">数は少なく</text>
+  <text x="656" y="114" text-anchor="middle" font-size="11" fill="#fff" font-weight="bold">例外は認めない</text>
+
+  <!-- T1 -->
+  <rect x="24" y="150" width="712" height="82" rx="10" fill="#b4661a"/>
+  <text x="46" y="176" font-size="13.5" font-weight="bold" fill="#fff">Tier 1 ── 常時、警告として出す</text>
+  <text x="46" y="198" font-size="11.5" fill="#fde9d0">ローカルの編集中にも CI にも出る。既存コードの違反はゼロにしてある</text>
+  <text x="46" y="218" font-size="11" font-family="monospace" fill="#fff">bugprone-*, performance-*, modernize-use-nullptr, readability-identifier-naming …</text>
+  <rect x="596" y="162" width="120" height="56" rx="6" fill="#fff" opacity="0.15"/>
+  <text x="656" y="186" text-anchor="middle" font-size="11" fill="#fff" font-weight="bold">運用の主力</text>
+  <text x="656" y="204" text-anchor="middle" font-size="11" fill="#fff" font-weight="bold">件数を0に保つ</text>
+
+  <!-- T2 -->
+  <rect x="24" y="240" width="712" height="82" rx="10" fill="#2f6f9f"/>
+  <text x="46" y="266" font-size="13.5" font-weight="bold" fill="#fff">Tier 2 ── 新しく書いた行だけに適用</text>
+  <text x="46" y="288" font-size="11.5" fill="#d6e6f2">既存コードに違反が大量にあるが、これから書くコードでは守りたいもの</text>
+  <text x="46" y="308" font-size="11" font-family="monospace" fill="#fff">misc-include-cleaner, readability-function-size, clang-analyzer-* …</text>
+  <rect x="596" y="252" width="120" height="56" rx="6" fill="#fff" opacity="0.15"/>
+  <text x="656" y="276" text-anchor="middle" font-size="11" fill="#fff" font-weight="bold">差分解析で適用</text>
+  <text x="656" y="294" text-anchor="middle" font-size="11" fill="#fff" font-weight="bold">（第15章）</text>
+
+  <!-- T3 -->
+  <rect x="24" y="330" width="712" height="82" rx="10" fill="#f4f6f8" stroke="#5a6b7a" stroke-dasharray="5 4" stroke-width="1.6"/>
+  <text x="46" y="356" font-size="13.5" font-weight="bold" fill="#5a6b7a">Tier 3 ── 採用しない（理由を書く）</text>
+  <text x="46" y="378" font-size="11.5" fill="#1f2933">前提が合わない、偽陽性が多い、合意が取れていない</text>
+  <text x="46" y="398" font-size="11" font-family="monospace" fill="#5a6b7a">cppcoreguidelines-owning-memory, bugprone-easily-swappable-parameters, cert-* …</text>
+  <rect x="596" y="342" width="120" height="56" rx="6" fill="#fff" stroke="#d8dee4"/>
+  <text x="656" y="366" text-anchor="middle" font-size="11" fill="#a04a34" font-weight="bold">「検討していない」</text>
+  <text x="656" y="384" text-anchor="middle" font-size="11" fill="#a04a34" font-weight="bold">と区別する</text>
+
+  <text x="380" y="432" text-anchor="middle" font-size="11.5" fill="#5a6b7a">Tier 2 の違反を潰し終えたら Tier 1 に昇格させる。設定は「育てる」もの</text>
+  </g>
+</svg>
+<figcaption><b>図22-1</b>　四層モデル。Tier 3 に「なぜ採用しないか」を書き残すことが、後から設定を触れるようにする鍵。</figcaption>
+</figure>
+
+<h2>22.3 採用の判断フロー</h2>
+
+<figure>
+<svg viewBox="0 0 760 400" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="チェック採用の判断フロー">
+  <defs>
+    <marker id="a22" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5a6b7a"/>
+    </marker>
+  </defs>
+  <g font-family="sans-serif">
+
+  <rect x="290" y="14" width="180" height="34" rx="17" fill="#1f2933"/>
+  <text x="380" y="37" text-anchor="middle" fill="#fff" font-size="12.5" font-weight="bold">候補のチェック</text>
+  <line x1="380" y1="48" x2="380" y2="64" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#a22)"/>
+
+  <path d="M380,68 L520,98 L380,128 L240,98 Z" fill="#eef4f9" stroke="#2f6f9f" stroke-width="1.5"/>
+  <text x="380" y="94" text-anchor="middle" font-size="11.5" fill="#1f2933" font-weight="bold">前提を満たすか？</text>
+  <text x="380" y="112" text-anchor="middle" font-size="10" fill="#5a6b7a">GSL・規約・言語規格</text>
+  <line x1="240" y1="98" x2="182" y2="98" stroke="#a04a34" stroke-width="1.5" marker-end="url(#a22)"/>
+  <text x="196" y="90" font-size="10.5" fill="#a04a34" font-weight="bold">いいえ</text>
+  <rect x="24" y="80" width="154" height="36" rx="6" fill="#f4f6f8" stroke="#5a6b7a" stroke-dasharray="4 3"/>
+  <text x="101" y="103" text-anchor="middle" font-size="11.5" fill="#5a6b7a" font-weight="bold">Tier 3（理由：前提）</text>
+
+  <line x1="380" y1="128" x2="380" y2="144" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#a22)"/>
+
+  <path d="M380,148 L520,178 L380,208 L240,178 Z" fill="#eef4f9" stroke="#2f6f9f" stroke-width="1.5"/>
+  <text x="380" y="174" text-anchor="middle" font-size="11.5" fill="#1f2933" font-weight="bold">エイリアスではないか？</text>
+  <text x="380" y="192" text-anchor="middle" font-size="10" fill="#5a6b7a">既に別名で入れていないか</text>
+  <line x1="520" y1="178" x2="578" y2="178" stroke="#a04a34" stroke-width="1.5" marker-end="url(#a22)"/>
+  <text x="536" y="170" font-size="10.5" fill="#a04a34" font-weight="bold">重複</text>
+  <rect x="582" y="160" width="154" height="36" rx="6" fill="#f4f6f8" stroke="#5a6b7a" stroke-dasharray="4 3"/>
+  <text x="659" y="183" text-anchor="middle" font-size="11.5" fill="#5a6b7a" font-weight="bold">Tier 3（理由：重複）</text>
+
+  <line x1="380" y1="208" x2="380" y2="224" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#a22)"/>
+
+  <path d="M380,228 L530,260 L380,292 L230,260 Z" fill="#fbf4ea" stroke="#b4661a" stroke-width="1.8"/>
+  <text x="380" y="256" text-anchor="middle" font-size="11.5" fill="#1f2933" font-weight="bold">既存コードの違反件数は？</text>
+  <text x="380" y="274" text-anchor="middle" font-size="10" fill="#5a6b7a">実際に走らせて数える</text>
+
+  <line x1="230" y1="260" x2="182" y2="260" stroke="#3d7a52" stroke-width="1.5" marker-end="url(#a22)"/>
+  <text x="188" y="252" font-size="10.5" fill="#3d7a52" font-weight="bold">0〜少数</text>
+  <rect x="24" y="242" width="154" height="36" rx="6" fill="#b4661a"/>
+  <text x="101" y="265" text-anchor="middle" font-size="11.5" fill="#fff" font-weight="bold">直して Tier 1 へ</text>
+
+  <line x1="530" y1="260" x2="578" y2="260" stroke="#2f6f9f" stroke-width="1.5" marker-end="url(#a22)"/>
+  <text x="540" y="252" font-size="10.5" fill="#2f6f9f" font-weight="bold">大量</text>
+  <rect x="582" y="242" width="154" height="36" rx="6" fill="#2f6f9f"/>
+  <text x="659" y="265" text-anchor="middle" font-size="11.5" fill="#fff" font-weight="bold">Tier 2（差分のみ）</text>
+
+  <line x1="380" y1="292" x2="380" y2="308" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#a22)"/>
+
+  <path d="M380,312 L530,342 L380,372 L230,342 Z" fill="#f7e9e5" stroke="#a04a34" stroke-width="1.8"/>
+  <text x="380" y="338" text-anchor="middle" font-size="11.5" fill="#1f2933" font-weight="bold">違反したら壊れるか？</text>
+  <text x="380" y="356" text-anchor="middle" font-size="10" fill="#5a6b7a">バグに直結するか</text>
+  <line x1="380" y1="372" x2="380" y2="388" stroke="#a04a34" stroke-width="1.5" marker-end="url(#a22)"/>
+  <text x="396" y="386" font-size="10.5" fill="#a04a34" font-weight="bold">はい → Tier 0 に昇格</text>
+  </g>
+</svg>
+<figcaption><b>図22-2</b>　採用の判断フロー。<strong>「実際に走らせて件数を数える」ステップを飛ばさない</strong>ことが要点。</figcaption>
+</figure>
+
+<h2>22.4 完成形 ── TidyLab の <code>.clang-tidy</code></h2>
+
+<p>第2部から第4部までの内容を反映した、運用可能な設定です。</p>
+
+<pre><code>---
+# ============================================================
+# TidyLab 静的解析設定
+#   対象: Visual Studio 2026 / C++23 / モジュール不使用
+#   前提: LLVM 22 以降（Query Based Custom Check を第6部で使うため）
+#   更新: 設定を変えたら、変更理由をこのファイルのコメントに残すこと
+# ============================================================
+
+Checks: &gt;
+  -*,
+
+  # --- Tier 1: バグの温床（第16章） -------------------------
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,   # Tier 3: 偽陽性が多く、件数に見合わない
+
+  # --- Tier 1: 性能上の無駄（第19章） -----------------------
+  performance-*,
+
+  # --- Tier 1: 移行後に残す modernize（第18章） -------------
+  modernize-use-nullptr,
+  modernize-use-override,
+  modernize-use-using,
+  modernize-use-equals-default,
+  modernize-use-equals-delete,
+  modernize-use-std-print,
+  modernize-use-std-format,
+  modernize-use-starts-ends-with,
+
+  # --- Tier 1: 合意済みの可読性（第20章） -------------------
+  readability-identifier-naming,
+  readability-braces-around-statements,
+  readability-else-after-return,
+  readability-container-size-empty,
+  readability-redundant-string-cstr,
+  readability-simplify-boolean-expr,
+  readability-qualified-auto,
+  readability-duplicate-include,
+
+  # --- Tier 1: 個別採用のガイドライン系（第21章） -----------
+  cppcoreguidelines-init-variables,
+  cppcoreguidelines-prefer-member-initializer,
+  cppcoreguidelines-pro-type-member-init,
+  cppcoreguidelines-special-member-functions,
+  cppcoreguidelines-virtual-class-destructor,
+  cppcoreguidelines-slicing,
+  cppcoreguidelines-pro-type-cstyle-cast,
+
+  # --- Tier 1: misc の掘り出し物（第21章） ------------------
+  misc-const-correctness,
+  misc-definitions-in-headers,
+  misc-use-internal-linkage,
+  misc-unused-using-decls
+
+# ------------------------------------------------------------
+# Tier 0: 違反したらビルドを止める（第40章で CI に反映）
+# ------------------------------------------------------------
+WarningsAsErrors: &gt;
+  bugprone-use-after-move,
+  bugprone-unsafe-functions,
+  bugprone-undefined-memory-manipulation,
+  cppcoreguidelines-special-member-functions,
+  cppcoreguidelines-virtual-class-destructor
+
+# ------------------------------------------------------------
+# 解析範囲（第10章）
+# ------------------------------------------------------------
+HeaderFilterRegex: '.*'
+ExcludeHeaderFilterRegex: 'third_party|generated'
+SystemHeaders: false
+
+# ------------------------------------------------------------
+# 自動修正時の整形（第11章）
+# ------------------------------------------------------------
+FormatStyle: file
+
+# ------------------------------------------------------------
+# Clang に渡す引数（第12章）
+# ------------------------------------------------------------
+ExtraArgsBefore: ['-std=c++23']
+
+CheckOptions:
+  # 命名規約（第20章の設計シート）
+  readability-identifier-naming.ClassCase: 'CamelCase'
+  readability-identifier-naming.StructCase: 'CamelCase'
+  readability-identifier-naming.EnumCase: 'CamelCase'
+  readability-identifier-naming.EnumConstantCase: 'CamelCase'
+  readability-identifier-naming.FunctionCase: 'camelBack'
+  readability-identifier-naming.MethodCase: 'camelBack'
+  readability-identifier-naming.ParameterCase: 'lower_case'
+  readability-identifier-naming.VariableCase: 'lower_case'
+  readability-identifier-naming.PrivateMemberCase: 'lower_case'
+  readability-identifier-naming.PrivateMemberSuffix: '_'
+  readability-identifier-naming.ConstantCase: 'UPPER_CASE'
+  readability-identifier-naming.NamespaceCase: 'lower_case'
+  readability-identifier-naming.MacroDefinitionCase: 'UPPER_CASE'
+...</code></pre>
+
+<div class="note">
+<span class="t"><code>WarningsAsErrors</code> の注意</span>
+<p>ここに書いたチェックは、<strong><code>Checks</code> で有効になっているものだけ</strong>が対象です。有効になっていないチェックを <code>WarningsAsErrors</code> に書いても何も起きません。また、書式は <code>Checks</code> と同じグロブなので、<code>bugprone-*</code> のようにまとめて指定することもできます ── ただし Tier 0 は「例外を認めない」層なので、<strong>個別に列挙するのが安全です。</strong></p>
+</div>
+
+<h2>22.5 Tier 2 と Tier 3 をどこに書くか</h2>
+
+<p><code>.clang-tidy</code> には「有効にするもの」しか書けません。Tier 2 と Tier 3 は別の場所に記録します。</p>
+
+<h3>Tier 2 ── 差分解析用の設定ファイル</h3>
+
+<p>CI の差分解析（第15章）でだけ使う設定を、別ファイルとして持ちます。</p>
+
+<pre><code># tools/clang-tidy-diff.yml （差分解析専用）
+InheritParentConfig: true
+Checks: &gt;
+  clang-analyzer-*,
+  misc-include-cleaner,
+  readability-function-size,
+  readability-function-cognitive-complexity
+
+CheckOptions:
+  readability-function-size.LineThreshold: '80'
+  readability-function-size.NestingThreshold: '5'
+  readability-function-cognitive-complexity.Threshold: '25'</code></pre>
+
+<pre class="term"><code><span class="p">&gt;</span> git diff -U0 | python clang-tidy-diff.py -p1 -path out\build\ninja -config-file tools\clang-tidy-diff.yml</code></pre>
+
+<h3>Tier 3 ── 決定の記録</h3>
+
+<p>「採用しなかった」という判断は、記録がないと <strong>「検討していない」と区別できません</strong>。リポジトリにドキュメントを1枚置きます。</p>
+
+<pre><code>&lt;!-- docs/clang-tidy-decisions.md --&gt;
+# Clang-Tidy チェック採用の判断記録
+
+| チェック | 判断 | 理由 | 見直し条件 |
+|---|---|---|---|
+| bugprone-easily-swappable-parameters | 不採用 | 既存コードで 340 件。ほぼ描画系の座標引数で、実際の取り違えは発生していない | 型安全な座標型を導入したら再検討 |
+| cppcoreguidelines-owning-memory | 不採用 | GSL を採用していないため、生ポインタ全箇所が違反になる | GSL 導入を決めたら再検討 |
+| cppcoreguidelines-pro-bounds-* | 不採用 | 同上 | 同上 |
+| cert-* / hicpp-* | 不採用 | 大半が他モジュールのエイリアス。二重警告になる | ─ |
+| misc-include-cleaner | Tier 2 | 既存コードで 1200 件。新規コードのみ適用 | 違反が 100 件を切ったら Tier 1 へ |
+| clang-analyzer-* | Tier 2 | ローカルビルドが 3.4 倍に。CI の差分解析のみ | ビルドマシンが速くなったら再検討 |
+| modernize-use-trailing-return-type | 不採用 | チーム内で合意が取れなかった（2026-08 の議論） | 合意が変われば再検討 |</code></pre>
+
+<div class="tip">
+<span class="t">「見直し条件」の欄が効く</span>
+<p>不採用の理由は変わります。「GSL を導入したら」「件数が減ったら」「ビルドマシンが速くなったら」── その条件を書いておくと、状況が変わったときに設定を見直すきっかけになります。書いていないと、一度不採用にしたチェックは永遠に不採用のままです。</p>
+</div>
+
+<h2>22.6 バージョン更新への備え</h2>
+
+<p>LLVM を更新すると、警告件数が変わります（第4章）。手順を決めておきます。</p>
+
+<figure>
+<svg viewBox="0 0 760 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="LLVM 更新時の手順">
+  <defs>
+    <marker id="b22" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5a6b7a"/>
+    </marker>
+  </defs>
+  <g font-family="sans-serif">
+
+  <rect x="24" y="24" width="150" height="60" rx="8" fill="#1f2933"/>
+  <text x="99" y="48" text-anchor="middle" fill="#fff" font-size="12" font-weight="bold">① 旧版で記録</text>
+  <text x="99" y="68" text-anchor="middle" fill="#b8c4cd" font-size="10.5">現在の警告件数を保存</text>
+  <line x1="174" y1="54" x2="200" y2="54" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#b22)"/>
+
+  <rect x="204" y="24" width="150" height="60" rx="8" fill="#2f6f9f"/>
+  <text x="279" y="48" text-anchor="middle" fill="#fff" font-size="12" font-weight="bold">② 新版を並べて入れる</text>
+  <text x="279" y="68" text-anchor="middle" fill="#d6e6f2" font-size="10.5">旧版は消さない</text>
+  <line x1="354" y1="54" x2="380" y2="54" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#b22)"/>
+
+  <rect x="384" y="24" width="150" height="60" rx="8" fill="#b4661a"/>
+  <text x="459" y="48" text-anchor="middle" fill="#fff" font-size="12" font-weight="bold">③ 新版で計測</text>
+  <text x="459" y="68" text-anchor="middle" fill="#fde9d0" font-size="10.5">件数と時間を比較</text>
+  <line x1="534" y1="54" x2="560" y2="54" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#b22)"/>
+
+  <rect x="564" y="24" width="172" height="60" rx="8" fill="#3d7a52"/>
+  <text x="650" y="48" text-anchor="middle" fill="#fff" font-size="12" font-weight="bold">④ 差分を検討</text>
+  <text x="650" y="68" text-anchor="middle" fill="#d5e6da" font-size="10.5">増減の理由を特定</text>
+
+  <rect x="24" y="104" width="712" height="88" rx="10" fill="#fbf4ea" stroke="#b4661a" stroke-width="1.6"/>
+  <text x="46" y="128" font-size="12.5" font-weight="bold" fill="#b4661a">件数が変わる理由は4つ</text>
+  <text x="46" y="152" font-size="11.5" fill="#1f2933">1. 新しいチェックが追加された（<tspan font-family="monospace">*</tspan> 指定をしていると勝手に増える）</text>
+  <text x="46" y="170" font-size="11.5" fill="#1f2933">2. 既存チェックの検出精度が上がった（真陽性が増える／偽陽性が減る）</text>
+  <text x="46" y="188" font-size="11.5" fill="#1f2933">3. チェックが改名・削除された（指定名が無効になり、黙って0件になる）</text>
+
+  <rect x="24" y="204" width="712" height="80" rx="10" fill="#eef4f9" stroke="#2f6f9f" stroke-width="1.6"/>
+  <text x="46" y="228" font-size="12.5" font-weight="bold" fill="#2f6f9f">だから更新のたびに確認する</text>
+  <text x="46" y="252" font-size="11.5" fill="#1f2933">・<tspan font-family="monospace">--list-checks</tspan> で、設定したチェック名が全部有効になっているか（改名・削除の検出）</text>
+  <text x="46" y="272" font-size="11.5" fill="#1f2933">・件数の増減と、<tspan font-family="monospace">--dump-config</tspan> でのオプション既定値の変化</text>
+  </g>
+</svg>
+<figcaption><b>図22-3</b>　LLVM 更新時の手順。第6章の「<code>-*</code> から積み上げる」形にしておくと、1番の影響を受けずに済む。</figcaption>
+</figure>
+
+<h2>22.7 【ハンズオン】設定を完成させる</h2>
+
+<div class="hands">
+<div class="hd">HANDS-ON 22　運用可能な設定に仕上げる</div>
+<div class="bd">
+<ol>
+  <li><strong>候補を全部走らせて件数を出す。</strong> 第16〜21章で見たモジュールについて、モジュール単位で件数を記録します。表を作ってください。
+<pre><code>for %m in (bugprone modernize performance readability misc) do @(
+  echo === %m ===
+  clang-tidy --checks="-*,%m-*" config_loader.cpp main.cpp -- -std=c++23 2^&gt;nul | findstr /c:"warning:" | find /c /v ""
+)</code></pre>
+  </li>
+
+  <li><strong>四層に振り分ける。</strong> 図22-2 のフローに従い、各チェックを Tier 0〜3 に分類します。<strong>件数を見てから判断する</strong>のが要点です。</li>
+
+  <li><strong>Tier 1 の違反をゼロにする。</strong> Tier 1 に置いたチェックについて、既存コードの違反をすべて直します。直せないものは Tier 2 に落とすか、Tier 3 にします。<strong>「Tier 1 なのに違反が残っている」状態を作らないでください。</strong> 警告が常時出ていると、人はそれを見なくなります。</li>
+
+  <li><strong>設定ファイルを書く。</strong> 22.4 節の内容を、自分の判断に合わせて調整して <code>.clang-tidy</code> に書きます。<strong>各行にコメントで Tier と理由を残してください。</strong></li>
+
+  <li><strong>Tier 2 用の設定を作る。</strong> <code>tools/clang-tidy-diff.yml</code> を作り、<code>InheritParentConfig: true</code> で親を引き継ぐ形にします（第7章）。</li>
+
+  <li><strong>差分解析で動作確認する。</strong> 適当な変更を1行加え、Tier 2 の設定で差分解析を実行します。
+<pre><code>git diff -U0 | python clang-tidy-diff.py -p1 -path out\build\ninja -config-file tools\clang-tidy-diff.yml</code></pre>
+    変更した行だけがチェックされることを確認します。</li>
+
+  <li><strong>Tier 0 を検証する。</strong> <code>WarningsAsErrors</code> に指定したチェックに違反するコードをわざと書き、<strong>警告ではなくエラーになる</strong>ことを確認します。確認したら削除します。</li>
+
+  <li><strong>判断記録を書く。</strong> <code>docs/clang-tidy-decisions.md</code> を作り、Tier 2・Tier 3 のチェックについて「理由」と「見直し条件」を書きます。<strong>この文書が第4部の最終成果物です。</strong></li>
+
+  <li><strong>基準を保存する。</strong> 現在の警告件数を記録しておきます。次に LLVM を更新したとき、この数字と比較します（図22-3）。
+<pre><code>python "C:\Program Files\LLVM\bin\run-clang-tidy" -p out\build\ninja &gt; baseline-llvm22.log 2&gt;&amp;1
+findstr /c:"warning:" baseline-llvm22.log | find /c /v ""</code></pre>
+  </li>
+</ol>
+</div>
+</div>
+
+<div class="partend">
+<h2>第4部の終わりに</h2>
+<p>標準チェックの全体像をつかみ、自分たちの設定を組み上げました。</p>
+<ul>
+  <li>モジュールごとの性格と、置き場所（ローカル／CI／一括変換）を理解した（第16〜21章）</li>
+  <li>四層モデルで「入れる／入れない」の二択から抜け出した（第22章）</li>
+  <li>採用・不採用の判断を記録に残す仕組みを作った</li>
+</ul>
+<p style="margin-top:.8rem">ここまでで <strong>「用意されたチェックを使いこなす」</strong> は完了です。しかし、実務で本当に効くルールの多くは標準チェックには存在しません。「うちのコードベースでは <code>LegacyCopy()</code> を使わない」「この基底クラスを継承したら接尾辞を付ける」── こうしたルールは、あなたのチームにしか存在しないからです。</p>
+<p style="margin-top:.6rem">第5部では、そのルールを書くための土台である <strong>Clang AST と AST Matcher</strong> を学びます。そして第6部で、C++ を一行も書かずに <code>.clang-tidy</code> だけで独自チェックを実装します。本書の主題は、ここから始まります。</p>
+</div>
+
+<div class="summary">
+<h2>この章のまとめ</h2>
+<ul>
+  <li>チェックを「入れる／入れない」の二択で考えない。<strong>四つの層</strong>に分ける。</li>
+  <li>Tier 0（エラー・少数）／Tier 1（常時・違反ゼロを保つ）／Tier 2（新規コードのみ・差分解析）／Tier 3（不採用・理由を記録）。</li>
+  <li>判断フローの要点は<strong>「実際に走らせて件数を数えてから決める」</strong>こと。</li>
+  <li><code>WarningsAsErrors</code> は <code>Checks</code> で有効なチェックにしか効かない。Tier 0 は個別列挙が安全。</li>
+  <li>Tier 2 は <code>InheritParentConfig: true</code> の別ファイルにして、差分解析で使う。</li>
+  <li><strong>Tier 3 は文書に記録する。</strong> 「理由」と「見直し条件」を書かないと、「検討していない」と区別できない。</li>
+  <li>LLVM 更新時は、件数の記録・<code>--list-checks</code> での名前検証・<code>--dump-config</code> での既定値確認を行う。</li>
+  <li><strong>Tier 1 に違反を残さない。</strong> 常時出ている警告は、いずれ誰も見なくなる。</li>
+</ul>
+</div>
+
+<p class="next"><strong>次章：</strong> 第5部に入ります。第23章「Clang AST を覗く」から、独自チェックを書くための土台作りが始まります。まずは <code>-ast-dump</code> で、ソースコードがどんな木構造になっているかを自分の目で見ます。</p>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第15章 プロジェクト全体・差分だけを解析する ─ Clang-Tidy入門</title>
+<style>
+  :root{
+    --ink:#1f2933; --sub:#5a6b7a; --line:#d8dee4; --bg:#ffffff;
+    --code-bg:#f6f8fa; --code-line:#e2e8ee;
+    --accent:#2f6f9f; --accent-bg:#eef4f9;
+    --warn:#b4661a; --warn-bg:#fbf4ea;
+    --ok:#3d7a52; --ok-bg:#eef5f0;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0; background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Noto Sans JP","Meiryo",sans-serif;
+    font-size:16px; line-height:1.95; font-feature-settings:"palt" 1;}
+  .page{max-width:47rem; margin:0 auto; padding:3.5rem 1.6rem 6rem}
+  .chap-no{font-size:.8rem; letter-spacing:.22em; color:var(--accent); font-weight:700; margin:0 0 .5rem}
+  h1{font-size:1.85rem; line-height:1.5; margin:0 0 .6rem; letter-spacing:.01em}
+  .lede{color:var(--sub); font-size:1rem; margin:0 0 2.2rem; padding-bottom:1.6rem; border-bottom:2px solid var(--ink)}
+  h2{font-size:1.28rem; margin:3rem 0 1rem; padding-left:.7rem; border-left:4px solid var(--accent); line-height:1.6}
+  h3{font-size:1.05rem; margin:2.2rem 0 .7rem}
+  h3::before{content:"◆ "; color:var(--accent); font-size:.8em}
+  p{margin:0 0 1.1rem}
+  ul,ol{margin:0 0 1.2rem; padding-left:1.6rem}
+  li{margin:.35rem 0}
+  code{font-family:"Cascadia Mono","Consolas","SFMono-Regular",monospace; font-size:.9em;
+       background:var(--code-bg); border:1px solid var(--code-line); border-radius:4px; padding:.08em .35em}
+  pre{background:var(--code-bg); border:1px solid var(--code-line); border-radius:8px;
+      padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.7}
+  pre code{background:none; border:none; padding:0; font-size:.86rem}
+  pre.term{background:#1f2933; border-color:#1f2933; color:#e6edf3}
+  pre.term code{color:#e6edf3}
+  pre.term .p{color:#7fb2d6}
+  pre.term .o{color:#9fb3c0}
+  .cap{font-size:.82rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+  figure{margin:2rem 0 2.2rem}
+  figure svg{display:block; width:100%; height:auto; border:1px solid var(--line); border-radius:8px; background:#fff}
+  figcaption{font-size:.85rem; color:var(--sub); margin-top:.6rem}
+  figcaption b{color:var(--ink)}
+  .box{border-radius:8px; padding:1rem 1.2rem; margin:1.6rem 0; font-size:.94rem}
+  .box p:last-child{margin-bottom:0}
+  .box .t{font-weight:700; display:block; margin-bottom:.35rem; font-size:.88rem; letter-spacing:.04em}
+  .note{background:var(--accent-bg); border-left:4px solid var(--accent)} .note .t{color:var(--accent)}
+  .warn{background:var(--warn-bg); border-left:4px solid var(--warn)} .warn .t{color:var(--warn)}
+  .tip{background:var(--ok-bg); border-left:4px solid var(--ok)} .tip .t{color:var(--ok)}
+  .hands{border:1px solid var(--line); border-radius:10px; margin:2rem 0; overflow:hidden}
+  .hands>.hd{background:var(--ink); color:#fff; padding:.55rem 1.1rem; font-size:.85rem; letter-spacing:.1em; font-weight:700}
+  .hands>.bd{padding:1.3rem 1.3rem .4rem}
+  .hands ol{counter-reset:step; list-style:none; padding-left:0}
+  .hands ol>li{counter-increment:step; position:relative; padding-left:2.4rem; margin:0 0 1.2rem}
+  .hands ol>li::before{content:counter(step); position:absolute; left:0; top:.25rem;
+    width:1.7rem; height:1.7rem; border-radius:50%; background:var(--accent); color:#fff;
+    font-size:.82rem; font-weight:700; display:flex; align-items:center; justify-content:center; line-height:1}
+  table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+  th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+  th{background:var(--code-bg); font-weight:700}
+  .summary{border:2px solid var(--ink); border-radius:10px; padding:1.3rem 1.5rem; margin:3rem 0 1rem}
+  .summary h2{margin:0 0 .8rem; border:none; padding:0; font-size:1.1rem}
+  .summary ul{margin-bottom:0}
+  .partend{background:#1f2933; color:#fff; border-radius:10px; padding:1.4rem 1.6rem; margin:2.5rem 0 1rem}
+  .partend h2{color:#fff; border-left-color:#e8b075; margin:0 0 .8rem; font-size:1.1rem}
+  .partend p{color:#cfd8de; margin-bottom:.6rem}
+  .partend ul{color:#cfd8de; margin-bottom:0}
+  .next{color:var(--sub); font-size:.94rem; border-top:1px solid var(--line); padding-top:1.2rem; margin-top:2.5rem}
+  @media (max-width:600px){ body{font-size:15px} .page{padding:2.2rem 1.1rem 4rem} h1{font-size:1.5rem} }
+</style>
+</head>
+<body>
+<div class="page">
+
+<p class="chap-no">第 15 章</p>
+<h1>プロジェクト全体・差分だけを解析する</h1>
+<p class="lede"><code>clang-tidy</code> 本体は原則1ファイルずつです。数百ファイルのプロジェクトを回すには一括実行の道具が要り、既存コードに新ルールを入れるには「変更した行だけ」を見る道具が要ります。この章で第3部が完結し、Clang-Tidy を実プロジェクトで運用する準備が整います。</p>
+
+<h2>15.1 三つの粒度</h2>
+
+<figure>
+<svg viewBox="0 0 760 360" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="解析の三つの粒度と使いどころ">
+  <g font-family="sans-serif">
+
+  <!-- 1 -->
+  <rect x="24" y="24" width="228" height="300" rx="10" fill="#eef4f9" stroke="#2f6f9f" stroke-width="1.6"/>
+  <text x="138" y="50" text-anchor="middle" font-size="13" font-weight="bold" fill="#2f6f9f">① 1 ファイル</text>
+  <rect x="40" y="62" width="196" height="30" rx="5" fill="#1f2933"/>
+  <text x="138" y="82" text-anchor="middle" font-size="11" font-family="monospace" fill="#e6edf3">clang-tidy</text>
+
+  <g>
+    <rect x="60" y="106" width="156" height="16" rx="3" fill="#2f6f9f"/>
+    <rect x="60" y="126" width="156" height="16" rx="3" fill="#dde5ec"/>
+    <rect x="60" y="146" width="156" height="16" rx="3" fill="#dde5ec"/>
+    <rect x="60" y="166" width="156" height="16" rx="3" fill="#dde5ec"/>
+    <rect x="60" y="186" width="156" height="16" rx="3" fill="#dde5ec"/>
+  </g>
+
+  <text x="138" y="228" text-anchor="middle" font-size="11.5" fill="#1f2933" font-weight="bold">用途</text>
+  <text x="40" y="250" font-size="11" fill="#1f2933">・切り分け・デバッグ</text>
+  <text x="40" y="270" font-size="11" fill="#1f2933">・カスタムチェックの試作</text>
+  <text x="40" y="290" font-size="11" fill="#1f2933">・IDE が内部で使う形</text>
+  <text x="40" y="312" font-size="10.5" fill="#5a6b7a">→ 第12章</text>
+
+  <!-- 2 -->
+  <rect x="266" y="24" width="228" height="300" rx="10" fill="#fbf4ea" stroke="#b4661a" stroke-width="1.6"/>
+  <text x="380" y="50" text-anchor="middle" font-size="13" font-weight="bold" fill="#b4661a">② プロジェクト全体</text>
+  <rect x="282" y="62" width="196" height="30" rx="5" fill="#1f2933"/>
+  <text x="380" y="82" text-anchor="middle" font-size="11" font-family="monospace" fill="#e6edf3">run-clang-tidy</text>
+
+  <g>
+    <rect x="302" y="106" width="156" height="16" rx="3" fill="#b4661a"/>
+    <rect x="302" y="126" width="156" height="16" rx="3" fill="#b4661a"/>
+    <rect x="302" y="146" width="156" height="16" rx="3" fill="#b4661a"/>
+    <rect x="302" y="166" width="156" height="16" rx="3" fill="#b4661a"/>
+    <rect x="302" y="186" width="156" height="16" rx="3" fill="#b4661a"/>
+  </g>
+
+  <text x="380" y="228" text-anchor="middle" font-size="11.5" fill="#1f2933" font-weight="bold">用途</text>
+  <text x="282" y="250" font-size="11" fill="#1f2933">・現状の棚卸し</text>
+  <text x="282" y="270" font-size="11" fill="#1f2933">・新チェック導入時の一括修正</text>
+  <text x="282" y="290" font-size="11" fill="#1f2933">・夜間 CI</text>
+  <text x="282" y="312" font-size="10.5" fill="#b4661a">→ 遅い。並列前提</text>
+
+  <!-- 3 -->
+  <rect x="508" y="24" width="228" height="300" rx="10" fill="#eef5f0" stroke="#3d7a52" stroke-width="2"/>
+  <text x="622" y="50" text-anchor="middle" font-size="13" font-weight="bold" fill="#3d7a52">③ 変更した行だけ</text>
+  <rect x="524" y="62" width="196" height="30" rx="5" fill="#1f2933"/>
+  <text x="622" y="82" text-anchor="middle" font-size="11" font-family="monospace" fill="#e6edf3">clang-tidy-diff.py</text>
+
+  <g>
+    <rect x="544" y="106" width="156" height="16" rx="3" fill="#dbe7de"/>
+    <rect x="544" y="126" width="60" height="16" rx="3" fill="#3d7a52"/>
+    <rect x="608" y="126" width="92" height="16" rx="3" fill="#dbe7de"/>
+    <rect x="544" y="146" width="156" height="16" rx="3" fill="#dbe7de"/>
+    <rect x="544" y="166" width="110" height="16" rx="3" fill="#3d7a52"/>
+    <rect x="658" y="166" width="42" height="16" rx="3" fill="#dbe7de"/>
+    <rect x="544" y="186" width="156" height="16" rx="3" fill="#dbe7de"/>
+  </g>
+
+  <text x="622" y="228" text-anchor="middle" font-size="11.5" fill="#1f2933" font-weight="bold">用途</text>
+  <text x="524" y="250" font-size="11" fill="#1f2933">・プルリクエストのチェック</text>
+  <text x="524" y="270" font-size="11" fill="#1f2933">・既存コードへの段階導入</text>
+  <text x="524" y="290" font-size="11" fill="#1f2933">・「新規コードだけ厳しく」</text>
+  <text x="524" y="312" font-size="10.5" fill="#3d7a52">→ 速い。実運用の主役</text>
+  </g>
+</svg>
+<figcaption><b>図15-1</b>　解析の三つの粒度。既存の大きなコードベースに導入するときは、③が現実的な入口になる。</figcaption>
+</figure>
+
+<h2>15.2 <code>run-clang-tidy</code> ── 全体を並列で回す</h2>
+
+<h3>どこにあるか</h3>
+
+<p>これは Python スクリプトです。LLVM のインストール先の <code>bin</code> に入ります。</p>
+
+<pre class="term"><code><span class="p">&gt;</span> dir "C:\Program Files\LLVM\bin\run-clang-tidy*"
+<span class="o">run-clang-tidy</span></code></pre>
+
+<p>実行には Python が必要です。拡張子が付かない形で入ることがあるので、明示的に Python から起動するのが確実です。</p>
+
+<pre class="term"><code><span class="p">&gt;</span> python "C:\Program Files\LLVM\bin\run-clang-tidy" -p out\build\ninja</code></pre>
+
+<h3>主なオプション</h3>
+
+<table>
+<tr><th>オプション</th><th>意味</th></tr>
+<tr><td><code>-p &lt;dir&gt;</code></td><td>コンパイルデータベースのあるディレクトリ（必須級）</td></tr>
+<tr><td><code>-j &lt;N&gt;</code></td><td>並列数。既定は論理プロセッサ数</td></tr>
+<tr><td><code>-checks=…</code></td><td>チェック指定。<code>.clang-tidy</code> があれば不要</td></tr>
+<tr><td><code>-header-filter=…</code></td><td>ヘッダフィルタ（第10章）</td></tr>
+<tr><td><code>-export-fixes &lt;file or dir&gt;</code></td><td>修正案を書き出す</td></tr>
+<tr><td><code>-fix</code></td><td>修正を適用する</td></tr>
+<tr><td><code>-quiet</code></td><td>統計行を抑制する</td></tr>
+<tr><td>（末尾の位置引数）</td><td>対象ファイルを絞る<strong>正規表現</strong></td></tr>
+</table>
+
+<p>最後の項目が便利です。DB に載っている全ファイルのうち、パスが正規表現に一致するものだけを回せます。</p>
+
+<pre class="term"><code><span class="p">&gt;</span> python run-clang-tidy -p out\build\ninja -j 8 "TidyLab[\\/]"</code></pre>
+
+<h3>並列実行と自動修正の相性</h3>
+
+<p>第10章で見たとおり、複数の翻訳単位が同じヘッダを解析します。ここで <code>-fix</code> を素直に使うと、<strong>複数のプロセスが同じヘッダを同時に書き換えようとします</strong>。そのためのパイプラインが用意されています。</p>
+
+<figure>
+<svg viewBox="0 0 760 340" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="並列解析と修正の一括適用パイプライン">
+  <defs>
+    <marker id="a15" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5a6b7a"/>
+    </marker>
+  </defs>
+  <g font-family="sans-serif">
+
+  <rect x="24" y="20" width="170" height="46" rx="8" fill="#1f2933"/>
+  <text x="109" y="40" text-anchor="middle" fill="#fff" font-size="12" font-weight="bold">run-clang-tidy</text>
+  <text x="109" y="57" text-anchor="middle" fill="#b8c4cd" font-size="10.5">-j 8 -export-fixes fixes\</text>
+
+  <line x1="194" y1="43" x2="226" y2="43" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#a15)"/>
+
+  <!-- workers -->
+  <g>
+    <rect x="230" y="12" width="120" height="26" rx="5" fill="#eef4f9" stroke="#2f6f9f"/>
+    <text x="290" y="30" text-anchor="middle" font-size="10.5" fill="#1f2933">プロセス 1</text>
+    <rect x="230" y="42" width="120" height="26" rx="5" fill="#eef4f9" stroke="#2f6f9f"/>
+    <text x="290" y="60" text-anchor="middle" font-size="10.5" fill="#1f2933">プロセス 2</text>
+    <rect x="230" y="72" width="120" height="26" rx="5" fill="#eef4f9" stroke="#2f6f9f"/>
+    <text x="290" y="90" text-anchor="middle" font-size="10.5" fill="#1f2933">…</text>
+    <rect x="230" y="102" width="120" height="26" rx="5" fill="#eef4f9" stroke="#2f6f9f"/>
+    <text x="290" y="120" text-anchor="middle" font-size="10.5" fill="#1f2933">プロセス 8</text>
+  </g>
+
+  <path d="M350,25 L392,60" fill="none" stroke="#5a6b7a" stroke-width="1.3"/>
+  <path d="M350,55 L392,62" fill="none" stroke="#5a6b7a" stroke-width="1.3"/>
+  <path d="M350,85 L392,68" fill="none" stroke="#5a6b7a" stroke-width="1.3"/>
+  <path d="M350,115 L392,72" fill="none" stroke="#5a6b7a" stroke-width="1.3" marker-end="url(#a15)"/>
+
+  <rect x="396" y="42" width="164" height="56" rx="8" fill="#fbf4ea" stroke="#b4661a" stroke-width="1.8"/>
+  <text x="478" y="64" text-anchor="middle" font-size="12" fill="#b4661a" font-weight="bold">fixes\ （YAML 群）</text>
+  <text x="478" y="84" text-anchor="middle" font-size="10.5" fill="#5a6b7a">各プロセスは書き出すだけ</text>
+
+  <line x1="560" y1="70" x2="592" y2="70" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#a15)"/>
+
+  <rect x="596" y="42" width="140" height="56" rx="8" fill="#3d7a52"/>
+  <text x="666" y="64" text-anchor="middle" fill="#fff" font-size="11.5" font-weight="bold">clang-apply-</text>
+  <text x="666" y="80" text-anchor="middle" fill="#fff" font-size="11.5" font-weight="bold">replacements</text>
+
+  <line x1="666" y1="98" x2="666" y2="126" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#a15)"/>
+  <rect x="556" y="130" width="180" height="46" rx="8" fill="#1f2933"/>
+  <text x="646" y="150" text-anchor="middle" fill="#fff" font-size="11.5" font-weight="bold">ソースに一括適用</text>
+  <text x="646" y="167" text-anchor="middle" fill="#b8c4cd" font-size="10">重複排除・競合検出つき</text>
+
+  <rect x="24" y="204" width="712" height="120" rx="10" fill="#f7e9e5" stroke="#a04a34" stroke-width="1.5"/>
+  <text x="46" y="230" font-size="12.5" font-weight="bold" fill="#a04a34">なぜ直接 -fix ではいけないのか</text>
+  <text x="46" y="256" font-size="11.5" fill="#1f2933">・同じヘッダを 8 プロセスが同時に開いて書き換える → 内容が壊れる／片方の修正が失われる</text>
+  <text x="46" y="278" font-size="11.5" fill="#1f2933">・同じ箇所への修正が重複して二重適用される</text>
+  <text x="46" y="300" font-size="11.5" fill="#1f2933">・矛盾する修正（同じ範囲に別の置換）が検出されずに当たる</text>
+  <text x="46" y="318" font-size="11" fill="#a04a34" font-weight="bold">→ 書き出しと適用を分ければ、すべて適用側でまとめて解決できる</text>
+  </g>
+</svg>
+<figcaption><b>図15-2</b>　並列解析と修正適用の分離。第11章の「経路B」が、ここで本領を発揮する。</figcaption>
+</figure>
+
+<pre class="term"><code><span class="p">&gt;</span> mkdir fixes
+<span class="p">&gt;</span> python run-clang-tidy -p out\build\ninja -j 8 -export-fixes fixes
+<span class="p">&gt;</span> clang-apply-replacements fixes</code></pre>
+
+<h2>15.3 <code>clang-tidy-diff.py</code> ── 変更した行だけ</h2>
+
+<h3>どこにあるか</h3>
+
+<p>こちらは <code>bin</code> ではなく、<strong>共有データのディレクトリ</strong>に入ります。Windows の LLVM インストールでは次のあたりです。</p>
+
+<pre class="term"><code><span class="p">&gt;</span> dir /s /b "C:\Program Files\LLVM\clang-tidy-diff.py"
+<span class="o">C:\Program Files\LLVM\share\clang\clang-tidy-diff.py</span></code></pre>
+
+<div class="note">
+<span class="t">見つからないときは</span>
+<p>インストール方法やバージョンによって配置は変わります（LLVM 側でも「<code>bin</code> に統一すべきでは」という議論があります）。見つからない場合は、LLVM のソースツリーから <code>clang-tools-extra/clang-tidy/tool/clang-tidy-diff.py</code> を取ってきて、リポジトリの <code>tools\</code> に置いても構いません。単体の Python スクリプトなので、それで動きます。</p>
+</div>
+
+<h3>使い方</h3>
+
+<p>標準入力から <strong>unified diff</strong> を受け取り、追加・変更された行に対してだけ解析を走らせます。</p>
+
+<figure>
+<svg viewBox="0 0 760 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="差分解析の流れ">
+  <defs>
+    <marker id="b15" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5a6b7a"/>
+    </marker>
+  </defs>
+  <g font-family="sans-serif">
+
+  <rect x="24" y="30" width="180" height="64" rx="8" fill="#1f2933"/>
+  <text x="114" y="54" text-anchor="middle" fill="#fff" font-size="12" font-weight="bold">git diff -U0</text>
+  <text x="114" y="72" text-anchor="middle" fill="#b8c4cd" font-size="10.5">変更行だけの unified diff</text>
+  <text x="114" y="87" text-anchor="middle" fill="#e8b075" font-size="10">-U0 が重要（後述）</text>
+
+  <line x1="204" y1="62" x2="240" y2="62" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#b15)"/>
+  <text x="222" y="52" text-anchor="middle" font-size="10" fill="#5a6b7a">パイプ</text>
+
+  <rect x="244" y="30" width="200" height="64" rx="8" fill="#3d7a52"/>
+  <text x="344" y="54" text-anchor="middle" fill="#fff" font-size="12" font-weight="bold">clang-tidy-diff.py</text>
+  <text x="344" y="72" text-anchor="middle" fill="#d5e6da" font-size="10.5">diff を解析して</text>
+  <text x="344" y="87" text-anchor="middle" fill="#d5e6da" font-size="10.5">ファイルと行範囲を抽出</text>
+
+  <line x1="444" y1="62" x2="480" y2="62" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#b15)"/>
+
+  <rect x="484" y="30" width="252" height="64" rx="8" fill="#b4661a"/>
+  <text x="610" y="54" text-anchor="middle" fill="#fff" font-size="12" font-weight="bold">clang-tidy --line-filter=…</text>
+  <text x="610" y="72" text-anchor="middle" fill="#fde9d0" font-size="10.5">第10章 10.6 節のオプション</text>
+  <text x="610" y="87" text-anchor="middle" fill="#fde9d0" font-size="10.5">を内部で組み立てて実行</text>
+
+  <rect x="24" y="122" width="712" height="70" rx="8" fill="#eef5f0" stroke="#3d7a52" stroke-width="1.5"/>
+  <text x="46" y="146" font-size="12" font-weight="bold" fill="#3d7a52">これが「既存の大量警告を無視して、新しく書いた行だけを厳しくする」仕組みの正体</text>
+  <text x="46" y="170" font-size="11.5" fill="#1f2933">既存コードに 3000 件の警告があっても、今回のプルリクエストで触った 40 行だけを見る</text>
+  <text x="46" y="186" font-size="11" fill="#5a6b7a">→ 導入初日から CI を赤にせず運用を始められる（第39章）</text>
+
+  <rect x="24" y="206" width="712" height="80" rx="8" fill="#fbf4ea" stroke="#b4661a" stroke-width="1.5"/>
+  <text x="46" y="230" font-size="12" font-weight="bold" fill="#b4661a">なぜ -U0 なのか</text>
+  <text x="46" y="254" font-size="11.5" fill="#1f2933">git diff は既定で前後 3 行の文脈を含む。その文脈行まで「変更された行」として扱われ、</text>
+  <text x="46" y="272" font-size="11.5" fill="#1f2933">触っていないコードの警告が出てしまう。<tspan font-family="monospace" font-weight="bold">-U0</tspan> で文脈行をゼロにする</text>
+  </g>
+</svg>
+<figcaption><b>図15-3</b>　差分解析の流れ。実体は第10章で紹介した <code>--line-filter</code> の自動生成である。</figcaption>
+</figure>
+
+<pre class="term"><code><span class="p">&gt;</span> git diff -U0 HEAD~1 | python clang-tidy-diff.py -p1 -path out\build\ninja -j 8</code></pre>
+
+<table>
+<tr><th>オプション</th><th>意味</th></tr>
+<tr><td><code>-p1</code></td><td>diff のパスから先頭 1 階層を取り除く（<code>a/src/foo.cpp</code> → <code>src/foo.cpp</code>）。<code>git diff</code> の出力ならこれ</td></tr>
+<tr><td><code>-path &lt;dir&gt;</code></td><td>コンパイルデータベースのディレクトリ。<code>clang-tidy</code> の <code>-p</code> に相当</td></tr>
+<tr><td><code>-j &lt;N&gt;</code></td><td>並列数</td></tr>
+<tr><td><code>-checks=…</code></td><td>チェック指定</td></tr>
+<tr><td><code>-fix</code></td><td>修正を適用する</td></tr>
+</table>
+
+<div class="warn">
+<span class="t"><code>-p1</code> と <code>-p</code> を混同しない</span>
+<p><code>clang-tidy</code> 本体の <code>-p</code> は「ビルドディレクトリ」ですが、<code>clang-tidy-diff.py</code> の <code>-p1</code> は「パスの階層を1つ削る」という <code>patch</code> コマンド由来の意味です。ビルドディレクトリを指定するのは <code>-path</code> のほうです。<strong>両者はまったく別物です。</strong></p>
+</div>
+
+<h2>15.4 Windows で動かすときの注意</h2>
+
+<ul>
+  <li><strong>Python が必要。</strong> どちらのスクリプトも Python 製です。<code>python --version</code> で確認してください。</li>
+  <li><strong>パイプはシェル依存。</strong> <code>git diff | python …</code> はコマンドプロンプトでも PowerShell でも動きますが、PowerShell では文字エンコーディングの扱いで差分が壊れることがあります。うまくいかないときは、いったんファイルに落として <code>&lt;</code> で流し込んでください。</li>
+  <li><strong>パスに空白がある。</strong> <code>C:\Program Files\LLVM\...</code> は空白を含みます。必ず引用符で囲みます。</li>
+  <li><strong>コンパイルデータベースが要る。</strong> どちらも <code>-p</code> / <code>-path</code> を前提としています。第14章の Ninja 構成を用意しておいてください。</li>
+</ul>
+
+<h2>15.5 【ハンズオン】全体と差分を回す</h2>
+
+<div class="hands">
+<div class="hd">HANDS-ON 15　一括実行と差分実行</div>
+<div class="bd">
+<ol>
+  <li><strong>準備を確認する。</strong> 第14章で作った <code>out\build\ninja\compile_commands.json</code> があること、<code>python --version</code> が通ることを確認します。</li>
+
+  <li><strong>スクリプトの場所を特定する。</strong>
+<pre><code>dir /s /b "C:\Program Files\LLVM\run-clang-tidy*"
+dir /s /b "C:\Program Files\LLVM\clang-tidy-diff.py"</code></pre>
+    見つかったパスを控えます。</li>
+
+  <li><strong>全体を回す。</strong>
+<pre><code>python "C:\Program Files\LLVM\bin\run-clang-tidy" -p out\build\ninja -j 4</code></pre>
+    <code>clang-tidy</code> を1ファイルずつ実行したときと同じ警告が、全ファイル分まとめて出ることを確認します。</li>
+
+  <li><strong>対象を絞る。</strong> 末尾に正規表現を付けて、特定のディレクトリだけを回します。
+<pre><code>python "C:\Program Files\LLVM\bin\run-clang-tidy" -p out\build\ninja "config_loader"</code></pre>
+  </li>
+
+  <li><strong>修正を書き出す。</strong>
+<pre><code>mkdir fixes
+python "C:\Program Files\LLVM\bin\run-clang-tidy" -p out\build\ninja -j 4 -export-fixes fixes</code></pre>
+    <code>fixes\</code> の中に YAML ができることを確認し、中身を1つ開いて第11章で見た形式と同じであることを確認します。</li>
+
+  <li><strong>一括適用する。</strong> 作業ツリーがきれいであることを確認してから、
+<pre><code>clang-apply-replacements fixes
+git diff</code></pre>
+    差分を読み、ビルドが通ることを確認したら <code>git checkout -- .</code> で戻します。</li>
+
+  <li><strong>差分だけを解析する。</strong> <code>config_loader.cpp</code> に、警告が出る行を1行だけ足してコミットせずに置きます。
+<pre><code>    int* tmp = NULL;   // わざと</code></pre>
+    そのうえで、
+<pre><code>git diff -U0 | python "C:\Program Files\LLVM\share\clang\clang-tidy-diff.py" -p1 -path out\build\ninja</code></pre>
+    <strong>追加した1行に対してだけ</strong>警告が出ることを確認します。ファイル内の他の既存警告が出ないことが観察点です。</li>
+
+  <li><strong><code>-U0</code> の効果を確かめる。</strong> <code>-U0</code> を外して同じことを実行し、<strong>触っていない周辺行の警告まで出る</strong>ことを確認します。</li>
+
+  <li><strong>後片付け。</strong> わざと足した行を削除し、<code>fixes\</code> ディレクトリを削除します。</li>
+</ol>
+</div>
+</div>
+
+<div class="tip">
+<span class="t">この章の成果物をスクリプトにしておく</span>
+<p>手順3と手順7のコマンドラインは、今後ずっと使います。<code>tools\analyze-all.cmd</code> と <code>tools\analyze-diff.cmd</code> としてリポジトリに置いておくと、チーム全員が同じ手順を踏めますし、そのまま CI の設定に転記できます（第40章）。パスの直書きは避け、LLVM の場所は環境変数で受け取る形にしておくと移植しやすくなります。</p>
+</div>
+
+<div class="partend">
+<h2>第3部の終わりに</h2>
+<p>Clang-Tidy を「実プロジェクトで動かす」ための道具が揃いました。</p>
+<ul>
+  <li>コマンドラインで直接叩き、引数の問題を切り分けられる（第12章）</li>
+  <li>Visual Studio が何を渡しているかを確認し、速度と設定を制御できる（第13章）</li>
+  <li>CMake の3つの経路と、それぞれの制約を理解している（第14章）</li>
+  <li>プロジェクト全体と、変更行だけを回し分けられる（第15章）</li>
+</ul>
+<p style="margin-top:.8rem">ここまでは <strong>「どう動かすか」</strong> の話でした。第4部では中身に入り、標準チェック群が実際に何を見ているのかをツアーします。そして第5部以降、<strong>「自分でチェックを作る」</strong> 側へ移ります。</p>
+</div>
+
+<div class="summary">
+<h2>この章のまとめ</h2>
+<ul>
+  <li>解析の粒度は3つ。1ファイル（切り分け）、全体（棚卸し）、差分（日常運用）。</li>
+  <li><code>run-clang-tidy</code> は Python スクリプトで <code>bin</code> にある。<code>-p</code> でコンパイルデータベース、<code>-j</code> で並列数、末尾の正規表現で対象を絞る。</li>
+  <li>並列実行時に <code>-fix</code> を直接使うとヘッダの奪い合いで壊れる。<code>-export-fixes</code> → <code>clang-apply-replacements</code> の二段構えにする。</li>
+  <li><code>clang-tidy-diff.py</code> は <code>share\clang</code> にある。unified diff を標準入力から受け取り、内部で <code>--line-filter</code> を組み立てる。</li>
+  <li><code>git diff</code> には <strong><code>-U0</code></strong> を付ける。文脈行を含めると、触っていないコードまで対象になる。</li>
+  <li><code>-p1</code>（パス階層を削る）と <code>-path</code>（ビルドディレクトリ）は別物。</li>
+  <li>差分解析があるから、既存コードに 3000 件の警告があっても導入初日から運用を始められる。</li>
+</ul>
+</div>
+
+<p class="next"><strong>次章：</strong> 第4部に入ります。第16章「<code>bugprone-*</code> ── バグの温床を突く」から、標準チェック群が実際に何を見ているのかを、題材コードに当てながら見ていきます。</p>
+
+</div>
+</body>
+</html>

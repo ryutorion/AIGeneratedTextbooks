@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第21章 cppcoreguidelines-* / cert-* / misc-* ─ Clang-Tidy入門</title>
+<style>
+  :root{
+    --ink:#1f2933; --sub:#5a6b7a; --line:#d8dee4; --bg:#ffffff;
+    --code-bg:#f6f8fa; --code-line:#e2e8ee;
+    --accent:#2f6f9f; --accent-bg:#eef4f9;
+    --warn:#b4661a; --warn-bg:#fbf4ea;
+    --ok:#3d7a52; --ok-bg:#eef5f0;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0; background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Noto Sans JP","Meiryo",sans-serif;
+    font-size:16px; line-height:1.95; font-feature-settings:"palt" 1;}
+  .page{max-width:47rem; margin:0 auto; padding:3.5rem 1.6rem 6rem}
+  .chap-no{font-size:.8rem; letter-spacing:.22em; color:var(--accent); font-weight:700; margin:0 0 .5rem}
+  h1{font-size:1.7rem; line-height:1.5; margin:0 0 .6rem; letter-spacing:.01em}
+  .lede{color:var(--sub); font-size:1rem; margin:0 0 2.2rem; padding-bottom:1.6rem; border-bottom:2px solid var(--ink)}
+  h2{font-size:1.28rem; margin:3rem 0 1rem; padding-left:.7rem; border-left:4px solid var(--accent); line-height:1.6}
+  h3{font-size:1.05rem; margin:2.2rem 0 .7rem}
+  h3::before{content:"◆ "; color:var(--accent); font-size:.8em}
+  p{margin:0 0 1.1rem}
+  ul,ol{margin:0 0 1.2rem; padding-left:1.6rem}
+  li{margin:.35rem 0}
+  code{font-family:"Cascadia Mono","Consolas","SFMono-Regular",monospace; font-size:.9em;
+       background:var(--code-bg); border:1px solid var(--code-line); border-radius:4px; padding:.08em .35em}
+  pre{background:var(--code-bg); border:1px solid var(--code-line); border-radius:8px;
+      padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.7}
+  pre code{background:none; border:none; padding:0; font-size:.86rem}
+  pre.term{background:#1f2933; border-color:#1f2933; color:#e6edf3}
+  pre.term code{color:#e6edf3}
+  pre.term .p{color:#7fb2d6}
+  pre.term .o{color:#9fb3c0}
+  pre.term .w{color:#e8b075}
+  .cap{font-size:.82rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+  figure{margin:2rem 0 2.2rem}
+  figure svg{display:block; width:100%; height:auto; border:1px solid var(--line); border-radius:8px; background:#fff}
+  figcaption{font-size:.85rem; color:var(--sub); margin-top:.6rem}
+  figcaption b{color:var(--ink)}
+  .box{border-radius:8px; padding:1rem 1.2rem; margin:1.6rem 0; font-size:.94rem}
+  .box p:last-child{margin-bottom:0}
+  .box .t{font-weight:700; display:block; margin-bottom:.35rem; font-size:.88rem; letter-spacing:.04em}
+  .note{background:var(--accent-bg); border-left:4px solid var(--accent)} .note .t{color:var(--accent)}
+  .warn{background:var(--warn-bg); border-left:4px solid var(--warn)} .warn .t{color:var(--warn)}
+  .tip{background:var(--ok-bg); border-left:4px solid var(--ok)} .tip .t{color:var(--ok)}
+  .hands{border:1px solid var(--line); border-radius:10px; margin:2rem 0; overflow:hidden}
+  .hands>.hd{background:var(--ink); color:#fff; padding:.55rem 1.1rem; font-size:.85rem; letter-spacing:.1em; font-weight:700}
+  .hands>.bd{padding:1.3rem 1.3rem .4rem}
+  .hands ol{counter-reset:step; list-style:none; padding-left:0}
+  .hands ol>li{counter-increment:step; position:relative; padding-left:2.4rem; margin:0 0 1.2rem}
+  .hands ol>li::before{content:counter(step); position:absolute; left:0; top:.25rem;
+    width:1.7rem; height:1.7rem; border-radius:50%; background:var(--accent); color:#fff;
+    font-size:.82rem; font-weight:700; display:flex; align-items:center; justify-content:center; line-height:1}
+  table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+  th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+  th{background:var(--code-bg); font-weight:700}
+  .summary{border:2px solid var(--ink); border-radius:10px; padding:1.3rem 1.5rem; margin:3rem 0 1rem}
+  .summary h2{margin:0 0 .8rem; border:none; padding:0; font-size:1.1rem}
+  .summary ul{margin-bottom:0}
+  .next{color:var(--sub); font-size:.94rem; border-top:1px solid var(--line); padding-top:1.2rem; margin-top:2.5rem}
+  @media (max-width:600px){ body{font-size:15px} .page{padding:2.2rem 1.1rem 4rem} h1{font-size:1.4rem} }
+</style>
+</head>
+<body>
+<div class="page">
+
+<p class="chap-no">第 21 章</p>
+<h1><code>cppcoreguidelines-*</code> / <code>cert-*</code> / <code>misc-*</code></h1>
+<p class="lede">既存のコーディング標準を機械化したモジュール群です。「C++ Core Guidelines に準拠したい」という動機で全部有効にすると、たいてい失敗します。前提となるライブラリを要求するチェックが混ざっていること、そして<strong>別モジュールに同じ実体のチェックが別名で入っていること</strong>が原因です。この二つを見抜けるようにします。</p>
+
+<h2>21.1 ガイドライン系の性格</h2>
+
+<p>これらのモジュールは、外部の規範文書に対応しています。</p>
+
+<table>
+<tr><th>モジュール</th><th>由来</th><th>性格</th></tr>
+<tr><td><code>cppcoreguidelines-</code></td><td>C++ Core Guidelines</td><td>現代 C++ の設計指針。範囲が広く、思想も強い</td></tr>
+<tr><td><code>cert-</code></td><td>CERT セキュアコーディング標準</td><td><strong>大半が他モジュールへのエイリアス</strong></td></tr>
+<tr><td><code>hicpp-</code></td><td>High Integrity C++</td><td>同上。エイリアスが多い</td></tr>
+<tr><td><code>misc-</code></td><td>どこにも属さないもの</td><td>寄せ集めだが、実用的なものが混ざっている</td></tr>
+</table>
+
+<p>「規範に準拠する」という目的は立派ですが、<strong>規範は自分たちの環境を知りません。</strong> ガイドラインが前提としている書き方（GSL ライブラリの使用など）を採用していないなら、対応するチェックは意味を成しません。</p>
+
+<h2>21.2 <code>cert-*</code> の正体はエイリアス</h2>
+
+<p><code>cert-</code> モジュールを開くと、実体を持つチェックはごくわずかで、大半が他モジュールへの<strong>別名</strong>だと分かります。</p>
+
+<table>
+<tr><th><code>cert-</code> の名前</th><th>実体</th></tr>
+<tr><td><code>cert-arr39-c</code></td><td><code>bugprone-sizeof-expression</code></td></tr>
+<tr><td><code>cert-dcl03-c</code></td><td><code>misc-static-assert</code></td></tr>
+<tr><td><code>cert-dcl16-c</code></td><td><code>readability-uppercase-literal-suffix</code></td></tr>
+<tr><td><code>cert-dcl37-c</code> / <code>cert-dcl51-cpp</code></td><td><code>bugprone-reserved-identifier</code></td></tr>
+<tr><td><code>cert-dcl54-cpp</code></td><td><code>misc-new-delete-overloads</code></td></tr>
+<tr><td><code>cert-dcl58-cpp</code></td><td><code>bugprone-std-namespace-modification</code></td></tr>
+<tr><td><code>cert-dcl59-cpp</code></td><td><code>misc-anonymous-namespace-in-header</code></td></tr>
+<tr><td><code>cert-env33-c</code></td><td><code>bugprone-command-processor</code></td></tr>
+<tr><td><code>cert-con36-c</code> / <code>cert-con54-cpp</code></td><td><code>bugprone-spuriously-wake-up-functions</code></td></tr>
+<tr><td colspan="2" style="background:#eef5f0"><strong>実体を持つもの（少数）：</strong> <code>cert-err33-c</code>, <code>cert-err60-cpp</code>, <code>cert-flp30-c</code>, <code>cert-msc50-cpp</code>, <code>cert-oop58-cpp</code></td></tr>
+</table>
+
+<figure>
+<svg viewBox="0 0 760 330" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="エイリアスによる二重警告の仕組み">
+  <defs>
+    <marker id="a21" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5a6b7a"/>
+    </marker>
+  </defs>
+  <g font-family="sans-serif">
+
+  <text x="30" y="28" font-size="12.5" font-weight="bold" fill="#5a6b7a" letter-spacing="1.5">一つの実装を、複数の名前が指している</text>
+
+  <rect x="270" y="44" width="220" height="56" rx="8" fill="#1f2933"/>
+  <text x="380" y="68" text-anchor="middle" fill="#fff" font-size="12.5" font-weight="bold">チェックの実装（1つ）</text>
+  <text x="380" y="88" text-anchor="middle" fill="#b8c4cd" font-size="10.5">予約識別子の検出ロジック</text>
+
+  <path d="M330,100 L150,140" fill="none" stroke="#5a6b7a" stroke-width="1.4" marker-end="url(#a21)"/>
+  <path d="M380,100 L380,140" fill="none" stroke="#5a6b7a" stroke-width="1.4" marker-end="url(#a21)"/>
+  <path d="M430,100 L610,140" fill="none" stroke="#5a6b7a" stroke-width="1.4" marker-end="url(#a21)"/>
+
+  <rect x="40" y="146" width="220" height="40" rx="6" fill="#fbf4ea" stroke="#b4661a" stroke-width="1.6"/>
+  <text x="150" y="171" text-anchor="middle" font-size="11.5" font-family="monospace" fill="#1f2933" font-weight="bold">bugprone-reserved-identifier</text>
+
+  <rect x="270" y="146" width="220" height="40" rx="6" fill="#eef4f9" stroke="#2f6f9f" stroke-width="1.6"/>
+  <text x="380" y="171" text-anchor="middle" font-size="11.5" font-family="monospace" fill="#1f2933" font-weight="bold">cert-dcl37-c</text>
+
+  <rect x="500" y="146" width="220" height="40" rx="6" fill="#eef4f9" stroke="#2f6f9f" stroke-width="1.6"/>
+  <text x="610" y="171" text-anchor="middle" font-size="11.5" font-family="monospace" fill="#1f2933" font-weight="bold">cert-dcl51-cpp</text>
+
+  <path d="M150,186 L150,212 L380,212" fill="none" stroke="#a04a34" stroke-width="1.4"/>
+  <path d="M380,186 L380,212" fill="none" stroke="#a04a34" stroke-width="1.4"/>
+  <path d="M610,186 L610,212 L380,212" fill="none" stroke="#a04a34" stroke-width="1.4"/>
+  <line x1="380" y1="212" x2="380" y2="234" stroke="#a04a34" stroke-width="1.6" marker-end="url(#a21)"/>
+
+  <rect x="200" y="238" width="360" height="46" rx="8" fill="#a04a34"/>
+  <text x="380" y="258" text-anchor="middle" fill="#fff" font-size="12.5" font-weight="bold">3つとも有効にすると、同じ箇所に警告が3件</text>
+  <text x="380" y="276" text-anchor="middle" fill="#f0d5cf" font-size="10.5">オプションもそれぞれの名前で個別に設定が必要（第8章）</text>
+
+  <text x="380" y="312" text-anchor="middle" font-size="11.5" fill="#5a6b7a">「警告件数が異様に多い」ときは、まずエイリアスの重複を疑う</text>
+  </g>
+</svg>
+<figcaption><b>図21-1</b>　エイリアスによる二重警告。<code>*</code> でモジュールをまとめて有効にすると起こりやすい。</figcaption>
+</figure>
+
+<div class="tip">
+<span class="t">エイリアスの見分け方</span>
+<p>公式のチェック一覧では、エイリアスは実体へのリンクとして表示されます。実務上は次の手順が早い。</p>
+<ol style="margin-top:.5rem">
+  <li>同じ箇所に複数の警告が出ていたら、角括弧の中のチェック名をすべて控える。</li>
+  <li>それぞれのドキュメントページを開く。エイリアスなら実体のページに転送される。</li>
+  <li>実体側だけを <code>Checks</code> に残し、エイリアス側を <code>-</code> で外す。</li>
+</ol>
+<p style="margin-top:.5rem">本書の推奨は <strong>「<code>cert-*</code> や <code>hicpp-*</code> をモジュールごと有効にしない」</strong>です。必要な規範は、実体側のチェック名で直接指定してください。</p>
+</div>
+
+<h2>21.3 <code>cppcoreguidelines-*</code> の取捨</h2>
+
+<h3>そのまま入れられるもの</h3>
+
+<table>
+<tr><th>チェック</th><th>内容</th></tr>
+<tr><td><code>cppcoreguidelines-init-variables</code></td><td>初期化されていない変数を検出（自動修正あり）</td></tr>
+<tr><td><code>cppcoreguidelines-prefer-member-initializer</code></td><td>コンストラクタ本体での代入 → メンバ初期化子リスト</td></tr>
+<tr><td><code>cppcoreguidelines-pro-type-member-init</code></td><td>初期化されないメンバを検出</td></tr>
+<tr><td><code>cppcoreguidelines-special-member-functions</code></td><td>五の法則。一部だけ定義している型を検出</td></tr>
+<tr><td><code>cppcoreguidelines-virtual-class-destructor</code></td><td>多相基底クラスのデストラクタが仮想でない</td></tr>
+<tr><td><code>cppcoreguidelines-slicing</code></td><td>オブジェクトスライシング</td></tr>
+<tr><td><code>cppcoreguidelines-pro-type-cstyle-cast</code></td><td>C 形式キャスト → C++ キャスト</td></tr>
+<tr><td><code>cppcoreguidelines-macro-usage</code></td><td>定数・関数の代わりにマクロを使っている</td></tr>
+<tr><td><code>cppcoreguidelines-rvalue-reference-param-not-moved</code></td><td><code>T&amp;&amp;</code> で受けたのにムーブしていない</td></tr>
+<tr><td><code>cppcoreguidelines-missing-std-forward</code></td><td>転送参照を <code>std::forward</code> していない</td></tr>
+<tr><td><code>cppcoreguidelines-use-enum-class</code></td><td>スコープなし列挙型 → <code>enum class</code></td></tr>
+</table>
+
+<p>題材コードの <code>ConfigLoader</code> は、この上から3つに引っかかります。<code>path_ = path;</code> をコンストラクタ本体で代入している点（<code>prefer-member-initializer</code>）、デストラクタだけ定義してコピーコンストラクタを定義していない点（<code>special-member-functions</code>）です。<strong>後者は実際に危険です。</strong> <code>ConfigLoader</code> をコピーすると <code>buffer_</code> が二重解放されます。</p>
+
+<h3>前提ライブラリを要求するもの</h3>
+
+<figure>
+<svg viewBox="0 0 760 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="GSL を前提とするチェック群">
+  <g font-family="sans-serif">
+
+  <rect x="24" y="20" width="712" height="36" rx="8" fill="#b4661a"/>
+  <text x="380" y="44" text-anchor="middle" fill="#fff" font-size="13" font-weight="bold">「前提を採用していないなら、そのチェックは有効にしない」</text>
+
+  <rect x="24" y="70" width="350" height="212" rx="10" fill="#f7e9e5" stroke="#a04a34" stroke-width="1.8"/>
+  <text x="199" y="96" text-anchor="middle" font-size="13" font-weight="bold" fill="#a04a34">GSL を前提とするチェック</text>
+  <g font-size="11" font-family="monospace" fill="#1f2933">
+  <text x="44" y="126">owning-memory</text>
+  <text x="44" y="150">pro-bounds-array-to-pointer-decay</text>
+  <text x="44" y="174">pro-bounds-constant-array-index</text>
+  <text x="44" y="198">pro-bounds-pointer-arithmetic</text>
+  <text x="44" y="222">pro-bounds-avoid-unchecked-container-access</text>
+  </g>
+  <rect x="44" y="238" width="310" height="30" rx="5" fill="#fff" stroke="#e0c4bc"/>
+  <text x="199" y="258" text-anchor="middle" font-size="10.5" fill="#a04a34">gsl::owner / gsl::span / gsl::at を使う前提</text>
+
+  <rect x="386" y="70" width="350" height="212" rx="10" fill="#eef4f9" stroke="#2f6f9f" stroke-width="1.6"/>
+  <text x="561" y="96" text-anchor="middle" font-size="13" font-weight="bold" fill="#2f6f9f">採用していない場合どうなるか</text>
+  <g font-size="11.5" fill="#1f2933">
+  <text x="406" y="126">・生ポインタを使うたびに警告</text>
+  <text x="406" y="150">・配列アクセスのたびに警告</text>
+  <text x="406" y="174">・ポインタ演算のたびに警告</text>
+  <text x="406" y="204" font-weight="bold" fill="#a04a34">＝ 既存コードのほぼ全行が違反</text>
+  </g>
+  <rect x="406" y="220" width="310" height="48" rx="5" fill="#fff" stroke="#c5d6e4"/>
+  <text x="561" y="240" text-anchor="middle" font-size="10.5" fill="#1f2933">「導入したが誰も見なくなった」の</text>
+  <text x="561" y="258" text-anchor="middle" font-size="10.5" fill="#1f2933">最も典型的な原因</text>
+  </g>
+</svg>
+<figcaption><b>図21-2</b>　前提ライブラリを要求するチェック。GSL を採用していないプロジェクトでは、これらは有効にすべきではない。</figcaption>
+</figure>
+
+<p>ほかに <code>cppcoreguidelines-pro-type-vararg</code>（可変長引数の禁止）も、C 系 API を多用する Windows プログラミングでは大量に出ます。「守れない規範は入れない」が原則です。</p>
+
+<h2>21.4 <code>misc-*</code> の掘り出し物</h2>
+
+<p>寄せ集めのモジュールですが、実用性の高いものが混ざっています。</p>
+
+<table>
+<tr><th>チェック</th><th>内容</th></tr>
+<tr><td><code>misc-const-correctness</code></td><td>変更されないローカル変数に <code>const</code> を付ける（自動修正あり）</td></tr>
+<tr><td><code>misc-include-cleaner</code></td><td>使っていない <code>#include</code> の削除と、使っているのに直接 include していないヘッダの追加</td></tr>
+<tr><td><code>misc-use-internal-linkage</code></td><td>他の翻訳単位から使われない関数・変数を <code>static</code> に</td></tr>
+<tr><td><code>misc-use-anonymous-namespace</code></td><td><code>static</code> より無名名前空間を使う</td></tr>
+<tr><td><code>misc-definitions-in-headers</code></td><td>ヘッダに非 inline の定義がある（ODR 違反の温床）</td></tr>
+<tr><td><code>misc-header-include-cycle</code></td><td>ヘッダの循環参照</td></tr>
+<tr><td><code>misc-unused-parameters</code></td><td>使われていない引数</td></tr>
+<tr><td><code>misc-unused-using-decls</code></td><td>使われていない <code>using</code> 宣言</td></tr>
+<tr><td><code>misc-no-recursion</code></td><td>再帰呼び出し（組込みなどスタック制約が厳しい環境向け）</td></tr>
+<tr><td><code>misc-non-private-member-variables-in-classes</code></td><td>public なメンバ変数</td></tr>
+<tr><td><code>misc-throw-by-value-catch-by-reference</code></td><td>例外は値で投げて参照で受ける</td></tr>
+<tr><td><code>misc-unconventional-assign-operator</code></td><td>代入演算子のシグネチャが慣例から外れている</td></tr>
+</table>
+
+<h3><code>misc-include-cleaner</code> を掘り下げる</h3>
+
+<p>ビルド時間に直接効く数少ないチェックです。「このファイルが実際に使っているシンボルは何か」を AST から調べ、それに対応するヘッダだけを include すべきだと指摘します。</p>
+
+<div class="warn">
+<span class="t">推移的インクルードに依存したコードでは荒れる</span>
+<p>「<code>a.h</code> が <code>b.h</code> を include しているから、<code>b.h</code> の中身も使える」という書き方をしていると、大量の「include を追加せよ」が出ます。指摘自体は正しく、直せばビルドは頑健になりますが、<strong>件数が多いので段階導入が前提</strong>です。第39章の進め方に従ってください。</p>
+</div>
+
+<h2>21.5 モジュールをまとめて有効にしない</h2>
+
+<p>この章の結論はこれに尽きます。<code>cppcoreguidelines-*</code>、<code>cert-*</code>、<code>hicpp-*</code> は、<strong>ワイルドカードで有効にしないでください。</strong> 理由が3つ揃っています。</p>
+
+<ol>
+  <li>エイリアスが重複して同じ箇所に複数の警告が出る（図21-1）</li>
+  <li>前提ライブラリを要求するチェックが混ざっている（図21-2）</li>
+  <li>バージョンが上がると勝手に新しいチェックが増える（第6章）</li>
+</ol>
+
+<p>個別のチェック名で列挙するのが正解です。第6章のパターンC の使いどころが、まさにここです。</p>
+
+<h2>21.6 【ハンズオン】重複を見つけて整理する</h2>
+
+<div class="hands">
+<div class="hd">HANDS-ON 21　エイリアスと前提を切り分ける</div>
+<div class="bd">
+<ol>
+  <li><strong>あえて失敗させる。</strong> <code>.clang-tidy</code> の <code>Checks</code> を一時的に次にして、題材コードを解析します。
+<pre><code>Checks: '-*,cppcoreguidelines-*,cert-*,hicpp-*'</code></pre>
+    件数を記録してください。おそらく想定よりずっと多いはずです。</li>
+
+  <li><strong>二重警告を確認する。</strong> 同じ行番号に複数の警告が出ている箇所を探します。
+<pre><code>clang-tidy config_loader.cpp -- -std=c++23 &gt; guideline.log 2&gt;&amp;1
+findstr /c:"warning:" guideline.log | sort</code></pre>
+    同じファイル・同じ行が並んでいる箇所のチェック名を控えます。</li>
+
+  <li><strong>実体を特定する。</strong> 控えたチェック名を公式ドキュメントで引き、エイリアスがどれかを確認します。実体側だけを残す形に <code>Checks</code> を書き換えます。</li>
+
+  <li><strong>前提が要るチェックを外す。</strong> <code>owning-memory</code> と <code>pro-bounds-*</code> だけを有効にして件数を見ます。
+<pre><code>--checks="-*,cppcoreguidelines-owning-memory,cppcoreguidelines-pro-bounds-*"</code></pre>
+    GSL を採用していないなら、これらは外す判断になります。<strong>件数を見てから判断してください。</strong></li>
+
+  <li><strong>価値の高いものを個別に入れる。</strong> 21.3 節の「そのまま入れられるもの」の表から、個別に指定します。
+<pre><code>Checks: &gt;
+  -*,
+  cppcoreguidelines-init-variables,
+  cppcoreguidelines-prefer-member-initializer,
+  cppcoreguidelines-pro-type-member-init,
+  cppcoreguidelines-special-member-functions,
+  cppcoreguidelines-virtual-class-destructor,
+  cppcoreguidelines-slicing,
+  cppcoreguidelines-pro-type-cstyle-cast</code></pre>
+  </li>
+
+  <li><strong>実際の危険を確認する。</strong> <code>special-member-functions</code> の警告が <code>ConfigLoader</code> に出ることを確認し、<strong>なぜ危険かを説明できるか</strong>自分で確かめてください。次のコードを書いて実行すると、二重解放が起きます。
+<pre><code>ConfigLoader a("app.ini");
+a.load();
+ConfigLoader b = a;   // 暗黙のコピー。buffer_ が共有される</code></pre>
+    確認したら、コピーを禁止するか正しくコピーするかを決めて修正します。</li>
+
+  <li><strong><code>misc-</code> の掘り出し物を試す。</strong>
+<pre><code>--checks="-*,misc-const-correctness,misc-use-internal-linkage,misc-definitions-in-headers"</code></pre>
+    <code>const-correctness</code> は自動修正付きなので、第11章の手順で当ててみてください。</li>
+
+  <li><strong><code>include-cleaner</code> の件数を見る。</strong>
+<pre><code>--checks="-*,misc-include-cleaner"</code></pre>
+    件数が多ければ、いまは採用せず「第39章で段階導入する候補」として記録に残します。</li>
+</ol>
+</div>
+</div>
+
+<div class="summary">
+<h2>この章のまとめ</h2>
+<ul>
+  <li>ガイドライン系モジュールは外部の規範に対応する。<strong>規範は自分たちの環境を知らない。</strong></li>
+  <li><code>cert-*</code> の大半は他モジュールへのエイリアス。<code>hicpp-*</code> も同様。</li>
+  <li>エイリアスを重ねて有効にすると、<strong>同じ箇所に複数の警告が出て、オプションも名前ごとに個別設定が必要になる</strong>。</li>
+  <li><code>cppcoreguidelines-owning-memory</code> と <code>pro-bounds-*</code> は GSL の使用が前提。採用していなければ既存コードのほぼ全行が違反になる。</li>
+  <li>そのまま入れられるものは多い。<code>init-variables</code>, <code>prefer-member-initializer</code>, <code>special-member-functions</code>, <code>virtual-class-destructor</code>, <code>slicing</code> など。</li>
+  <li><code>misc-</code> には掘り出し物がある。<code>const-correctness</code>, <code>include-cleaner</code>, <code>use-internal-linkage</code>, <code>definitions-in-headers</code>。</li>
+  <li><strong>これらのモジュールはワイルドカードで有効にせず、チェック名で個別に列挙する。</strong></li>
+</ul>
+</div>
+
+<p class="next"><strong>次章：</strong> 第22章「自分たちの <code>.clang-tidy</code> を育てる」で第4部が完結します。ここまで見てきた全モジュールから、実際に運用する設定を組み立て、判断を記録に残す方法を扱います。</p>
+
+</div>
+</body>
+</html>

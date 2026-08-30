@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第12章 コマンドラインから直接叩く ─ Clang-Tidy入門</title>
+<style>
+  :root{
+    --ink:#1f2933; --sub:#5a6b7a; --line:#d8dee4; --bg:#ffffff;
+    --code-bg:#f6f8fa; --code-line:#e2e8ee;
+    --accent:#2f6f9f; --accent-bg:#eef4f9;
+    --warn:#b4661a; --warn-bg:#fbf4ea;
+    --ok:#3d7a52; --ok-bg:#eef5f0;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0; background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Noto Sans JP","Meiryo",sans-serif;
+    font-size:16px; line-height:1.95; font-feature-settings:"palt" 1;}
+  .page{max-width:47rem; margin:0 auto; padding:3.5rem 1.6rem 6rem}
+  .chap-no{font-size:.8rem; letter-spacing:.22em; color:var(--accent); font-weight:700; margin:0 0 .5rem}
+  h1{font-size:1.85rem; line-height:1.5; margin:0 0 .6rem; letter-spacing:.01em}
+  .lede{color:var(--sub); font-size:1rem; margin:0 0 2.2rem; padding-bottom:1.6rem; border-bottom:2px solid var(--ink)}
+  h2{font-size:1.28rem; margin:3rem 0 1rem; padding-left:.7rem; border-left:4px solid var(--accent); line-height:1.6}
+  h3{font-size:1.05rem; margin:2.2rem 0 .7rem}
+  h3::before{content:"◆ "; color:var(--accent); font-size:.8em}
+  p{margin:0 0 1.1rem}
+  ul,ol{margin:0 0 1.2rem; padding-left:1.6rem}
+  li{margin:.35rem 0}
+  code{font-family:"Cascadia Mono","Consolas","SFMono-Regular",monospace; font-size:.9em;
+       background:var(--code-bg); border:1px solid var(--code-line); border-radius:4px; padding:.08em .35em}
+  pre{background:var(--code-bg); border:1px solid var(--code-line); border-radius:8px;
+      padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.7}
+  pre code{background:none; border:none; padding:0; font-size:.86rem}
+  pre.term{background:#1f2933; border-color:#1f2933; color:#e6edf3}
+  pre.term code{color:#e6edf3}
+  pre.term .p{color:#7fb2d6}
+  pre.term .o{color:#9fb3c0}
+  pre.term .e{color:#e08a74}
+  .cap{font-size:.82rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+  figure{margin:2rem 0 2.2rem}
+  figure svg{display:block; width:100%; height:auto; border:1px solid var(--line); border-radius:8px; background:#fff}
+  figcaption{font-size:.85rem; color:var(--sub); margin-top:.6rem}
+  figcaption b{color:var(--ink)}
+  .box{border-radius:8px; padding:1rem 1.2rem; margin:1.6rem 0; font-size:.94rem}
+  .box p:last-child{margin-bottom:0}
+  .box .t{font-weight:700; display:block; margin-bottom:.35rem; font-size:.88rem; letter-spacing:.04em}
+  .note{background:var(--accent-bg); border-left:4px solid var(--accent)} .note .t{color:var(--accent)}
+  .warn{background:var(--warn-bg); border-left:4px solid var(--warn)} .warn .t{color:var(--warn)}
+  .tip{background:var(--ok-bg); border-left:4px solid var(--ok)} .tip .t{color:var(--ok)}
+  .hands{border:1px solid var(--line); border-radius:10px; margin:2rem 0; overflow:hidden}
+  .hands>.hd{background:var(--ink); color:#fff; padding:.55rem 1.1rem; font-size:.85rem; letter-spacing:.1em; font-weight:700}
+  .hands>.bd{padding:1.3rem 1.3rem .4rem}
+  .hands ol{counter-reset:step; list-style:none; padding-left:0}
+  .hands ol>li{counter-increment:step; position:relative; padding-left:2.4rem; margin:0 0 1.2rem}
+  .hands ol>li::before{content:counter(step); position:absolute; left:0; top:.25rem;
+    width:1.7rem; height:1.7rem; border-radius:50%; background:var(--accent); color:#fff;
+    font-size:.82rem; font-weight:700; display:flex; align-items:center; justify-content:center; line-height:1}
+  table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+  th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+  th{background:var(--code-bg); font-weight:700}
+  .summary{border:2px solid var(--ink); border-radius:10px; padding:1.3rem 1.5rem; margin:3rem 0 1rem}
+  .summary h2{margin:0 0 .8rem; border:none; padding:0; font-size:1.1rem}
+  .summary ul{margin-bottom:0}
+  .next{color:var(--sub); font-size:.94rem; border-top:1px solid var(--line); padding-top:1.2rem; margin-top:2.5rem}
+  @media (max-width:600px){ body{font-size:15px} .page{padding:2.2rem 1.1rem 4rem} h1{font-size:1.5rem} }
+</style>
+</head>
+<body>
+<div class="page">
+
+<p class="chap-no">第 12 章</p>
+<h1>コマンドラインから直接叩く</h1>
+<p class="lede">第3部に入ります。IDE の中だけで使っていると、うまく動かないときに手詰まりになります。この章では <code>clang-tidy.exe</code> を素で起動し、コンパイルオプションを自分の手で渡します。「ヘッダが見つからない」「C++23 の構文でパースエラーになる」という詰まりどころは、すべてここに原因があります。</p>
+
+<h2>12.1 起動の形は二つしかない</h2>
+
+<p>第2章で見たとおり、Clang-Tidy はソースを実際にパースして AST を作ります。そのためにはコンパイルオプションが必要です。オプションの渡し方が2通りあり、それが起動形態の違いになります。</p>
+
+<figure>
+<svg viewBox="0 0 760 330" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="clang-tidy の2つの起動形態">
+  <defs>
+    <marker id="a12" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5a6b7a"/>
+    </marker>
+  </defs>
+  <g font-family="sans-serif">
+
+  <!-- A -->
+  <rect x="24" y="20" width="340" height="270" rx="10" fill="#fbf4ea" stroke="#b4661a" stroke-width="2"/>
+  <text x="194" y="46" text-anchor="middle" font-size="13.5" font-weight="bold" fill="#b4661a">形態A：その場で引数を渡す</text>
+  <text x="194" y="66" text-anchor="middle" font-size="11" fill="#5a6b7a">1ファイルを手早く見るとき</text>
+
+  <rect x="44" y="80" width="300" height="46" rx="6" fill="#1f2933"/>
+  <text x="58" y="100" font-size="11.5" font-family="monospace" fill="#e6edf3">clang-tidy foo.cpp</text>
+  <text x="58" y="118" font-size="11.5" font-family="monospace" fill="#e8b075">  -- -std=c++23 -I..\include</text>
+
+  <text x="194" y="148" text-anchor="middle" font-size="11.5" fill="#1f2933">↓</text>
+  <rect x="44" y="158" width="300" height="60" rx="6" fill="#fff" stroke="#e6d5bd"/>
+  <text x="194" y="180" text-anchor="middle" font-size="11.5" fill="#1f2933"><tspan font-family="monospace" font-weight="bold">--</tspan> の後ろをそのまま</text>
+  <text x="194" y="198" text-anchor="middle" font-size="11.5" fill="#1f2933">コンパイラ引数として使う</text>
+
+  <rect x="44" y="230" width="300" height="46" rx="6" fill="#fff" stroke="#e6d5bd"/>
+  <text x="58" y="250" font-size="11" fill="#b4661a" font-weight="bold">長所：準備不要</text>
+  <text x="58" y="268" font-size="11" fill="#5a6b7a">短所：ファイルごとに引数が違うと破綻</text>
+
+  <!-- B -->
+  <rect x="396" y="20" width="340" height="270" rx="10" fill="#eef4f9" stroke="#2f6f9f" stroke-width="2"/>
+  <text x="566" y="46" text-anchor="middle" font-size="13.5" font-weight="bold" fill="#2f6f9f">形態B：コンパイルデータベース</text>
+  <text x="566" y="66" text-anchor="middle" font-size="11" fill="#5a6b7a">プロジェクト全体を回すとき</text>
+
+  <rect x="416" y="80" width="300" height="46" rx="6" fill="#1f2933"/>
+  <text x="430" y="100" font-size="11.5" font-family="monospace" fill="#e6edf3">clang-tidy foo.cpp</text>
+  <text x="430" y="118" font-size="11.5" font-family="monospace" fill="#7fb2d6">  -p build\</text>
+
+  <text x="566" y="148" text-anchor="middle" font-size="11.5" fill="#1f2933">↓</text>
+  <rect x="416" y="158" width="300" height="60" rx="6" fill="#fff" stroke="#c5d6e4"/>
+  <text x="566" y="180" text-anchor="middle" font-size="11.5" fill="#1f2933"><tspan font-family="monospace" font-weight="bold">compile_commands.json</tspan> を読み</text>
+  <text x="566" y="198" text-anchor="middle" font-size="11.5" fill="#1f2933">そのファイル用の引数を取り出す</text>
+
+  <rect x="416" y="230" width="300" height="46" rx="6" fill="#fff" stroke="#c5d6e4"/>
+  <text x="430" y="250" font-size="11" fill="#2f6f9f" font-weight="bold">長所：ビルドと完全に同じ引数</text>
+  <text x="430" y="268" font-size="11" fill="#5a6b7a">短所：DB を生成する仕掛けが要る（第14章）</text>
+
+  <rect x="24" y="300" width="712" height="1" fill="#d8dee4"/>
+  </g>
+</svg>
+<figcaption><b>図12-1</b>　二つの起動形態。<code>--</code> を書かないと形態B とみなされ、コンパイルデータベースを探しに行って失敗する。</figcaption>
+</figure>
+
+<div class="warn">
+<span class="t"><code>--</code> を忘れるとこうなる</span>
+<pre class="term" style="margin-top:.6rem"><code><span class="p">&gt;</span> clang-tidy config_loader.cpp
+<span class="e">Error while trying to load a compilation database:
+Could not auto-detect compilation database for file "config_loader.cpp"</span></code></pre>
+<p>「コンパイルデータベースが見つからない」というエラーは、<strong>ほとんどの場合 <code>--</code> の書き忘れ</strong> です。引数を渡す必要がなくても、<code>clang-tidy foo.cpp --</code> のように末尾に <code>--</code> だけ書けば形態A になります。</p>
+</div>
+
+<h2>12.2 <code>--</code> の後ろに何を書くか</h2>
+
+<p><code>--</code> の後ろは <strong>Clang に渡すコンパイラ引数</strong> です。MSVC の <code>/std:c++23preview</code> ではなく、Clang の <code>-std=c++23</code> を書きます（第3章の図3-2）。</p>
+
+<pre class="term"><code><span class="p">&gt;</span> clang-tidy config_loader.cpp -- -std=c++23 -I..\include -DNDEBUG -D_WIN32_WINNT=0x0A00</code></pre>
+
+<table>
+<tr><th>渡すもの</th><th>Clang での書き方</th><th>忘れるとどうなるか</th></tr>
+<tr><td>言語規格</td><td><code>-std=c++23</code></td><td>C++23 の構文でパースエラー</td></tr>
+<tr><td>インクルードパス</td><td><code>-I&lt;path&gt;</code></td><td><code>'foo.h' file not found</code></td></tr>
+<tr><td>マクロ定義</td><td><code>-D名=値</code></td><td><code>#ifdef</code> の別ブロックが解析される</td></tr>
+<tr><td>強制インクルード</td><td><code>-include foo.h</code></td><td>プリコンパイル済みヘッダ前提のコードが壊れる</td></tr>
+</table>
+
+<h2>12.3 追加引数を設定で持たせる</h2>
+
+<p>毎回長い引数を打つのは現実的ではありません。<code>.clang-tidy</code> に書いておけます。</p>
+
+<pre><code># .clang-tidy
+ExtraArgsBefore: ['-std=c++23']
+ExtraArgs: ['-Wno-unknown-pragmas']</code></pre>
+
+<p>Visual Studio のプロパティにも対応する項目があります（第5章の図5-1）。</p>
+
+<table>
+<tr><th>VS のプロパティ</th><th>コマンドライン</th><th><code>.clang-tidy</code></th></tr>
+<tr><td>Clang-Tidy 追加オプション</td><td><code>--extra-args=…</code></td><td><code>ExtraArgs</code></td></tr>
+<tr><td>Clang-Tidy 事前追加オプション</td><td><code>--extra-args-before=…</code></td><td><code>ExtraArgsBefore</code></td></tr>
+</table>
+
+<h3>before と after の違い</h3>
+
+<figure>
+<svg viewBox="0 0 760 210" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="extra-args-before と extra-args の挿入位置">
+  <g font-family="sans-serif">
+  <text x="30" y="30" font-size="12.5" font-weight="bold" fill="#5a6b7a" letter-spacing="1.5">Clang に最終的に渡る引数列</text>
+
+  <rect x="30" y="46" width="200" height="54" rx="8" fill="#3d7a52"/>
+  <text x="130" y="70" text-anchor="middle" fill="#fff" font-size="12" font-weight="bold">ExtraArgsBefore</text>
+  <text x="130" y="88" text-anchor="middle" fill="#d5e6da" font-size="10.5">先に置く＝後で上書きされうる</text>
+
+  <rect x="240" y="46" width="280" height="54" rx="8" fill="#1f2933"/>
+  <text x="380" y="70" text-anchor="middle" fill="#fff" font-size="12" font-weight="bold">元の引数</text>
+  <text x="380" y="88" text-anchor="middle" fill="#b8c4cd" font-size="10.5">-- の後ろ、または compile_commands.json 由来</text>
+
+  <rect x="530" y="46" width="200" height="54" rx="8" fill="#b4661a"/>
+  <text x="630" y="70" text-anchor="middle" fill="#fff" font-size="12" font-weight="bold">ExtraArgs</text>
+  <text x="630" y="88" text-anchor="middle" fill="#fde9d0" font-size="10.5">後に置く＝こちらが勝つ</text>
+
+  <rect x="30" y="122" width="700" height="70" rx="8" fill="#f4f6f8" stroke="#d8dee4"/>
+  <text x="50" y="146" font-size="12" fill="#1f2933"><tspan font-weight="bold">使い分け：</tspan></text>
+  <text x="50" y="166" font-size="11.5" fill="#1f2933">・ビルド設定の値を<tspan font-weight="bold">上書きしたい</tspan>（規格を強制する等） → ExtraArgs（後ろ）</text>
+  <text x="50" y="184" font-size="11.5" fill="#1f2933">・ビルド設定に<tspan font-weight="bold">上書きされてよい既定値</tspan>を置きたい → ExtraArgsBefore（前）</text>
+  </g>
+</svg>
+<figcaption><b>図12-2</b>　追加引数の挿入位置。同じオプションが複数あると通常は後ろが勝つので、この順序が意味を持つ。</figcaption>
+</figure>
+
+<h2>12.4 MSVC 前提のコードを Clang に読ませる</h2>
+
+<p>Windows のコードには MSVC 固有の要素が入り込みます。Clang はこれらを扱うためのモードを持っています。</p>
+
+<h3>ドライバモード</h3>
+
+<p>Clang には2つの引数解釈モードがあります。</p>
+
+<table>
+<tr><th>モード</th><th>引数の形</th><th>指定方法</th></tr>
+<tr><td>GNU 風（既定）</td><td><code>-std=c++23</code> <code>-I path</code> <code>-D NAME</code></td><td>既定</td></tr>
+<tr><td>MSVC 風（clang-cl）</td><td><code>/std:c++latest</code> <code>/I path</code> <code>/D NAME</code></td><td><code>--driver-mode=cl</code></td></tr>
+</table>
+
+<p>ビルドスクリプトから MSVC 形式の引数をそのまま流用したい場合は、後者を使います。</p>
+
+<pre class="term"><code><span class="p">&gt;</span> clang-tidy config_loader.cpp -- --driver-mode=cl /std:c++latest /I..\include /DNDEBUG</code></pre>
+
+<h3>MSVC 互換オプション</h3>
+
+<table>
+<tr><th>オプション</th><th>効果</th></tr>
+<tr><td><code>-fms-compatibility</code></td><td>MSVC の非標準な挙動を受け入れる</td></tr>
+<tr><td><code>-fms-extensions</code></td><td><code>__declspec</code> などの MS 拡張を有効にする</td></tr>
+<tr><td><code>-fms-compatibility-version=19.4x</code></td><td>どのバージョンの MSVC に合わせるかを指定</td></tr>
+<tr><td><code>-fdelayed-template-parsing</code></td><td>テンプレートの解析を遅らせる（MSVC の従来挙動に近づく）</td></tr>
+</table>
+
+<div class="note">
+<span class="t">MSBuild 経由なら通常は自動</span>
+<p>Visual Studio の MSBuild 統合は、これらの互換オプションを自動的に付けてくれます。手で書く必要が出るのは、<strong>コマンドラインや CI から素の <code>clang-tidy</code> を叩くとき</strong> です。IDE では出ないパースエラーがコマンドラインで出たら、まずこの節を疑ってください。</p>
+</div>
+
+<h2>12.5 エラー別・切り分けの地図</h2>
+
+<figure>
+<svg viewBox="0 0 760 400" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="clang-tidy のエラー別トラブルシュート">
+  <defs>
+    <marker id="b12" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5a6b7a"/>
+    </marker>
+  </defs>
+  <g font-family="sans-serif">
+
+  <rect x="270" y="14" width="220" height="36" rx="8" fill="#1f2933"/>
+  <text x="380" y="38" text-anchor="middle" fill="#fff" font-size="12.5" font-weight="bold">clang-tidy がエラーを出した</text>
+  <line x1="380" y1="50" x2="380" y2="68" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#b12)"/>
+  <line x1="120" y1="68" x2="640" y2="68" stroke="#5a6b7a" stroke-width="1.4"/>
+  <line x1="120" y1="68" x2="120" y2="86" stroke="#5a6b7a" stroke-width="1.4" marker-end="url(#b12)"/>
+  <line x1="380" y1="68" x2="380" y2="86" stroke="#5a6b7a" stroke-width="1.4" marker-end="url(#b12)"/>
+  <line x1="640" y1="68" x2="640" y2="86" stroke="#5a6b7a" stroke-width="1.4" marker-end="url(#b12)"/>
+
+  <rect x="24" y="90" width="192" height="70" rx="8" fill="#f7e9e5" stroke="#a04a34" stroke-width="1.5"/>
+  <text x="120" y="112" text-anchor="middle" font-size="11" font-family="monospace" fill="#a04a34" font-weight="bold">Could not auto-detect</text>
+  <text x="120" y="128" text-anchor="middle" font-size="11" font-family="monospace" fill="#a04a34" font-weight="bold">compilation database</text>
+  <text x="120" y="150" text-anchor="middle" font-size="11.5" fill="#1f2933">→ <tspan font-family="monospace" font-weight="bold">--</tspan> を書き忘れた</text>
+
+  <rect x="284" y="90" width="192" height="70" rx="8" fill="#f7e9e5" stroke="#a04a34" stroke-width="1.5"/>
+  <text x="380" y="112" text-anchor="middle" font-size="11" font-family="monospace" fill="#a04a34" font-weight="bold">'xxx.h' file not found</text>
+  <text x="380" y="136" text-anchor="middle" font-size="11.5" fill="#1f2933">→ <tspan font-family="monospace" font-weight="bold">-I</tspan> が足りない</text>
+  <text x="380" y="152" text-anchor="middle" font-size="10.5" fill="#5a6b7a">開発者コマンドプロンプトから実行しているか</text>
+
+  <rect x="544" y="90" width="192" height="70" rx="8" fill="#f7e9e5" stroke="#a04a34" stroke-width="1.5"/>
+  <text x="640" y="112" text-anchor="middle" font-size="11" font-family="monospace" fill="#a04a34" font-weight="bold">unknown argument</text>
+  <text x="640" y="136" text-anchor="middle" font-size="11.5" fill="#1f2933">→ MSVC 形式の引数を</text>
+  <text x="640" y="152" text-anchor="middle" font-size="11.5" fill="#1f2933">GNU モードで渡した</text>
+
+  <line x1="380" y1="176" x2="380" y2="192" stroke="#5a6b7a" stroke-width="1.4"/>
+  <line x1="200" y1="192" x2="560" y2="192" stroke="#5a6b7a" stroke-width="1.4"/>
+  <line x1="200" y1="192" x2="200" y2="210" stroke="#5a6b7a" stroke-width="1.4" marker-end="url(#b12)"/>
+  <line x1="560" y1="192" x2="560" y2="210" stroke="#5a6b7a" stroke-width="1.4" marker-end="url(#b12)"/>
+
+  <rect x="104" y="214" width="192" height="86" rx="8" fill="#fbf4ea" stroke="#b4661a" stroke-width="1.5"/>
+  <text x="200" y="236" text-anchor="middle" font-size="11" font-family="monospace" fill="#b4661a" font-weight="bold">expected ';' など</text>
+  <text x="200" y="252" text-anchor="middle" font-size="11" font-family="monospace" fill="#b4661a" font-weight="bold">C++23 の行で構文エラー</text>
+  <text x="200" y="276" text-anchor="middle" font-size="11.5" fill="#1f2933">→ <tspan font-family="monospace" font-weight="bold">-std=c++23</tspan> 未指定</text>
+  <text x="200" y="292" text-anchor="middle" font-size="10.5" fill="#5a6b7a">第3章の図3-2 の右側</text>
+
+  <rect x="464" y="214" width="192" height="86" rx="8" fill="#fbf4ea" stroke="#b4661a" stroke-width="1.5"/>
+  <text x="560" y="236" text-anchor="middle" font-size="11" font-family="monospace" fill="#b4661a" font-weight="bold">__declspec / __forceinline</text>
+  <text x="560" y="252" text-anchor="middle" font-size="11" font-family="monospace" fill="#b4661a" font-weight="bold">周辺でエラー</text>
+  <text x="560" y="276" text-anchor="middle" font-size="11.5" fill="#1f2933">→ <tspan font-family="monospace" font-weight="bold">-fms-extensions</tspan></text>
+  <text x="560" y="292" text-anchor="middle" font-size="11.5" fill="#1f2933"><tspan font-family="monospace" font-weight="bold">-fms-compatibility</tspan></text>
+
+  <rect x="104" y="326" width="552" height="58" rx="8" fill="#1f2933"/>
+  <text x="380" y="348" text-anchor="middle" fill="#fff" font-size="12.5" font-weight="bold">共通の原則：エラーは「解析結果」ではなく「解析できなかった」の合図</text>
+  <text x="380" y="368" text-anchor="middle" fill="#b8c4cd" font-size="11">パースに失敗した翻訳単位からは、正しい警告は出ない。まずエラーを消す</text>
+  </g>
+</svg>
+<figcaption><b>図12-3</b>　エラー別の切り分け。パースエラーを放置したまま「警告0件」を信じてはいけない。</figcaption>
+</figure>
+
+<div class="warn">
+<span class="t">エラーを黙らせるオプションは使わない</span>
+<p><code>clang-tidy</code> にはコンパイラの診断を絞る手段がありますが、<strong>パースエラーを隠して解析を続けても意味がありません</strong>。第2章 2.5 節で触れたとおり、パースに失敗した部分の AST は不完全で、そこから出る警告も出ない警告も信用できません。エラーは消すものであって、隠すものではありません。</p>
+</div>
+
+<h2>12.6 【ハンズオン】素で叩いて壊して直す</h2>
+
+<div class="hands">
+<div class="hd">HANDS-ON 12　引数の効果を一つずつ確かめる</div>
+<div class="bd">
+<ol>
+  <li><strong><code>--</code> なしで実行する。</strong> 開発者コマンドプロンプトで <code>TidyLab\TidyLab</code> に移動し、
+<pre><code>clang-tidy config_loader.cpp</code></pre>
+    「compilation database が見つからない」というエラーになることを確認します。</li>
+
+  <li><strong><code>--</code> だけ付ける。</strong>
+<pre><code>clang-tidy config_loader.cpp --</code></pre>
+    エラーの種類が変わることを確認します。<code>&lt;string&gt;</code> などが見つからないか、規格関連のエラーになるはずです。</li>
+
+  <li><strong>規格を指定する。</strong>
+<pre><code>clang-tidy config_loader.cpp -- -std=c++23</code></pre>
+    <code>main.cpp</code> でも同じことを試し、<code>std::println</code> の行がエラーにならないことを確認します。<code>-std=c++17</code> にすると壊れることも見ておいてください。</li>
+
+  <li><strong>マクロの効果を見る。</strong> <code>config_loader.cpp</code> に一時的に次を入れます。
+<pre><code>#ifdef TIDYLAB_STRICT
+    int* legacy = NULL;   // modernize-use-nullptr が反応する
+#endif</code></pre>
+    <code>-DTIDYLAB_STRICT</code> を付けたときだけ警告が出ることを確認します。<strong>マクロの指定漏れは「解析されていないコードがある」ことを意味します。</strong></li>
+
+  <li><strong>MSVC 形式で渡す。</strong>
+<pre><code>clang-tidy config_loader.cpp -- --driver-mode=cl /std:c++latest</code></pre>
+    <code>--driver-mode=cl</code> を外すと <code>unknown argument</code> になることを確認します。</li>
+
+  <li><strong>設定ファイルに逃がす。</strong> <code>.clang-tidy</code> に
+<pre><code>ExtraArgsBefore: ['-std=c++23']</code></pre>
+    を書き、<code>clang-tidy config_loader.cpp --</code> だけで動くようになることを確認します。</li>
+
+  <li><strong>実効設定を確認する。</strong>
+<pre><code>clang-tidy --dump-config config_loader.cpp --</code></pre>
+    <code>ExtraArgsBefore</code> が反映されていることを確認します。</li>
+
+  <li><strong>後片付け。</strong> 手順4で追加した <code>#ifdef</code> ブロックを削除します。</li>
+</ol>
+</div>
+</div>
+
+<div class="tip">
+<span class="t">この章で手に入る一番の武器</span>
+<p>「IDE で説明のつかない挙動が出たら、コマンドラインで再現する」という切り分け手段です。IDE は内部で <code>clang-tidy.exe</code> を呼んでいるだけなので、同じ引数を手で組み立てれば必ず再現できます。そして再現できた手順は、そのまま CI に持っていけます（第40章）。</p>
+</div>
+
+<div class="summary">
+<h2>この章のまとめ</h2>
+<ul>
+  <li>起動形態は2つ。<code>--</code> の後ろに引数を書く形態A と、<code>-p</code> でコンパイルデータベースを指す形態B。</li>
+  <li>「compilation database が見つからない」は、ほぼ <code>--</code> の書き忘れ。</li>
+  <li><code>--</code> の後ろは Clang の引数。<code>/std:c++23preview</code> ではなく <code>-std=c++23</code>。</li>
+  <li>常用する引数は <code>ExtraArgsBefore</code>（前に挿入）/ <code>ExtraArgs</code>（後ろに挿入）で設定ファイルに持たせる。上書きしたいなら後ろ。</li>
+  <li>MSVC 形式の引数を使うなら <code>--driver-mode=cl</code>。MS 拡張には <code>-fms-extensions</code> / <code>-fms-compatibility</code>。</li>
+  <li>パースエラーは「解析できなかった」の合図。隠さずに消す。</li>
+</ul>
+</div>
+
+<p class="next"><strong>次章：</strong> 第13章「MSBuild プロジェクトでの解析」では、Visual Studio がこの章の引数をどう組み立てているかを出力ウィンドウで確認し、解析の実行タイミングと速度を制御します。</p>
+
+</div>
+</body>
+</html>

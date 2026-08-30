@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第11章 自動修正を体験する ─ Clang-Tidy入門</title>
+<style>
+  :root{
+    --ink:#1f2933; --sub:#5a6b7a; --line:#d8dee4; --bg:#ffffff;
+    --code-bg:#f6f8fa; --code-line:#e2e8ee;
+    --accent:#2f6f9f; --accent-bg:#eef4f9;
+    --warn:#b4661a; --warn-bg:#fbf4ea;
+    --ok:#3d7a52; --ok-bg:#eef5f0;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0; background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Noto Sans JP","Meiryo",sans-serif;
+    font-size:16px; line-height:1.95; font-feature-settings:"palt" 1;}
+  .page{max-width:47rem; margin:0 auto; padding:3.5rem 1.6rem 6rem}
+  .chap-no{font-size:.8rem; letter-spacing:.22em; color:var(--accent); font-weight:700; margin:0 0 .5rem}
+  h1{font-size:1.85rem; line-height:1.5; margin:0 0 .6rem; letter-spacing:.01em}
+  .lede{color:var(--sub); font-size:1rem; margin:0 0 2.2rem; padding-bottom:1.6rem; border-bottom:2px solid var(--ink)}
+  h2{font-size:1.28rem; margin:3rem 0 1rem; padding-left:.7rem; border-left:4px solid var(--accent); line-height:1.6}
+  h3{font-size:1.05rem; margin:2.2rem 0 .7rem}
+  h3::before{content:"◆ "; color:var(--accent); font-size:.8em}
+  p{margin:0 0 1.1rem}
+  ul,ol{margin:0 0 1.2rem; padding-left:1.6rem}
+  li{margin:.35rem 0}
+  code{font-family:"Cascadia Mono","Consolas","SFMono-Regular",monospace; font-size:.9em;
+       background:var(--code-bg); border:1px solid var(--code-line); border-radius:4px; padding:.08em .35em}
+  pre{background:var(--code-bg); border:1px solid var(--code-line); border-radius:8px;
+      padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.7}
+  pre code{background:none; border:none; padding:0; font-size:.86rem}
+  pre.term{background:#1f2933; border-color:#1f2933; color:#e6edf3}
+  pre.term code{color:#e6edf3}
+  pre.term .p{color:#7fb2d6}
+  pre.term .o{color:#9fb3c0}
+  .diff-del{color:#a04a34}
+  .diff-add{color:#3d7a52}
+  .cap{font-size:.82rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+  figure{margin:2rem 0 2.2rem}
+  figure svg{display:block; width:100%; height:auto; border:1px solid var(--line); border-radius:8px; background:#fff}
+  figcaption{font-size:.85rem; color:var(--sub); margin-top:.6rem}
+  figcaption b{color:var(--ink)}
+  .box{border-radius:8px; padding:1rem 1.2rem; margin:1.6rem 0; font-size:.94rem}
+  .box p:last-child{margin-bottom:0}
+  .box .t{font-weight:700; display:block; margin-bottom:.35rem; font-size:.88rem; letter-spacing:.04em}
+  .note{background:var(--accent-bg); border-left:4px solid var(--accent)} .note .t{color:var(--accent)}
+  .warn{background:var(--warn-bg); border-left:4px solid var(--warn)} .warn .t{color:var(--warn)}
+  .tip{background:var(--ok-bg); border-left:4px solid var(--ok)} .tip .t{color:var(--ok)}
+  .hands{border:1px solid var(--line); border-radius:10px; margin:2rem 0; overflow:hidden}
+  .hands>.hd{background:var(--ink); color:#fff; padding:.55rem 1.1rem; font-size:.85rem; letter-spacing:.1em; font-weight:700}
+  .hands>.bd{padding:1.3rem 1.3rem .4rem}
+  .hands ol{counter-reset:step; list-style:none; padding-left:0}
+  .hands ol>li{counter-increment:step; position:relative; padding-left:2.4rem; margin:0 0 1.2rem}
+  .hands ol>li::before{content:counter(step); position:absolute; left:0; top:.25rem;
+    width:1.7rem; height:1.7rem; border-radius:50%; background:var(--accent); color:#fff;
+    font-size:.82rem; font-weight:700; display:flex; align-items:center; justify-content:center; line-height:1}
+  table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+  th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+  th{background:var(--code-bg); font-weight:700}
+  .summary{border:2px solid var(--ink); border-radius:10px; padding:1.3rem 1.5rem; margin:3rem 0 1rem}
+  .summary h2{margin:0 0 .8rem; border:none; padding:0; font-size:1.1rem}
+  .summary ul{margin-bottom:0}
+  .partend{background:#1f2933; color:#fff; border-radius:10px; padding:1.4rem 1.6rem; margin:2.5rem 0 1rem}
+  .partend h2{color:#fff; border-left-color:#e8b075; margin:0 0 .8rem; font-size:1.1rem}
+  .partend p{color:#cfd8de; margin-bottom:.6rem}
+  .partend ul{color:#cfd8de; margin-bottom:0}
+  .next{color:var(--sub); font-size:.94rem; border-top:1px solid var(--line); padding-top:1.2rem; margin-top:2.5rem}
+  @media (max-width:600px){ body{font-size:15px} .page{padding:2.2rem 1.1rem 4rem} h1{font-size:1.5rem} }
+</style>
+</head>
+<body>
+<div class="page">
+
+<p class="chap-no">第 11 章</p>
+<h1>自動修正を体験する</h1>
+<p class="lede">Clang-Tidy の警告の多くは、修正案を伴っています。コマンド一つで数百箇所を直せる ── 便利ですが、同時に本書で最も危険な機能でもあります。仕組みを理解し、安全な手順を確立してから使ってください。この章で第2部が完結します。</p>
+
+<h2>11.1 FixIt ── 診断に付いてくる修正案</h2>
+
+<p>チェックが診断を出すとき、多くの場合それは単なるメッセージではありません。<strong>「ソースのこの範囲を、この文字列に置き換えればよい」という具体的な指示（FixIt）</strong> が添えられています。</p>
+
+<pre class="term"><code><span class="p">&gt;</span> clang-tidy --checks="-*,modernize-use-nullptr" ch05_first_run.cpp -- -std=c++23
+<span class="o">ch05_first_run.cpp:5:14: warning: use nullptr [modernize-use-nullptr]
+    5 |     int* p = NULL;
+      |              ^~~~
+      |              nullptr</span></code></pre>
+
+<p>3行目の <code>^~~~</code> が置換範囲、4行目の <code>nullptr</code> が置換後の文字列です。これが FixIt の実体で、単なる表示ではなく機械可読なデータとして保持されています。</p>
+
+<figure>
+<svg viewBox="0 0 760 380" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="診断と FixIt から修正が適用されるまでの流れ">
+  <defs>
+    <marker id="m" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5a6b7a"/>
+    </marker>
+  </defs>
+  <g font-family="sans-serif">
+
+  <rect x="24" y="20" width="200" height="76" rx="8" fill="#1f2933"/>
+  <text x="124" y="46" text-anchor="middle" fill="#fff" font-size="13" font-weight="bold">チェックの診断</text>
+  <text x="124" y="66" text-anchor="middle" fill="#b8c4cd" font-size="11">メッセージ</text>
+  <text x="124" y="83" text-anchor="middle" fill="#e8b075" font-size="11">＋ FixIt（範囲・置換文字列）</text>
+
+  <line x1="224" y1="58" x2="262" y2="58" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#m)"/>
+
+  <!-- three paths -->
+  <rect x="266" y="14" width="470" height="88" rx="8" fill="#eef4f9" stroke="#2f6f9f" stroke-width="1.5"/>
+  <text x="286" y="36" font-size="12" font-weight="bold" fill="#2f6f9f">経路A：その場で適用</text>
+  <text x="286" y="56" font-size="11.5" font-family="monospace" fill="#1f2933">clang-tidy --fix</text>
+  <text x="286" y="76" font-size="11" fill="#5a6b7a">1ファイルずつ順に処理するときはこれで足りる</text>
+  <text x="286" y="93" font-size="11" fill="#b4661a">※ 並列実行すると同じヘッダを奪い合って壊れる</text>
+
+  <rect x="266" y="114" width="470" height="120" rx="8" fill="#fbf4ea" stroke="#b4661a" stroke-width="2"/>
+  <text x="286" y="136" font-size="12" font-weight="bold" fill="#b4661a">経路B：いったん書き出してから一括適用</text>
+  <text x="286" y="158" font-size="11.5" font-family="monospace" fill="#1f2933">clang-tidy --export-fixes=fixes.yaml</text>
+  <text x="286" y="180" font-size="11" fill="#5a6b7a">↓ 各プロセスが YAML に修正案を吐くだけ（衝突しない）</text>
+  <text x="286" y="202" font-size="11.5" font-family="monospace" fill="#1f2933">clang-apply-replacements .</text>
+  <text x="286" y="224" font-size="11" fill="#5a6b7a">↓ 重複を排除し、競合を検出しながら適用</text>
+
+  <rect x="266" y="246" width="470" height="72" rx="8" fill="#eef5f0" stroke="#3d7a52" stroke-width="1.5"/>
+  <text x="286" y="268" font-size="12" font-weight="bold" fill="#3d7a52">経路C：IDE のクイックフィックス</text>
+  <text x="286" y="288" font-size="11" fill="#5a6b7a">波線から1件ずつ選んで適用。差分を目視できるので最も安全</text>
+  <text x="286" y="308" font-size="11" fill="#5a6b7a">数が少ないうちはこれが最良</text>
+
+  <rect x="24" y="330" width="712" height="38" rx="8" fill="#f4f6f8" stroke="#d8dee4"/>
+  <text x="380" y="354" text-anchor="middle" font-size="12" fill="#1f2933">どの経路でも、適用されるのは<tspan font-weight="bold">同じ FixIt データ</tspan>。違うのは「いつ・どうまとめて当てるか」だけ</text>
+  </g>
+</svg>
+<figcaption><b>図11-1</b>　FixIt の適用経路。並列実行するかどうかで、経路A と 経路B を使い分ける。</figcaption>
+</figure>
+
+<h3>すべての警告に修正案があるわけではない</h3>
+
+<p>「危険な設計だ」という指摘のように、機械が正解を決められない警告には FixIt が付きません。目安として、</p>
+
+<ul>
+  <li><strong>付きやすい</strong>：<code>modernize-*</code>（書き換え規則が明確）、<code>readability-*</code> の一部</li>
+  <li><strong>付きにくい</strong>：<code>clang-analyzer-*</code>（何が正しい修正かは文脈依存）、<code>bugprone-*</code> の多く</li>
+</ul>
+
+<h2>11.2 修正を適用するオプション</h2>
+
+<table>
+<tr><th>オプション</th><th>意味</th></tr>
+<tr><td><code>--fix</code></td><td>修正案を適用する。<strong>コンパイルエラーが1つでもあると何もせず終了する</strong></td></tr>
+<tr><td><code>--fix-errors</code></td><td>コンパイルエラーがあっても適用する。コンパイラ側の FixIt も当てる</td></tr>
+<tr><td><code>--fix-notes</code></td><td>警告自体に修正案がなくても、付随する note に単一の修正案があれば当てる</td></tr>
+<tr><td><code>--format-style</code></td><td>修正した箇所の周辺を整形する（<code>none</code> / <code>file</code> / <code>llvm</code> など）</td></tr>
+<tr><td><code>--export-fixes</code></td><td>適用せず YAML に書き出す</td></tr>
+</table>
+
+<div class="warn">
+<span class="t"><code>--fix-errors</code> は慎重に</span>
+<p><code>--fix</code> がコンパイルエラー時に何もしないのは<strong>安全装置</strong>です。パースに失敗した状態の AST は不完全で、そこから導かれた修正案は信用できません。<code>--fix-errors</code> はその安全装置を外すオプションです。使うのは、コンパイルエラーの原因を把握したうえで、それが修正内容に影響しないと確信できるときだけにしてください。</p>
+</div>
+
+<h3><code>--format-style</code> を付ける理由</h3>
+
+<p>FixIt はテキストの置換なので、置換後に行が長くなったりインデントが崩れたりします。<code>--format-style=file</code> を指定すると、<code>.clang-format</code> の設定に従って修正箇所の周辺だけを整形してくれます。</p>
+
+<pre><code># .clang-tidy
+FormatStyle: file</code></pre>
+
+<p>ただしこれは <strong>修正した箇所の周辺だけ</strong> です。ファイル全体の整形は clang-format の仕事で、両者の役割分担は第41章で扱います。</p>
+
+<h2>11.3 自動修正が危険な場面</h2>
+
+<p>FixIt は「このチェックの観点では正しい」修正です。<strong>プログラム全体として正しいかは保証されていません。</strong> 典型的な危険を挙げます。</p>
+
+<h3>意味が変わる修正</h3>
+
+<pre><code>// modernize-pass-by-value の提案
+- void setName(const std::string&amp; name) { name_ = name; }
++ void setName(std::string name) { name_ = std::move(name); }</code></pre>
+
+<p>多くの場合これは改善ですが、呼び出し側が常に左辺値を渡している場合は、コピーが1回増えることがあります。「性能のための修正」が性能を落とすことがある、という点に注意が必要です。</p>
+
+<h3>影響範囲が広い修正</h3>
+
+<p><code>readability-identifier-naming</code> の自動修正は、<strong>識別子の定義と参照をまとめてリネームします</strong>。これは強力ですが、</p>
+
+<ul>
+  <li>解析対象外のファイル（第10章のフィルタで除外したもの）にある参照は書き換わらない</li>
+  <li>マクロや文字列リテラルの中に埋め込まれた名前は書き換わらない</li>
+  <li>外部に公開している API 名を勝手に変えてしまう可能性がある</li>
+</ul>
+
+<p>という穴があります。翻訳単位をまたぐリネームは、<strong>必ずプロジェクト全体を対象にして一度に実行し、直後にビルドを通す</strong> 必要があります。</p>
+
+<h3>コメントと乖離する修正</h3>
+
+<p>コードだけが書き換わり、隣のコメントは古いまま残ります。機械はコメントの意味を知りません。</p>
+
+<h2>11.4 安全な適用手順</h2>
+
+<figure>
+<svg viewBox="0 0 760 400" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="自動修正を安全に適用する手順">
+  <defs>
+    <marker id="n" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5a6b7a"/>
+    </marker>
+  </defs>
+  <g font-family="sans-serif">
+  <g font-size="12.5">
+  <rect x="60" y="16" width="640" height="42" rx="8" fill="#1f2933"/>
+  <text x="82" y="42" fill="#fff" font-weight="bold">① 作業ツリーをきれいにする（未コミットの変更をゼロに）</text>
+
+  <line x1="380" y1="58" x2="380" y2="74" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#n)"/>
+
+  <rect x="60" y="78" width="640" height="42" rx="8" fill="#2f6f9f"/>
+  <text x="82" y="104" fill="#fff" font-weight="bold">② チェックを 1 つだけに絞る（--checks=-*,対象チェック）</text>
+
+  <line x1="380" y1="120" x2="380" y2="136" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#n)"/>
+
+  <rect x="60" y="140" width="640" height="42" rx="8" fill="#2f6f9f"/>
+  <text x="82" y="166" fill="#fff" font-weight="bold">③ まず --export-fixes で書き出し、YAML を眺めて件数と範囲を把握する</text>
+
+  <line x1="380" y1="182" x2="380" y2="198" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#n)"/>
+
+  <rect x="60" y="202" width="640" height="42" rx="8" fill="#b4661a"/>
+  <text x="82" y="228" fill="#fff" font-weight="bold">④ 適用する（--fix または clang-apply-replacements）</text>
+
+  <line x1="380" y1="244" x2="380" y2="260" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#n)"/>
+
+  <rect x="60" y="264" width="640" height="42" rx="8" fill="#b4661a"/>
+  <text x="82" y="290" fill="#fff" font-weight="bold">⑤ 差分を全部読む（git diff）。1件ずつ「これは正しいか」を判断する</text>
+
+  <line x1="380" y1="306" x2="380" y2="322" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#n)"/>
+
+  <rect x="60" y="326" width="640" height="42" rx="8" fill="#3d7a52"/>
+  <text x="82" y="352" fill="#fff" font-weight="bold">⑥ ビルドしてテストを流す → 通ったらこのチェック単位でコミット</text>
+  </g>
+  <text x="380" y="390" text-anchor="middle" font-size="12" fill="#5a6b7a">②〜⑥ をチェックごとに繰り返す。まとめて当てると、壊れたときに原因が特定できない</text>
+  </g>
+</svg>
+<figcaption><b>図11-2</b>　安全な適用手順。要点は「1チェックずつ」「差分を全部読む」「チェック単位でコミット」の3つ。</figcaption>
+</figure>
+
+<div class="tip">
+<span class="t">差分を読まない自動修正は、自動でバグを入れる行為</span>
+<p>「500件直りました」は成果ではありません。500件の差分を読んでいないなら、それは 500件のレビューされていない変更をコミットしたということです。件数が多すぎて読めないなら、それはチェックの選び方かディレクトリの絞り方が粗すぎるサインです。</p>
+</div>
+
+<h2>11.5 【ハンズオン】修正を当ててみる</h2>
+
+<div class="hands">
+<div class="hd">HANDS-ON 11-A　1件だけ直す</div>
+<div class="bd">
+<ol>
+  <li><strong>コミットしておく。</strong> <code>TidyLab</code> の変更をすべてコミットし、<code>git status</code> がきれいな状態にします。バージョン管理を使っていない場合は、フォルダごとコピーしてバックアップします。<strong>この手順を飛ばさないでください。</strong></li>
+
+  <li><strong>修正対象を用意する。</strong> <code>ch05_first_run.cpp</code> に <code>int* p = NULL;</code> が残っていることを確認します。</li>
+
+  <li><strong>まず書き出す。</strong>
+<pre><code>clang-tidy --checks="-*,modernize-use-nullptr" --export-fixes=fixes.yaml ch05_first_run.cpp -- -std=c++23</code></pre>
+    生成された <code>fixes.yaml</code> をエディタで開き、<code>FilePath</code>、<code>Offset</code>、<code>Length</code>、<code>ReplacementText</code> といったフィールドを確認します。<strong>FixIt がどういうデータなのかを、一度自分の目で見ておいてください。</strong></li>
+
+  <li><strong>適用する。</strong>
+<pre><code>clang-tidy --checks="-*,modernize-use-nullptr" --fix ch05_first_run.cpp -- -std=c++23</code></pre>
+  </li>
+
+  <li><strong>差分を読む。</strong>
+<pre><code>git diff</code></pre>
+    <code>NULL</code> が <code>nullptr</code> になっていることを確認します。</li>
+
+  <li><strong>ビルドして戻す。</strong> ビルドが通ることを確認したら、次の手順のために <code>git checkout -- .</code> で元に戻します。</li>
+</ol>
+</div>
+</div>
+
+<div class="hands">
+<div class="hd">HANDS-ON 11-B　安全装置と危険な修正を確かめる</div>
+<div class="bd">
+<ol>
+  <li><strong><code>--fix</code> の安全装置を見る。</strong> <code>ch05_first_run.cpp</code> にわざと構文エラー（行末のセミコロンを消すなど）を入れ、手順4のコマンドを実行します。<strong>修正が一切適用されない</strong>ことを確認してください。確認したら構文エラーを戻します。</li>
+
+  <li><strong>整形の有無を比べる。</strong> <code>--format-style=none</code> と <code>--format-style=file</code> で同じ修正を当て、周辺の整形が変わることを確認します（<code>.clang-format</code> がない場合は <code>llvm</code> を指定）。</li>
+
+  <li><strong>影響範囲の広い修正を観察する（適用はしない）。</strong> 第8章で設定した命名規約を使い、<strong><code>--fix</code> を付けずに</strong> 書き出しだけ行います。
+<pre><code>clang-tidy --checks="-*,readability-identifier-naming" --export-fixes=rename.yaml config_loader.cpp -- -std=c++23</code></pre>
+    <code>rename.yaml</code> を開き、<strong>何ファイルの何箇所が書き換わる予定か</strong> を数えます。ヘッダも対象に入っていることを確認してください。</li>
+
+  <li><strong>実際に当てて、差分を読む。</strong> 手順3の対象を <code>config_loader.cpp</code> と <code>main.cpp</code> の両方にして <code>--fix</code> で適用し、<code>git diff</code> をすべて読みます。読んだうえで、<strong>これを人手でレビューできる量かどうか</strong>を自分に問うてください。</li>
+
+  <li><strong>ビルドする。</strong> 通らなければ、リネームが届いていない参照があるということです。第10章のヘッダフィルタとの関係を思い出してください。</li>
+
+  <li><strong>元に戻す。</strong> <code>git checkout -- .</code> で復元し、生成した YAML ファイルを削除します。</li>
+</ol>
+</div>
+</div>
+
+<div class="note">
+<span class="t">Visual Studio のクイックフィックス</span>
+<p>エディタ上の波線にカーソルを合わせると、修正案が提示されることがあります。1件ずつ差分を見ながら適用できるので、日常の作業ではこれが最も安全で速い経路です。<code>--fix</code> の出番は「新しいチェックを導入して、既存コードを一気に追従させる」ような、まとまった作業のときだけと考えてください。</p>
+</div>
+
+<div class="partend">
+<h2>第2部の終わりに</h2>
+<p>ここまでで、Clang-Tidy を実運用に耐える形に整える道具が揃いました。</p>
+<ul>
+  <li>チェックをグロブで自在に選べる（第6章）</li>
+  <li>設定を <code>.clang-tidy</code> に一本化し、ディレクトリ単位で使い分けられる（第7章）</li>
+  <li>オプションでチェックの挙動を自分の基準に合わせられる（第8章）</li>
+  <li>個別の例外を作法に沿って抑制できる（第9章）</li>
+  <li>ヘッダの見え方を制御できる（第10章）</li>
+  <li>修正を安全に適用できる（第11章）</li>
+</ul>
+<p style="margin-top:.8rem">ここまでは <strong>「用意されたチェックを使う」</strong> 話でした。第3部でコマンドラインとビルドへの組み込みを固め、第4部で標準チェックの中身をツアーしたあと、第5部・第6部で <strong>「自分でチェックを作る」</strong> 側へ移ります。</p>
+</div>
+
+<div class="summary">
+<h2>この章のまとめ</h2>
+<ul>
+  <li>多くの診断には FixIt（置換範囲と置換文字列）が付いている。<code>clang-analyzer-*</code> のような文脈依存のチェックには付きにくい。</li>
+  <li><code>--fix</code> はコンパイルエラーがあると何もしない。これは安全装置であり、<code>--fix-errors</code> はそれを外すオプション。</li>
+  <li>並列実行時は <code>--export-fixes</code> で YAML に書き出し、<code>clang-apply-replacements</code> で重複と競合を解決しながら適用する。</li>
+  <li><code>--format-style</code>（<code>FormatStyle</code>）で修正箇所の周辺を整形できる。ファイル全体の整形は clang-format の仕事。</li>
+  <li>FixIt は「そのチェックの観点で正しい」だけ。意味が変わる修正、影響範囲の広いリネーム、コメントとの乖離に注意する。</li>
+  <li>安全な手順は <strong>作業ツリーをきれいに → 1チェックずつ → 書き出して確認 → 適用 → 差分を全部読む → ビルドとテスト → チェック単位でコミット</strong>。</li>
+  <li>差分を読まない自動修正は、自動でバグを入れる行為に等しい。</li>
+</ul>
+</div>
+
+<p class="next"><strong>次章：</strong> 第3部に入ります。第12章「コマンドラインから直接叩く」では、<code>--</code> の後ろに渡すコンパイルオプションを正面から扱います。「ヘッダが見つからない」「C++23 の構文でパースエラーになる」といった詰まりどころは、すべてここで解決します。</p>
+
+</div>
+</body>
+</html>

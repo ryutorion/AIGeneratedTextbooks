@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第14章 CMake プロジェクトで使う ─ Clang-Tidy入門</title>
+<style>
+  :root{
+    --ink:#1f2933; --sub:#5a6b7a; --line:#d8dee4; --bg:#ffffff;
+    --code-bg:#f6f8fa; --code-line:#e2e8ee;
+    --accent:#2f6f9f; --accent-bg:#eef4f9;
+    --warn:#b4661a; --warn-bg:#fbf4ea;
+    --ok:#3d7a52; --ok-bg:#eef5f0;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0; background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Noto Sans JP","Meiryo",sans-serif;
+    font-size:16px; line-height:1.95; font-feature-settings:"palt" 1;}
+  .page{max-width:47rem; margin:0 auto; padding:3.5rem 1.6rem 6rem}
+  .chap-no{font-size:.8rem; letter-spacing:.22em; color:var(--accent); font-weight:700; margin:0 0 .5rem}
+  h1{font-size:1.85rem; line-height:1.5; margin:0 0 .6rem; letter-spacing:.01em}
+  .lede{color:var(--sub); font-size:1rem; margin:0 0 2.2rem; padding-bottom:1.6rem; border-bottom:2px solid var(--ink)}
+  h2{font-size:1.28rem; margin:3rem 0 1rem; padding-left:.7rem; border-left:4px solid var(--accent); line-height:1.6}
+  h3{font-size:1.05rem; margin:2.2rem 0 .7rem}
+  h3::before{content:"◆ "; color:var(--accent); font-size:.8em}
+  p{margin:0 0 1.1rem}
+  ul,ol{margin:0 0 1.2rem; padding-left:1.6rem}
+  li{margin:.35rem 0}
+  code{font-family:"Cascadia Mono","Consolas","SFMono-Regular",monospace; font-size:.9em;
+       background:var(--code-bg); border:1px solid var(--code-line); border-radius:4px; padding:.08em .35em}
+  pre{background:var(--code-bg); border:1px solid var(--code-line); border-radius:8px;
+      padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.7}
+  pre code{background:none; border:none; padding:0; font-size:.86rem}
+  pre.term{background:#1f2933; border-color:#1f2933; color:#e6edf3}
+  pre.term code{color:#e6edf3}
+  pre.term .p{color:#7fb2d6}
+  pre.term .o{color:#9fb3c0}
+  .cap{font-size:.82rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+  figure{margin:2rem 0 2.2rem}
+  figure svg{display:block; width:100%; height:auto; border:1px solid var(--line); border-radius:8px; background:#fff}
+  figcaption{font-size:.85rem; color:var(--sub); margin-top:.6rem}
+  figcaption b{color:var(--ink)}
+  .box{border-radius:8px; padding:1rem 1.2rem; margin:1.6rem 0; font-size:.94rem}
+  .box p:last-child{margin-bottom:0}
+  .box .t{font-weight:700; display:block; margin-bottom:.35rem; font-size:.88rem; letter-spacing:.04em}
+  .note{background:var(--accent-bg); border-left:4px solid var(--accent)} .note .t{color:var(--accent)}
+  .warn{background:var(--warn-bg); border-left:4px solid var(--warn)} .warn .t{color:var(--warn)}
+  .tip{background:var(--ok-bg); border-left:4px solid var(--ok)} .tip .t{color:var(--ok)}
+  .hands{border:1px solid var(--line); border-radius:10px; margin:2rem 0; overflow:hidden}
+  .hands>.hd{background:var(--ink); color:#fff; padding:.55rem 1.1rem; font-size:.85rem; letter-spacing:.1em; font-weight:700}
+  .hands>.bd{padding:1.3rem 1.3rem .4rem}
+  .hands ol{counter-reset:step; list-style:none; padding-left:0}
+  .hands ol>li{counter-increment:step; position:relative; padding-left:2.4rem; margin:0 0 1.2rem}
+  .hands ol>li::before{content:counter(step); position:absolute; left:0; top:.25rem;
+    width:1.7rem; height:1.7rem; border-radius:50%; background:var(--accent); color:#fff;
+    font-size:.82rem; font-weight:700; display:flex; align-items:center; justify-content:center; line-height:1}
+  table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+  th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+  th{background:var(--code-bg); font-weight:700}
+  .summary{border:2px solid var(--ink); border-radius:10px; padding:1.3rem 1.5rem; margin:3rem 0 1rem}
+  .summary h2{margin:0 0 .8rem; border:none; padding:0; font-size:1.1rem}
+  .summary ul{margin-bottom:0}
+  .next{color:var(--sub); font-size:.94rem; border-top:1px solid var(--line); padding-top:1.2rem; margin-top:2.5rem}
+  @media (max-width:600px){ body{font-size:15px} .page{padding:2.2rem 1.1rem 4rem} h1{font-size:1.5rem} }
+</style>
+</head>
+<body>
+<div class="page">
+
+<p class="chap-no">第 14 章</p>
+<h1>CMake プロジェクトで使う</h1>
+<p class="lede">本書は MSBuild を主軸にしていますが、CMake も押さえておく価値があります。理由は二つ。CI で回すときに扱いやすいこと、そして <code>compile_commands.json</code> が手に入ることです。このファイルは第5部で <code>clang-query</code> を使うときにも効いてきます。一方で、VS の CMake 統合にはツールセットの制約があります。そこを最初に押さえます。</p>
+
+<h2>14.1 三つの実行経路</h2>
+
+<p>CMake プロジェクトで Clang-Tidy を走らせる方法は、大きく3つあります。どれを選ぶかで、必要な準備も制約も変わります。</p>
+
+<figure>
+<svg viewBox="0 0 760 430" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="CMake プロジェクトで Clang-Tidy を実行する3つの経路">
+  <defs>
+    <marker id="a14" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5a6b7a"/>
+    </marker>
+  </defs>
+  <g font-family="sans-serif">
+
+  <rect x="290" y="16" width="180" height="38" rx="8" fill="#1f2933"/>
+  <text x="380" y="40" text-anchor="middle" fill="#fff" font-size="13" font-weight="bold">CMakeLists.txt</text>
+
+  <line x1="380" y1="54" x2="380" y2="70" stroke="#5a6b7a" stroke-width="1.4"/>
+  <line x1="140" y1="70" x2="620" y2="70" stroke="#5a6b7a" stroke-width="1.4"/>
+  <line x1="140" y1="70" x2="140" y2="88" stroke="#5a6b7a" stroke-width="1.4" marker-end="url(#a14)"/>
+  <line x1="380" y1="70" x2="380" y2="88" stroke="#5a6b7a" stroke-width="1.4" marker-end="url(#a14)"/>
+  <line x1="620" y1="70" x2="620" y2="88" stroke="#5a6b7a" stroke-width="1.4" marker-end="url(#a14)"/>
+
+  <!-- A -->
+  <rect x="24" y="92" width="232" height="250" rx="10" fill="#eef4f9" stroke="#2f6f9f" stroke-width="1.6"/>
+  <text x="140" y="116" text-anchor="middle" font-size="13" font-weight="bold" fill="#2f6f9f">経路A：VS の CMake 統合</text>
+  <rect x="40" y="128" width="200" height="44" rx="5" fill="#fff" stroke="#c5d6e4"/>
+  <text x="140" y="147" text-anchor="middle" font-size="10.5" font-family="monospace" fill="#1f2933">CMakePresets.json</text>
+  <text x="140" y="163" text-anchor="middle" font-size="10" fill="#5a6b7a">vendor マップに設定</text>
+  <text x="140" y="192" text-anchor="middle" font-size="11" fill="#1f2933">IDE の波線・エラー一覧に出る</text>
+  <text x="140" y="212" text-anchor="middle" font-size="11" fill="#1f2933">MSBuild 版に近い体験</text>
+  <rect x="40" y="226" width="200" height="60" rx="5" fill="#f7e9e5" stroke="#a04a34"/>
+  <text x="140" y="246" text-anchor="middle" font-size="11" fill="#a04a34" font-weight="bold">制約：clang-cl でビルド</text>
+  <text x="140" y="262" text-anchor="middle" font-size="11" fill="#a04a34" font-weight="bold">するときのみ有効</text>
+  <text x="140" y="278" text-anchor="middle" font-size="10" fill="#5a6b7a">MSVC ツールセットでは効かない</text>
+  <text x="140" y="308" text-anchor="middle" font-size="10.5" fill="#5a6b7a">用途：IDE で書きながら</text>
+  <text x="140" y="324" text-anchor="middle" font-size="10.5" fill="#5a6b7a">気づきたいとき</text>
+
+  <!-- B -->
+  <rect x="264" y="92" width="232" height="250" rx="10" fill="#fbf4ea" stroke="#b4661a" stroke-width="1.6"/>
+  <text x="380" y="116" text-anchor="middle" font-size="13" font-weight="bold" fill="#b4661a">経路B：ビルドに組み込む</text>
+  <rect x="280" y="128" width="200" height="44" rx="5" fill="#fff" stroke="#e6d5bd"/>
+  <text x="380" y="147" text-anchor="middle" font-size="10.5" font-family="monospace" fill="#1f2933">CMAKE_CXX_CLANG_TIDY</text>
+  <text x="380" y="163" text-anchor="middle" font-size="10" fill="#5a6b7a">コンパイラと一緒に起動</text>
+  <text x="380" y="192" text-anchor="middle" font-size="11" fill="#1f2933">ビルドすれば必ず走る</text>
+  <text x="380" y="212" text-anchor="middle" font-size="11" fill="#1f2933">ビルドログに残る</text>
+  <rect x="280" y="226" width="200" height="60" rx="5" fill="#fff" stroke="#e6d5bd"/>
+  <text x="380" y="246" text-anchor="middle" font-size="11" fill="#b4661a" font-weight="bold">制約：Makefile / Ninja</text>
+  <text x="380" y="262" text-anchor="middle" font-size="11" fill="#b4661a" font-weight="bold">ジェネレータで動作</text>
+  <text x="380" y="278" text-anchor="middle" font-size="10" fill="#5a6b7a">ビルドが必ず遅くなる</text>
+  <text x="380" y="308" text-anchor="middle" font-size="10.5" fill="#5a6b7a">用途：CI で「解析漏れを</text>
+  <text x="380" y="324" text-anchor="middle" font-size="10.5" fill="#5a6b7a">構造的に起こさない」</text>
+
+  <!-- C -->
+  <rect x="504" y="92" width="232" height="250" rx="10" fill="#eef5f0" stroke="#3d7a52" stroke-width="2"/>
+  <text x="620" y="116" text-anchor="middle" font-size="13" font-weight="bold" fill="#3d7a52">経路C：外部から回す</text>
+  <rect x="520" y="128" width="200" height="44" rx="5" fill="#fff" stroke="#c9dfd1"/>
+  <text x="620" y="147" text-anchor="middle" font-size="10.5" font-family="monospace" fill="#1f2933">compile_commands.json</text>
+  <text x="620" y="163" text-anchor="middle" font-size="10" fill="#5a6b7a">を生成して -p で渡す</text>
+  <text x="620" y="192" text-anchor="middle" font-size="11" fill="#1f2933">ビルドと解析を分離できる</text>
+  <text x="620" y="212" text-anchor="middle" font-size="11" fill="#1f2933">run-clang-tidy が使える</text>
+  <rect x="520" y="226" width="200" height="60" rx="5" fill="#fff" stroke="#c9dfd1"/>
+  <text x="620" y="246" text-anchor="middle" font-size="11" fill="#3d7a52" font-weight="bold">制約：DB の生成が</text>
+  <text x="620" y="262" text-anchor="middle" font-size="11" fill="#3d7a52" font-weight="bold">ジェネレータに依存</text>
+  <text x="620" y="278" text-anchor="middle" font-size="10" fill="#5a6b7a">（14.4 節）</text>
+  <text x="620" y="308" text-anchor="middle" font-size="10.5" fill="#5a6b7a">用途：全体解析・差分解析・</text>
+  <text x="620" y="324" text-anchor="middle" font-size="10.5" fill="#5a6b7a">clang-query（第5部）</text>
+
+  <rect x="24" y="356" width="712" height="60" rx="8" fill="#1f2933"/>
+  <text x="380" y="380" text-anchor="middle" fill="#fff" font-size="12.5" font-weight="bold">3つは排他ではない。実務では A（書きながら）＋ C（CI で全体・差分）の併用が多い</text>
+  <text x="380" y="402" text-anchor="middle" fill="#b8c4cd" font-size="11">どの経路でも、有効なチェックを決めるのは同じ .clang-tidy</text>
+  </g>
+</svg>
+<figcaption><b>図14-1</b>　CMake での3つの実行経路。制約がそれぞれ違うので、目的から逆算して選ぶ。</figcaption>
+</figure>
+
+<h2>14.2 経路A：CMakePresets.json に書く</h2>
+
+<p>Visual Studio の CMake 統合は、<code>CMakePresets.json</code> の <strong>vendor マップ</strong> に置いた設定を読みます。マップ名は <code>microsoft.com/VisualStudioSettings/CMake/1.0</code> です。</p>
+
+<pre><code>{
+  "version": 3,
+  "configurePresets": [
+    {
+      "name": "x64-clang-analysis",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_CXX_STANDARD": "23"
+      },
+      "vendor": {
+        "microsoft.com/VisualStudioSettings/CMake/1.0": {
+          "enableClangTidyCodeAnalysis": true,
+          "clangTidyChecks": "-*,bugprone-*,performance-*",
+          "enableMicrosoftCodeAnalysis": false,
+          "intelliSenseMode": "windows-clang-x64"
+        }
+      }
+    }
+  ]
+}</code></pre>
+
+<table>
+<tr><th>キー</th><th>意味</th></tr>
+<tr><td><code>enableClangTidyCodeAnalysis</code></td><td>Clang-Tidy 解析を有効にする（既定 <code>false</code>）</td></tr>
+<tr><td><code>clangTidyChecks</code></td><td>カンマ区切りのチェック指定。ワイルドカードと <code>-</code> 除外が使える（第6章と同じ文法）</td></tr>
+<tr><td><code>enableMicrosoftCodeAnalysis</code></td><td>Microsoft コード分析を有効にする</td></tr>
+<tr><td><code>disableExternalAnalysis</code></td><td>外部ヘッダに対して解析を走らせるか</td></tr>
+</table>
+
+<div class="warn">
+<span class="t">経路A の最大の落とし穴：clang-cl でビルドしていないと効かない</span>
+<p>公式ドキュメントには、<code>enableClangTidyCodeAnalysis</code> は「<strong>clang-cl でビルドするときに</strong> Visual Studio の clang-tidy コード分析を有効にする」と明記されています。MSVC ツールセットのままの CMake 構成では、この設定を <code>true</code> にしても解析は走りません。</p>
+<p style="margin-top:.5rem">MSBuild プロジェクト（第13章）では MSVC ツールセットのままでも Clang-Tidy が動いたので、ここは前提が違います。<strong>「CMake に移したら急に警告が出なくなった」の典型的な原因です。</strong></p>
+</div>
+
+<p>ツールセットを clang-cl にするには、プリセットでツールチェーンを指定します。</p>
+
+<pre><code>      "cacheVariables": {
+        "CMAKE_C_COMPILER": "clang-cl",
+        "CMAKE_CXX_COMPILER": "clang-cl"
+      }</code></pre>
+
+<p>ビルドまで Clang に変えたくない場合は、経路A を諦めて経路C に寄せるのが素直です。</p>
+
+<h2>14.3 経路B：ビルドに組み込む</h2>
+
+<p>CMake には、コンパイルのたびに Clang-Tidy を一緒に起動する仕組みがあります。ターゲットプロパティ <code>CXX_CLANG_TIDY</code>（およびそれを初期化する変数 <code>CMAKE_CXX_CLANG_TIDY</code>）です。</p>
+
+<pre><code># CMakeLists.txt
+set(CMAKE_CXX_CLANG_TIDY
+    "clang-tidy;--warnings-as-errors=bugprone-*")</code></pre>
+
+<p>値は <strong>セミコロン区切りのコマンドライン</strong> です。CMake はここに対象ソースファイルを足し、さらに <code>--</code> の後ろに完全なコンパイラコマンドラインを付けて起動します。第12章の「形態A」がビルドシステムによって自動生成される、と考えると分かりやすいはずです。</p>
+
+<table>
+<tr><th>項目</th><th>内容</th></tr>
+<tr><td>対応ジェネレータ</td><td>Makefile 系と Ninja が、コンパイラと一緒にこのツールを実行する</td></tr>
+<tr><td>導入バージョン</td><td>CMake 3.6</td></tr>
+<tr><td>引数の渡り方</td><td>ソースファイル＋ <code>--</code> ＋完全なコンパイラコマンドライン</td></tr>
+<tr><td>CMake 3.25 以降</td><td>指定に <code>-p</code> が含まれる場合は <code>--</code> を付けず、コンパイルデータベース参照に切り替わる</td></tr>
+</table>
+
+<div class="note">
+<span class="t">経路B の性格</span>
+<p>この方式の価値は「<strong>解析を忘れられなくなる</strong>」ことです。ビルドが成功したなら解析も走っています。CI の門番として優秀です。一方、日常の開発ビルドに入れると、第13章で測ったとおりの時間増がそのまま乗ります。CI 用のプリセットにだけ入れるのが実践的です。</p>
+</div>
+
+<h2>14.4 経路C：コンパイルデータベースを作る</h2>
+
+<p>第12章の「形態B」で使う <code>compile_commands.json</code> は、CMake が生成できます。</p>
+
+<pre class="term"><code><span class="p">&gt;</span> cmake -S . -B out\build\ninja -G Ninja -DCMAKE_EXPORT_COMPILE_COMMANDS=ON</code></pre>
+
+<div class="warn">
+<span class="t">ジェネレータの制約</span>
+<p>CMake の公式ドキュメントは <code>CMAKE_EXPORT_COMPILE_COMMANDS</code> についてこう述べています。「このオプションは <strong>Makefile ジェネレータと Ninja ジェネレータでのみ実装されている。他のジェネレータでは無視される</strong>」。</p>
+<p style="margin-top:.5rem">つまり <strong>Visual Studio ジェネレータ（<code>-G "Visual Studio 17 2022"</code> のような指定）では <code>compile_commands.json</code> は生成されません</strong>。エラーも出ず、ただファイルができないだけです。Windows で作るなら Ninja ジェネレータを使ってください。</p>
+</div>
+
+<figure>
+<svg viewBox="0 0 760 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="compile_commands.json のエントリ構造">
+  <g font-family="sans-serif">
+
+  <text x="30" y="28" font-size="12.5" font-weight="bold" fill="#5a6b7a" letter-spacing="1.5">compile_commands.json ── 翻訳単位ごとの「ビルドの記録」</text>
+
+  <rect x="24" y="42" width="712" height="150" rx="8" fill="#1f2933"/>
+  <text x="46" y="66" font-size="12" font-family="monospace" fill="#9fb3c0">[</text>
+  <text x="60" y="86" font-size="12" font-family="monospace" fill="#9fb3c0">{</text>
+  <text x="78" y="106" font-size="12" font-family="monospace" fill="#7fb2d6">"directory"</text>
+  <text x="180" y="106" font-size="12" font-family="monospace" fill="#9fb3c0">: </text>
+  <text x="196" y="106" font-size="12" font-family="monospace" fill="#a3d9a5">"C:/dev/TidyLab/out/build/ninja"</text>
+  <text x="78" y="126" font-size="12" font-family="monospace" fill="#7fb2d6">"command"</text>
+  <text x="180" y="126" font-size="12" font-family="monospace" fill="#9fb3c0">: </text>
+  <text x="196" y="126" font-size="12" font-family="monospace" fill="#e8b075">"clang-cl.exe /std:c++latest /I../../include ... config_loader.cpp"</text>
+  <text x="78" y="146" font-size="12" font-family="monospace" fill="#7fb2d6">"file"</text>
+  <text x="180" y="146" font-size="12" font-family="monospace" fill="#9fb3c0">: </text>
+  <text x="196" y="146" font-size="12" font-family="monospace" fill="#a3d9a5">"C:/dev/TidyLab/TidyLab/config_loader.cpp"</text>
+  <text x="60" y="166" font-size="12" font-family="monospace" fill="#9fb3c0">},  … 翻訳単位の数だけ続く</text>
+  <text x="46" y="184" font-size="12" font-family="monospace" fill="#9fb3c0">]</text>
+
+  <rect x="24" y="208" width="345" height="80" rx="8" fill="#eef5f0" stroke="#3d7a52"/>
+  <text x="196" y="232" text-anchor="middle" font-size="12" font-weight="bold" fill="#3d7a52">これがあると何ができるか</text>
+  <text x="42" y="254" font-size="11" fill="#1f2933">・clang-tidy foo.cpp -p out\build\ninja</text>
+  <text x="42" y="272" font-size="11" fill="#1f2933">・run-clang-tidy / clang-tidy-diff（第15章）</text>
+
+  <rect x="391" y="208" width="345" height="80" rx="8" fill="#fbf4ea" stroke="#b4661a"/>
+  <text x="563" y="232" text-anchor="middle" font-size="12" font-weight="bold" fill="#b4661a">なぜ「ビルドと同じ引数」が重要か</text>
+  <text x="409" y="254" font-size="11" fill="#1f2933">・手で書いた -I / -D の漏れがなくなる</text>
+  <text x="409" y="272" font-size="11" fill="#1f2933">・#ifdef の解析されない分岐が生じない</text>
+  </g>
+</svg>
+<figcaption><b>図14-2</b>　<code>compile_commands.json</code> の構造。翻訳単位ごとに「どのディレクトリで、どんなコマンドで、どのファイルをコンパイルしたか」が並ぶ。</figcaption>
+</figure>
+
+<p>生成したら、第12章の形態B で使えます。</p>
+
+<pre class="term"><code><span class="p">&gt;</span> clang-tidy TidyLab\config_loader.cpp -p out\build\ninja</code></pre>
+
+<p><code>-p</code> にはディレクトリを渡します（ファイル名ではありません）。<code>--</code> は不要です。</p>
+
+<div class="tip">
+<span class="t">MSBuild プロジェクトでも DB がほしいとき</span>
+<p><code>.vcxproj</code> ベースのプロジェクトには、<code>compile_commands.json</code> を生成する標準の仕組みがありません。第5部で <code>clang-query</code> を使うときに DB があると便利なので、選択肢を挙げておきます。</p>
+<ul style="margin-top:.5rem">
+  <li>解析用に <strong>CMake + Ninja の構成を別に用意する</strong>（同じソースを指す最小の <code>CMakeLists.txt</code> を書く）</li>
+  <li><strong>DB を使わず、<code>--</code> 方式で通す</strong>（第12章）。小さなプロジェクトならこれで十分</li>
+</ul>
+<p style="margin-top:.5rem">本書のハンズオンは <code>--</code> 方式でも進められるように書いてあります。</p>
+</div>
+
+<h2>14.5 MSBuild との設定対応表</h2>
+
+<table>
+<tr><th>やりたいこと</th><th>MSBuild（第13章）</th><th>CMake</th></tr>
+<tr><td>解析を有効にする</td><td>プロパティ「Clang-Tidy を有効にする」</td><td><code>enableClangTidyCodeAnalysis</code>（clang-cl 時のみ）／ <code>CMAKE_CXX_CLANG_TIDY</code></td></tr>
+<tr><td>チェックを選ぶ</td><td>プロパティ「Clang-Tidy チェック」</td><td><code>clangTidyChecks</code></td></tr>
+<tr><td>実行ファイルを変える</td><td>プロパティ「ツール ディレクトリ」</td><td><code>CMAKE_CXX_CLANG_TIDY</code> にフルパスを書く</td></tr>
+<tr><td>追加引数</td><td>プロパティ「追加オプション」</td><td><code>.clang-tidy</code> の <code>ExtraArgs</code>、または DB に含まれる</td></tr>
+<tr><td>解析の中身</td><td colspan="2" style="background:#eef5f0"><strong>どちらも <code>.clang-tidy</code>。ここは共通</strong></td></tr>
+</table>
+
+<p>最終行が重要です。<strong>チェックの選択・オプション・カスタムチェックは、ビルドシステムに依存しません。</strong> 第2部で作った <code>.clang-tidy</code> はそのまま使えますし、第6部で書くカスタムチェックも同様です。</p>
+
+<h2>14.6 【ハンズオン】CMake 構成を作る</h2>
+
+<div class="hands">
+<div class="hd">HANDS-ON 14　同じソースを CMake からも解析する</div>
+<div class="bd">
+<ol>
+  <li><strong>最小の <code>CMakeLists.txt</code> を書く。</strong> <code>TidyLab</code> のソリューション直下に置きます。既存の <code>.vcxproj</code> はそのまま残して構いません。
+<pre><code>cmake_minimum_required(VERSION 3.25)
+project(TidyLab CXX)
+
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+add_executable(TidyLab
+    TidyLab/main.cpp
+    TidyLab/config_loader.cpp
+)
+target_include_directories(TidyLab PRIVATE TidyLab)</code></pre>
+  </li>
+
+  <li><strong>Ninja で構成する。</strong> 開発者コマンドプロンプトで、
+<pre><code>cmake -S . -B out\build\ninja -G Ninja</code></pre>
+    <code>out\build\ninja\compile_commands.json</code> が生成されたことを確認します。</li>
+
+  <li><strong>VS ジェネレータでは生成されないことを確認する。</strong>
+<pre><code>cmake -S . -B out\build\vs -G "Visual Studio 18 2026"</code></pre>
+    （ジェネレータ名はお使いのバージョンに合わせてください。）<code>out\build\vs</code> に <code>compile_commands.json</code> が<strong>作られない</strong>ことを確認します。エラーも警告も出ないことが重要な観察点です。</li>
+
+  <li><strong>DB の中身を読む。</strong> 生成された <code>compile_commands.json</code> を開き、<code>directory</code> / <code>command</code> / <code>file</code> の3つを確認します。<code>command</code> に <code>-I</code> や規格の指定が入っていることを見てください。</li>
+
+  <li><strong>DB を使って解析する。</strong>
+<pre><code>clang-tidy TidyLab\config_loader.cpp -p out\build\ninja</code></pre>
+    <code>--</code> なしで動くこと、そして第12章で手動で <code>-std</code> や <code>-I</code> を渡したときと<strong>同じ警告</strong>が出ることを確認します。</li>
+
+  <li><strong>ビルドに組み込む（経路B）。</strong> <code>CMakeLists.txt</code> に次を追加して再構成・ビルドします。
+<pre><code>set(CMAKE_CXX_CLANG_TIDY "clang-tidy")</code></pre>
+<pre><code>cmake -S . -B out\build\ninja -G Ninja
+cmake --build out\build\ninja</code></pre>
+    ビルド出力に警告が混ざることと、ビルド時間が増えることを確認します。</li>
+
+  <li><strong>プリセットにまとめる。</strong> <code>CMakePresets.json</code> を作り、14.2 節の内容を書きます。Visual Studio でフォルダを開き、構成の切り替えでプリセットが選べることを確認します。</li>
+
+  <li><strong>設定が共通であることを確かめる。</strong> <code>.clang-tidy</code> の <code>Checks</code> を書き換えて、MSBuild ビルドと CMake ビルドの<strong>両方で警告の内容が変わる</strong>ことを確認します。これが「解析の中身はビルドシステムに依存しない」という意味です。</li>
+</ol>
+</div>
+</div>
+
+<div class="summary">
+<h2>この章のまとめ</h2>
+<ul>
+  <li>CMake での実行経路は3つ。A：VS の CMake 統合、B：<code>CMAKE_CXX_CLANG_TIDY</code> でビルドに組み込む、C：<code>compile_commands.json</code> を作って外部から回す。</li>
+  <li>経路A の <code>enableClangTidyCodeAnalysis</code> は <strong>clang-cl でビルドするときのみ有効</strong>。MSVC ツールセットのままでは走らない。MSBuild とはここが違う。</li>
+  <li>経路B は Makefile / Ninja ジェネレータでコンパイラと一緒に走る。CMake 3.6 以降。ソースファイルと <code>--</code> の後ろに完全なコンパイラコマンドラインが渡される。</li>
+  <li><code>CMAKE_EXPORT_COMPILE_COMMANDS</code> は <strong>Makefile / Ninja でのみ実装</strong>。Visual Studio ジェネレータでは無視され、ファイルは作られない（エラーも出ない）。</li>
+  <li><code>compile_commands.json</code> があれば <code>-p</code> でディレクトリを渡すだけで解析できる。ビルドと完全に同じ引数が使われる。</li>
+  <li><strong>チェックの選択・オプション・カスタムチェックは <code>.clang-tidy</code> に集約され、ビルドシステムに依存しない。</strong></li>
+</ul>
+</div>
+
+<p class="next"><strong>次章：</strong> 第15章「プロジェクト全体・差分だけを解析する」で第3部が完結します。この章で手に入れた <code>compile_commands.json</code> を使い、<code>run-clang-tidy</code> による一括実行と、<code>clang-tidy-diff</code> による差分解析を扱います。既存コードベースへの導入で決定的に効く道具です。</p>
+
+</div>
+</body>
+</html>

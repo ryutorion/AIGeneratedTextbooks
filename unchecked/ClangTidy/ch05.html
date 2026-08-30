@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第5章 はじめての Clang-Tidy 実行 ─ Clang-Tidy入門</title>
+<style>
+  :root{
+    --ink:#1f2933; --sub:#5a6b7a; --line:#d8dee4; --bg:#ffffff;
+    --code-bg:#f6f8fa; --code-line:#e2e8ee;
+    --accent:#2f6f9f; --accent-bg:#eef4f9;
+    --warn:#b4661a; --warn-bg:#fbf4ea;
+    --ok:#3d7a52; --ok-bg:#eef5f0;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Noto Sans JP","Meiryo",sans-serif;
+    font-size:16px; line-height:1.95; font-feature-settings:"palt" 1;
+  }
+  .page{max-width:47rem; margin:0 auto; padding:3.5rem 1.6rem 6rem}
+  .chap-no{font-size:.8rem; letter-spacing:.22em; color:var(--accent); font-weight:700; margin:0 0 .5rem}
+  h1{font-size:1.85rem; line-height:1.5; margin:0 0 .6rem; letter-spacing:.01em}
+  .lede{color:var(--sub); font-size:1rem; margin:0 0 2.2rem; padding-bottom:1.6rem; border-bottom:2px solid var(--ink)}
+  h2{font-size:1.28rem; margin:3rem 0 1rem; padding-left:.7rem; border-left:4px solid var(--accent); line-height:1.6}
+  h3{font-size:1.05rem; margin:2.2rem 0 .7rem; color:var(--ink)}
+  h3::before{content:"◆ "; color:var(--accent); font-size:.8em}
+  p{margin:0 0 1.1rem}
+  ul,ol{margin:0 0 1.2rem; padding-left:1.6rem}
+  li{margin:.35rem 0}
+  code{font-family:"Cascadia Mono","Consolas","SFMono-Regular",monospace; font-size:.9em;
+       background:var(--code-bg); border:1px solid var(--code-line); border-radius:4px; padding:.08em .35em}
+  pre{background:var(--code-bg); border:1px solid var(--code-line); border-radius:8px;
+      padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.7}
+  pre code{background:none; border:none; padding:0; font-size:.86rem}
+  pre.term{background:#1f2933; border-color:#1f2933; color:#e6edf3}
+  pre.term code{color:#e6edf3}
+  pre.term .p{color:#7fb2d6}
+  pre.term .o{color:#9fb3c0}
+  pre.term .w{color:#e8b075}
+  .cap{font-size:.82rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+  figure{margin:2rem 0 2.2rem}
+  figure svg{display:block; width:100%; height:auto; border:1px solid var(--line); border-radius:8px; background:#fff}
+  figcaption{font-size:.85rem; color:var(--sub); margin-top:.6rem}
+  figcaption b{color:var(--ink)}
+  .box{border-radius:8px; padding:1rem 1.2rem; margin:1.6rem 0; font-size:.94rem}
+  .box p:last-child{margin-bottom:0}
+  .box .t{font-weight:700; display:block; margin-bottom:.35rem; font-size:.88rem; letter-spacing:.04em}
+  .note{background:var(--accent-bg); border-left:4px solid var(--accent)}
+  .note .t{color:var(--accent)}
+  .warn{background:var(--warn-bg); border-left:4px solid var(--warn)}
+  .warn .t{color:var(--warn)}
+  .tip{background:var(--ok-bg); border-left:4px solid var(--ok)}
+  .tip .t{color:var(--ok)}
+  .hands{border:1px solid var(--line); border-radius:10px; margin:2rem 0; overflow:hidden}
+  .hands>.hd{background:var(--ink); color:#fff; padding:.55rem 1.1rem; font-size:.85rem; letter-spacing:.1em; font-weight:700}
+  .hands>.bd{padding:1.3rem 1.3rem .4rem}
+  .hands ol{counter-reset:step; list-style:none; padding-left:0}
+  .hands ol>li{counter-increment:step; position:relative; padding-left:2.4rem; margin:0 0 1.2rem}
+  .hands ol>li::before{content:counter(step); position:absolute; left:0; top:.25rem;
+    width:1.7rem; height:1.7rem; border-radius:50%; background:var(--accent); color:#fff;
+    font-size:.82rem; font-weight:700; display:flex; align-items:center; justify-content:center; line-height:1}
+  table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+  th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+  th{background:var(--code-bg); font-weight:700}
+  .summary{border:2px solid var(--ink); border-radius:10px; padding:1.3rem 1.5rem; margin:3rem 0 1rem}
+  .summary h2{margin:0 0 .8rem; border:none; padding:0; font-size:1.1rem}
+  .summary ul{margin-bottom:0}
+  .next{color:var(--sub); font-size:.94rem; border-top:1px solid var(--line); padding-top:1.2rem; margin-top:2.5rem}
+  @media (max-width:600px){ body{font-size:15px} .page{padding:2.2rem 1.1rem 4rem} h1{font-size:1.5rem} }
+</style>
+</head>
+<body>
+<div class="page">
+
+<p class="chap-no">第 5 章</p>
+<h1>はじめての Clang-Tidy 実行</h1>
+<p class="lede">準備が終わりました。この章で初めて解析を走らせます。ただし素直には成功しません。Clang-Tidy は <strong>既定でチェックが1つも有効になっていない</strong> ため、何もしないと「警告0件」という無意味な結果が返ってきます。この罠を意図的に踏んでから、確実に警告が出る状態を作り、警告の読み方を身につけます。</p>
+
+<h2>5.1 プロパティページのどこにあるか</h2>
+
+<p><code>TidyLab</code> プロジェクトのプロパティを開きます。Clang-Tidy に関わる設定は2つのページに分かれています。</p>
+
+<figure>
+<svg viewBox="0 0 760 420" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Visual Studio のプロパティページにおける Clang-Tidy 関連項目の位置">
+  <g font-family="sans-serif">
+  <rect x="24" y="16" width="712" height="388" rx="10" fill="#fafbfc" stroke="#d8dee4"/>
+  <text x="44" y="44" font-size="12.5" font-weight="bold" fill="#5a6b7a" letter-spacing="1.5">TidyLab プロパティ ページ</text>
+
+  <!-- tree -->
+  <text x="44" y="76" font-size="12.5" fill="#1f2933" font-weight="bold">構成プロパティ</text>
+  <text x="64" y="100" font-size="12.5" fill="#5a6b7a">├─ 全般</text>
+  <text x="64" y="122" font-size="12.5" fill="#5a6b7a">├─ C/C++</text>
+  <text x="84" y="144" font-size="12" fill="#5a6b7a">└─ 言語 &gt; C++ 言語標準 … /std:c++23preview（第3章）</text>
+  <text x="64" y="168" font-size="12.5" fill="#1f2933" font-weight="bold">└─ コード分析</text>
+
+  <!-- page 1 -->
+  <rect x="96" y="182" width="300" height="112" rx="8" fill="#eef4f9" stroke="#2f6f9f" stroke-width="1.8"/>
+  <text x="114" y="206" font-size="13" font-weight="bold" fill="#2f6f9f">├─ 全般</text>
+  <text x="114" y="230" font-size="11.5" fill="#1f2933">☐ ビルドに対するコード分析を有効にする</text>
+  <text x="114" y="252" font-size="11.5" fill="#1f2933">☐ Microsoft コード分析を有効にする</text>
+  <rect x="108" y="260" width="276" height="26" rx="4" fill="#2f6f9f"/>
+  <text x="120" y="278" font-size="11.5" fill="#fff" font-weight="bold">☑ Clang-Tidy を有効にする ← ここ</text>
+
+  <!-- page 2 -->
+  <rect x="420" y="182" width="300" height="200" rx="8" fill="#fbf4ea" stroke="#b4661a" stroke-width="2.2"/>
+  <text x="438" y="206" font-size="13" font-weight="bold" fill="#b4661a">└─ Clang-Tidy</text>
+
+  <rect x="432" y="216" width="276" height="30" rx="4" fill="#b4661a"/>
+  <text x="444" y="236" font-size="11.5" fill="#fff" font-weight="bold">Clang-Tidy チェック ← 本章の主役</text>
+
+  <text x="444" y="266" font-size="11.5" fill="#1f2933">Clang-Tidy ツール ディレクトリ</text>
+  <text x="600" y="266" font-size="10.5" fill="#5a6b7a">（第4章）</text>
+
+  <text x="444" y="290" font-size="11.5" fill="#1f2933">Clang-Tidy 追加オプション</text>
+  <text x="600" y="290" font-size="10.5" fill="#5a6b7a">（第12章）</text>
+
+  <text x="444" y="314" font-size="11.5" fill="#1f2933">Clang-Tidy 事前追加オプション</text>
+  <text x="600" y="314" font-size="10.5" fill="#5a6b7a">（第12章）</text>
+
+  <text x="444" y="338" font-size="11.5" fill="#1f2933">プロセスの最大数</text>
+  <text x="600" y="338" font-size="10.5" fill="#5a6b7a">（第13章）</text>
+
+  <text x="438" y="368" font-size="11" fill="#b4661a" font-weight="bold">既定値は空 → チェック0件で走る</text>
+
+  <path d="M396,238 L420,238" fill="none" stroke="#5a6b7a" stroke-width="1.5"/>
+  </g>
+</svg>
+<figcaption><b>図5-1</b>　プロパティページ上の Clang-Tidy 関連項目。「有効にする」は［全般］、「何を実行するか」は［Clang-Tidy］と、2ページに分かれている点に注意。</figcaption>
+</figure>
+
+<h2>5.2 最初の罠 ── 既定ではチェックが0件</h2>
+
+<p>「Clang-Tidy を有効にする」にチェックを入れてビルドしてみてください。おそらく何も起きません。</p>
+
+<p>これは故障ではなく仕様です。<strong>Clang-Tidy は既定でどのチェックも有効にしません。</strong> 数百あるチェックには互いに矛盾するものも、特定のプロジェクトにしか意味のないものも含まれるため、「まず何も有効にしない」が出発点になっています。</p>
+
+<p>したがって、有効にすべきチェックを自分で指定する必要があります。Microsoft の公式ドキュメントも、出発点として <code>clang-analyzer-*</code> を推奨しています。</p>
+
+<div class="warn">
+<span class="t">「警告0件」の三つの意味</span>
+<p>解析結果が空だったとき、可能性は3つあります。<strong>この区別ができないと、ずっと動いていないツールを信頼し続けることになります。</strong></p>
+<ul style="margin-top:.5rem">
+  <li>本当に問題がない</li>
+  <li>チェックが1つも有効になっていない（本節）</li>
+  <li>clang-tidy 実行ファイル自体が見つかっていない、あるいはパースに失敗した（第4章の図4-3、第2章の 2.5 節）</li>
+</ul>
+</div>
+
+<h3>だから最初は「必ず出る警告」で確かめる</h3>
+
+<p>ツールが動いていることを先に証明します。ソフトウェアのテストでいう <strong>スモークテスト</strong> です。次のような、疑いようのないコードを1本用意します。</p>
+
+<pre><code>// samples/ch05_first_run.cpp
+#include &lt;cstddef&gt;
+
+void smoke_test() {
+    int* p = NULL;        // ← modernize-use-nullptr が必ず反応する
+    (void)p;
+
+    char* buf = new char[16];
+    delete buf;           // ← new[] に delete。cppcoreguidelines 系が反応する
+}</code></pre>
+<p class="cap">リスト5-1　解析が走っていることを確認するためのスモークテスト用コード</p>
+
+<p><code>NULL</code> を <code>nullptr</code> に直すべき、という指摘は <code>modernize-use-nullptr</code> が確実に出します。フロー解析も型の複雑な推論も要らない、単純な形の照合だからです（第2章の①方式）。<strong>これが出なければ、環境の問題です。</strong></p>
+
+<h2>5.3 解析はいつ走り、結果はどこに出るか</h2>
+
+<figure>
+<svg viewBox="0 0 760 380" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Clang-Tidy が実行されるタイミングと結果の表示先">
+  <defs>
+    <marker id="f" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5a6b7a"/>
+    </marker>
+  </defs>
+  <g font-family="sans-serif">
+
+  <text x="30" y="28" font-size="12.5" font-weight="bold" fill="#5a6b7a" letter-spacing="1.5">実行タイミング</text>
+  <line x1="30" y1="38" x2="730" y2="38" stroke="#d8dee4"/>
+
+  <rect x="30" y="54" width="200" height="70" rx="8" fill="#1f2933"/>
+  <text x="130" y="80" text-anchor="middle" fill="#fff" font-size="13" font-weight="bold">ビルド</text>
+  <text x="130" y="100" text-anchor="middle" fill="#b8c4cd" font-size="11">MSVC がコンパイル</text>
+  <text x="130" y="116" text-anchor="middle" fill="#b8c4cd" font-size="11">成功したファイルのみ次へ</text>
+
+  <line x1="230" y1="89" x2="272" y2="89" stroke="#5a6b7a" stroke-width="1.6" marker-end="url(#f)"/>
+  <text x="251" y="80" text-anchor="middle" font-size="10" fill="#5a6b7a">成功</text>
+
+  <rect x="278" y="54" width="200" height="70" rx="8" fill="#b4661a"/>
+  <text x="378" y="80" text-anchor="middle" fill="#fff" font-size="13" font-weight="bold">Clang-Tidy 解析</text>
+  <text x="378" y="100" text-anchor="middle" fill="#fde9d0" font-size="11">Clang が改めてパース</text>
+  <text x="378" y="116" text-anchor="middle" fill="#fde9d0" font-size="11">→ AST → チェック実行</text>
+
+  <line x1="478" y1="89" x2="520" y2="89" stroke="#5a6b7a" stroke-width="1.6" marker-end="url(#f)"/>
+
+  <rect x="526" y="54" width="204" height="70" rx="8" fill="#2f6f9f"/>
+  <text x="628" y="88" text-anchor="middle" fill="#fff" font-size="13" font-weight="bold">診断の出力</text>
+  <text x="628" y="108" text-anchor="middle" fill="#d6e6f2" font-size="11">警告として IDE に反映</text>
+
+  <path d="M130,124 L130,150 L378,150" fill="none" stroke="#5a6b7a" stroke-width="1.4" stroke-dasharray="4 3"/>
+  <text x="200" y="145" font-size="10.5" fill="#b4661a">コンパイルエラーがあると解析されない</text>
+
+  <text x="30" y="196" font-size="12.5" font-weight="bold" fill="#5a6b7a" letter-spacing="1.5">結果の表示先</text>
+  <line x1="30" y1="206" x2="730" y2="206" stroke="#d8dee4"/>
+
+  <rect x="30" y="222" width="222" height="96" rx="8" fill="#eef4f9" stroke="#2f6f9f" stroke-width="1.5"/>
+  <text x="141" y="248" text-anchor="middle" font-size="13" font-weight="bold" fill="#2f6f9f">エラー一覧</text>
+  <text x="46" y="272" font-size="11.5" fill="#1f2933">・警告として一覧表示</text>
+  <text x="46" y="292" font-size="11.5" fill="#1f2933">・「カテゴリ」列でソート可</text>
+  <text x="46" y="310" font-size="11" fill="#5a6b7a">→ チェック名で絞り込める</text>
+
+  <rect x="270" y="222" width="222" height="96" rx="8" fill="#fbf4ea" stroke="#b4661a" stroke-width="1.5"/>
+  <text x="381" y="248" text-anchor="middle" font-size="13" font-weight="bold" fill="#b4661a">エディタ内の波線</text>
+  <text x="286" y="272" font-size="11.5" fill="#1f2933">・該当箇所に直接表示</text>
+  <text x="286" y="292" font-size="11.5" fill="#1f2933">・クイックフィックスの起点</text>
+  <text x="286" y="310" font-size="11" fill="#5a6b7a">→ 第11章の自動修正へ</text>
+
+  <rect x="510" y="222" width="220" height="96" rx="8" fill="#eef5f0" stroke="#3d7a52" stroke-width="1.5"/>
+  <text x="620" y="248" text-anchor="middle" font-size="13" font-weight="bold" fill="#3d7a52">出力ウィンドウ</text>
+  <text x="526" y="272" font-size="11.5" fill="#1f2933">・実際のコマンドライン</text>
+  <text x="526" y="292" font-size="11.5" fill="#1f2933">・ツールのエラーメッセージ</text>
+  <text x="526" y="310" font-size="11" fill="#3d7a52" font-weight="bold">→ 動かないときはここを見る</text>
+
+  <rect x="30" y="336" width="700" height="34" rx="6" fill="#f4f6f8" stroke="#d8dee4"/>
+  <text x="380" y="358" text-anchor="middle" font-size="12" fill="#1f2933">エラー一覧が空のときは <tspan font-weight="bold">出力ウィンドウ</tspan> を確認する。起動失敗はそちらに出る</text>
+  </g>
+</svg>
+<figcaption><b>図5-2</b>　解析のタイミングと表示先。解析はコンパイル成功後に走るので、コンパイルエラーが残っているファイルは解析されない。</figcaption>
+</figure>
+
+<div class="note">
+<span class="t">バックグラウンド解析とビルド時解析</span>
+<p>Visual Studio は既定で、コード分析をバックグラウンドで実行します。ビルドしなくても、編集の区切りで解析が走って波線が付きます。一方［全般］の「<strong>ビルドに対するコード分析を有効にする</strong>」をオンにすると、ビルドのたびに解析が走り、警告がビルド出力に混ざります。CI に近い挙動を手元で再現したいときはこちらです。速度への影響は第13章で扱います。</p>
+</div>
+
+<h2>5.4 警告の読み方</h2>
+
+<p>Clang-Tidy の診断は決まった形をしています。コマンドラインで実行すると、次のように出ます。</p>
+
+<figure>
+<svg viewBox="0 0 760 230" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Clang-Tidy の診断メッセージの構成要素">
+  <g font-family="sans-serif">
+  <rect x="24" y="24" width="712" height="70" rx="8" fill="#1f2933"/>
+  <text x="44" y="56" font-size="13" font-family="monospace" fill="#e6edf3">
+    <tspan fill="#7fb2d6">config_loader.cpp</tspan><tspan fill="#9fb3c0">:</tspan><tspan fill="#a3d9a5">30</tspan><tspan fill="#9fb3c0">:</tspan><tspan fill="#a3d9a5">5</tspan><tspan fill="#9fb3c0">: </tspan><tspan fill="#e8b075">warning</tspan><tspan fill="#9fb3c0">: </tspan>
+  </text>
+  <text x="44" y="80" font-size="13" font-family="monospace" fill="#e6edf3">
+    <tspan fill="#e6edf3">'delete' applied to a pointer allocated with 'new[]' </tspan><tspan fill="#c9a3e0">[cppcoreguidelines-owning-memory]</tspan>
+  </text>
+
+  <line x1="60" y1="94" x2="60" y2="126" stroke="#2f6f9f" stroke-width="1.4"/>
+  <line x1="185" y1="94" x2="185" y2="150" stroke="#3d7a52" stroke-width="1.4"/>
+  <line x1="255" y1="94" x2="255" y2="174" stroke="#b4661a" stroke-width="1.4"/>
+  <line x1="300" y1="94" x2="300" y2="198" stroke="#5a6b7a" stroke-width="1.4"/>
+  <line x1="600" y1="94" x2="600" y2="222" stroke="#7d5a9c" stroke-width="1.4"/>
+
+  <text x="66" y="122" font-size="11.5" fill="#2f6f9f" font-weight="bold">① ファイル</text>
+  <text x="191" y="146" font-size="11.5" fill="#3d7a52" font-weight="bold">② 行:列</text>
+  <text x="261" y="170" font-size="11.5" fill="#b4661a" font-weight="bold">③ 深刻度（warning / note / error）</text>
+  <text x="306" y="194" font-size="11.5" fill="#5a6b7a" font-weight="bold">④ メッセージ本文</text>
+  <text x="606" y="218" font-size="11.5" fill="#7d5a9c" font-weight="bold">⑤ チェック名 ← 最も重要</text>
+  </g>
+</svg>
+<figcaption><b>図5-3</b>　診断メッセージの構成。末尾の角括弧に入っているチェック名が、有効化・抑制・調査すべてのキーになる。</figcaption>
+</figure>
+
+<p>実務で一番よく使うのは <strong>⑤ のチェック名</strong> です。この名前があれば、</p>
+
+<ul>
+  <li>公式ドキュメントで詳細と根拠を調べられる</li>
+  <li><code>-checks</code> でそのチェックだけを無効にできる（第6章）</li>
+  <li><code>// NOLINT(チェック名)</code> でその1箇所だけ抑制できる（第9章）</li>
+  <li>オプションでしきい値を変えられる（第8章）</li>
+</ul>
+
+<p>という具合に、次の行動がすべて決まります。<strong>警告を見たら、まずメッセージではなくチェック名を読む</strong> 癖をつけてください。</p>
+
+<h2>5.5 【ハンズオン】初めての解析を成功させる</h2>
+
+<div class="hands">
+<div class="hd">HANDS-ON 5-A　スモークテストで「走っていること」を証明する</div>
+<div class="bd">
+<ol>
+  <li><strong>スモークテスト用ファイルを追加する。</strong> <code>TidyLab</code> プロジェクトに <code>ch05_first_run.cpp</code> を追加し、リスト5-1 の内容にします。</li>
+
+  <li><strong>Clang-Tidy を有効にする。</strong> プロパティで
+    <code>構成プロパティ &gt; コード分析 &gt; 全般</code> を開き、
+    <strong>「Clang-Tidy を有効にする」を「はい」</strong> にします。</li>
+
+  <li><strong>チェックを1つだけ指定する。</strong>
+    <code>構成プロパティ &gt; コード分析 &gt; Clang-Tidy</code> の
+    <strong>「Clang-Tidy チェック」</strong> に次を入力します。
+<pre><code>modernize-use-nullptr</code></pre>
+    <span style="font-size:.92rem;color:#5a6b7a">最初はあえて1つに絞ります。大量に有効化してから動作確認をすると、切り分けができません。</span></li>
+
+  <li><strong>ビルドする。</strong> エラー一覧の「警告」タブを確認します。次のような警告が出れば成功です。
+<pre><code>use nullptr [modernize-use-nullptr]</code></pre>
+  </li>
+
+  <li><strong>出なかった場合の切り分け。</strong> 出力ウィンドウ（「ビルド」を選択）を開き、clang-tidy の起動に失敗していないか確認します。よくある原因は次のとおりです。
+    <ul>
+      <li>「Windows 用 C++ Clang ツール」が未インストール（第3章）</li>
+      <li>Clang-Tidy ツール ディレクトリの指定ミス（第4章）</li>
+      <li>設定した構成（Debug/Release、x64/x86）と、ビルドした構成が違う</li>
+      <li><code>.clang-tidy</code> に <code>Checks: '-*'</code> と書いたまま（第3章の手順8）で、それが優先されている</li>
+    </ul>
+  </li>
+</ol>
+</div>
+</div>
+
+<div class="warn">
+<span class="t">プロパティの設定と <code>.clang-tidy</code> がぶつかったら</span>
+<p>第3章でソリューション直下に置いた <code>.clang-tidy</code> には <code>Checks: '-*'</code>（全部無効）と書きました。プロパティ側の指定と設定ファイル側の指定は合成されるため、環境によっては打ち消し合って何も出なくなります。スモークテストが通らないときは、<strong>いったん <code>.clang-tidy</code> の中身を空にして</strong> 試してください。両者の優先順位は第7章で正確に扱います。</p>
+</div>
+
+<div class="hands">
+<div class="hd">HANDS-ON 5-B　題材コードに解析をかける</div>
+<div class="bd">
+<ol>
+  <li><strong>チェックを差し替える。</strong> 「Clang-Tidy チェック」を次のように変更します。
+<pre><code>clang-analyzer-*</code></pre>
+    これが Microsoft の推奨する出発点です。フロー解析（第2章の②方式）が有効になります。</li>
+
+  <li><strong>ビルドして待つ。</strong> フロー解析は AST マッチングより明確に遅いので、初回は時間がかかります。「解析はタダではない」という感覚をここで掴んでおいてください。</li>
+
+  <li><strong>警告を読む。</strong> <code>config_loader.cpp</code> に対して、<code>fopen</code> の戻り値を確認せずに使っている経路に関する指摘が出るはずです。エラー一覧の「カテゴリ」列でソートすると、チェック名ごとにまとまります。</li>
+
+  <li><strong>チェックを足す。</strong> 今度は次のように広げます。
+<pre><code>clang-analyzer-*,bugprone-*,performance-*</code></pre>
+    警告が一気に増えます。第1章の表に挙げた問題のうち、いくつが検出されたかを数えてください。</li>
+
+  <li><strong>数を記録する。</strong> このときの警告件数をメモしておきます。第2部でチェックを整理し、第4部で標準チェックを学び、第6部で自作チェックを足していく過程で、この数がどう変わるかを追いかけます。</li>
+</ol>
+</div>
+</div>
+
+<div class="tip">
+<span class="t">いきなり <code>*</code> を指定しないこと</span>
+<p><code>Clang-Tidy チェック</code> に <code>*</code> と書けば全チェックが有効になります。しかし実際にやると、数千件の警告が出て、互いに矛盾する指摘（「<code>auto</code> を使え」と「<code>auto</code> を使うな」が同時に出るなど）が並び、解析にも時間がかかり、結局誰も見なくなります。<strong>静的解析導入の最も一般的な失敗がこれです。</strong> 少数から始めて足していくのが正解で、その具体的な進め方は第22章と第39章で扱います。</p>
+</div>
+
+<h2>5.6 コマンドラインでも同じことをしてみる</h2>
+
+<p>IDE の中だけで完結させていると、うまく動かないときに手詰まりになります。同じ解析をコマンドラインからも実行できることを、この段階で見ておきます。</p>
+
+<pre class="term"><code><span class="p">&gt;</span> clang-tidy --checks=modernize-use-nullptr ch05_first_run.cpp -- -std=c++23
+<span class="w">ch05_first_run.cpp:5:14: warning:</span> <span class="o">use nullptr [modernize-use-nullptr]</span>
+<span class="o">    5 |     int* p = NULL;
+      |              ^~~~
+      |              nullptr</span></code></pre>
+
+<p><code>--</code> の後ろがコンパイラに渡す引数です。第3章の図3-2 で説明した「Clang 側にも規格を伝える」がここに現れています。<code>--</code> を書き忘れると、Clang-Tidy はコンパイルデータベースを探しに行って失敗します。この形の詳細は第12章で扱います。</p>
+
+<div class="note">
+<span class="t">IDE とコマンドラインは同じものを実行している</span>
+<p>Visual Studio の Clang-Tidy 統合は、内部でこの <code>clang-tidy.exe</code> を呼んでいるだけです。したがって、IDE で説明のつかない挙動に出会ったら、コマンドラインで再現して切り分けるのが定石になります。逆に、コマンドラインで確立した手順はそのまま CI に持っていけます（第40章）。</p>
+</div>
+
+<h2>5.7 ここまでで手に入ったもの</h2>
+
+<p>第1部が終わりました。現在の状態を確認します。</p>
+
+<table>
+<tr><th>できるようになったこと</th><th>まだできないこと</th></tr>
+<tr><td>Visual Studio 上で Clang-Tidy を動かせる</td><td>チェックを体系的に選べない（第2部）</td></tr>
+<tr><td>警告が「本当に走った結果」か切り分けられる</td><td>設定をファイルで共有できない（第7章）</td></tr>
+<tr><td>診断メッセージからチェック名を読める</td><td>個別の警告を抑制できない（第9章）</td></tr>
+<tr><td>コマンドラインでも同じ解析を再現できる</td><td>自分のルールを書けない（第6部）</td></tr>
+</table>
+
+<p>次の第2部では、プロパティに直接書いていたチェック指定を <code>.clang-tidy</code> ファイルに移し、オプションで挙動を調整し、必要な箇所だけ抑制する ── つまり「Clang-Tidy を実運用に耐える形に整える」作業に入ります。</p>
+
+<div class="summary">
+<h2>この章のまとめ</h2>
+<ul>
+  <li>Clang-Tidy は <strong>既定でチェックを1つも有効にしない</strong>。有効化しただけでは何も起こらない。</li>
+  <li>「警告0件」には3つの意味がある。本当に問題がない／チェックが空／ツールが動いていない。まず <code>modernize-use-nullptr</code> のような確実に出るチェックでスモークテストする。</li>
+  <li>解析はコンパイル成功後に走る。結果はエラー一覧・波線・出力ウィンドウの3か所に出る。動かないときは出力ウィンドウを見る。</li>
+  <li>診断は <code>ファイル:行:列: warning: メッセージ [チェック名]</code> の形。<strong>チェック名がすべての起点</strong>。</li>
+  <li>出発点としては <code>clang-analyzer-*</code>。いきなり <code>*</code> を指定してはいけない。</li>
+  <li>IDE の解析は内部で <code>clang-tidy.exe</code> を呼んでいるだけなので、コマンドラインで再現・切り分けができる。</li>
+</ul>
+</div>
+
+<p class="next"><strong>次章：</strong> 第2部に入ります。第6章「チェック名の読み方」では、<code>bugprone-*</code> のようなワイルドカード指定と <code>-</code> による除外を組み合わせて、チェックセットを自在に組み立てられるようにします。</p>
+
+</div>
+</body>
+</html>

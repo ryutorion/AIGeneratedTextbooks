@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第32章 実践1：禁止 API を検出する ─ Clang-Tidy入門</title>
+<style>
+  :root{
+    --ink:#1f2933; --sub:#5a6b7a; --line:#d8dee4; --bg:#ffffff;
+    --code-bg:#f6f8fa; --code-line:#e2e8ee;
+    --accent:#2f6f9f; --accent-bg:#eef4f9;
+    --warn:#b4661a; --warn-bg:#fbf4ea;
+    --ok:#3d7a52; --ok-bg:#eef5f0;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0; background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Noto Sans JP","Meiryo",sans-serif;
+    font-size:16px; line-height:1.95; font-feature-settings:"palt" 1;}
+  .page{max-width:47rem; margin:0 auto; padding:3.5rem 1.6rem 6rem}
+  .chap-no{font-size:.8rem; letter-spacing:.22em; color:var(--accent); font-weight:700; margin:0 0 .5rem}
+  h1{font-size:1.85rem; line-height:1.5; margin:0 0 .6rem; letter-spacing:.01em}
+  .lede{color:var(--sub); font-size:1rem; margin:0 0 2.2rem; padding-bottom:1.6rem; border-bottom:2px solid var(--ink)}
+  h2{font-size:1.28rem; margin:3rem 0 1rem; padding-left:.7rem; border-left:4px solid var(--accent); line-height:1.6}
+  h3{font-size:1.05rem; margin:2.2rem 0 .7rem}
+  h3::before{content:"◆ "; color:var(--accent); font-size:.8em}
+  p{margin:0 0 1.1rem}
+  ul,ol{margin:0 0 1.2rem; padding-left:1.6rem}
+  li{margin:.35rem 0}
+  code{font-family:"Cascadia Mono","Consolas","SFMono-Regular",monospace; font-size:.9em;
+       background:var(--code-bg); border:1px solid var(--code-line); border-radius:4px; padding:.08em .35em}
+  pre{background:var(--code-bg); border:1px solid var(--code-line); border-radius:8px;
+      padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.7}
+  pre code{background:none; border:none; padding:0; font-size:.86rem}
+  pre.term{background:#1f2933; border-color:#1f2933; color:#e6edf3}
+  pre.term code{color:#e6edf3}
+  pre.term .p{color:#7fb2d6}
+  pre.term .o{color:#9fb3c0}
+  pre.term .e{color:#e08a74}
+  .cap{font-size:.82rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+  figure{margin:2rem 0 2.2rem}
+  figure svg{display:block; width:100%; height:auto; border:1px solid var(--line); border-radius:8px; background:#fff}
+  figcaption{font-size:.85rem; color:var(--sub); margin-top:.6rem}
+  figcaption b{color:var(--ink)}
+  .box{border-radius:8px; padding:1rem 1.2rem; margin:1.6rem 0; font-size:.94rem}
+  .box p:last-child{margin-bottom:0}
+  .box .t{font-weight:700; display:block; margin-bottom:.35rem; font-size:.88rem; letter-spacing:.04em}
+  .note{background:var(--accent-bg); border-left:4px solid var(--accent)} .note .t{color:var(--accent)}
+  .warn{background:var(--warn-bg); border-left:4px solid var(--warn)} .warn .t{color:var(--warn)}
+  .tip{background:var(--ok-bg); border-left:4px solid var(--ok)} .tip .t{color:var(--ok)}
+  .hands{border:1px solid var(--line); border-radius:10px; margin:2rem 0; overflow:hidden}
+  .hands>.hd{background:var(--ink); color:#fff; padding:.55rem 1.1rem; font-size:.85rem; letter-spacing:.1em; font-weight:700}
+  .hands>.bd{padding:1.3rem 1.3rem .4rem}
+  .hands ol{counter-reset:step; list-style:none; padding-left:0}
+  .hands ol>li{counter-increment:step; position:relative; padding-left:2.4rem; margin:0 0 1.2rem}
+  .hands ol>li::before{content:counter(step); position:absolute; left:0; top:.25rem;
+    width:1.7rem; height:1.7rem; border-radius:50%; background:var(--accent); color:#fff;
+    font-size:.82rem; font-weight:700; display:flex; align-items:center; justify-content:center; line-height:1}
+  table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+  th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+  th{background:var(--code-bg); font-weight:700}
+  .summary{border:2px solid var(--ink); border-radius:10px; padding:1.3rem 1.5rem; margin:3rem 0 1rem}
+  .summary h2{margin:0 0 .8rem; border:none; padding:0; font-size:1.1rem}
+  .summary ul{margin-bottom:0}
+  .next{color:var(--sub); font-size:.94rem; border-top:1px solid var(--line); padding-top:1.2rem; margin-top:2.5rem}
+  @media (max-width:600px){ body{font-size:15px} .page{padding:2.2rem 1.1rem 4rem} h1{font-size:1.5rem} }
+</style>
+</head>
+<body>
+<div class="page">
+
+<p class="chap-no">第 32 章</p>
+<h1>実践1：禁止 API を検出する</h1>
+<p class="lede">ここから4章にわたって実践編です。最初は「使ってはいけない関数を検出する」── カスタムチェックの需要として最も多いパターンです。単純に見えますが、実運用に耐える形にするには <strong>除外の設計と、移行の設計</strong>が要ります。作りながら、その二つを身につけます。</p>
+
+<h2>32.1 要件を定義する</h2>
+
+<p>いきなりクエリを書きません。<strong>何を検出したいのかを言葉で確定させてから</strong>始めます。</p>
+
+<figure>
+<svg viewBox="0 0 760 330" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="要件から設定ファイルへの流れ">
+  <defs>
+    <marker id="a32" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5a6b7a"/>
+    </marker>
+  </defs>
+  <g font-family="sans-serif">
+
+  <rect x="24" y="20" width="712" height="34" rx="8" fill="#1f2933"/>
+  <text x="380" y="43" text-anchor="middle" fill="#fff" font-size="13" font-weight="bold">クエリを書く前に埋める4つの欄</text>
+
+  <g font-size="11.5">
+  <rect x="24" y="66" width="712" height="46" rx="6" fill="#eef4f9" stroke="#2f6f9f"/>
+  <text x="44" y="86" fill="#2f6f9f" font-weight="bold">① 何を禁止するか</text>
+  <text x="230" y="86" fill="#1f2933" font-family="monospace">strcpy / strcat / sprintf / gets</text>
+  <text x="44" y="104" fill="#5a6b7a" font-size="10.5">名前を列挙できるか、パターンで表せるか</text>
+
+  <rect x="24" y="120" width="712" height="46" rx="6" fill="#fbf4ea" stroke="#b4661a"/>
+  <text x="44" y="140" fill="#b4661a" font-weight="bold">② 代わりに何を使うか</text>
+  <text x="230" y="140" fill="#1f2933" font-family="monospace">util::SafeCopy() / std::format</text>
+  <text x="44" y="158" fill="#5a6b7a" font-size="10.5">これがメッセージの中身になる。決まっていないなら、まずそれを決める</text>
+
+  <rect x="24" y="174" width="712" height="46" rx="6" fill="#eef5f0" stroke="#3d7a52"/>
+  <text x="44" y="194" fill="#3d7a52" font-weight="bold">③ 例外はあるか</text>
+  <text x="230" y="194" fill="#1f2933">third_party / 生成コード / テストコード / 移行猶予中のモジュール</text>
+  <text x="44" y="212" fill="#5a6b7a" font-size="10.5">除外条件の設計。ここを詰めないと運用で破綻する</text>
+
+  <rect x="24" y="228" width="712" height="46" rx="6" fill="#f7e9e5" stroke="#a04a34"/>
+  <text x="44" y="248" fill="#a04a34" font-weight="bold">④ 既存コードに何件あるか</text>
+  <text x="270" y="248" fill="#1f2933">clang-query で数える</text>
+  <text x="44" y="266" fill="#5a6b7a" font-size="10.5">0〜数件なら即 Tier 1、大量なら Tier 2（差分のみ）から（第22章）</text>
+  </g>
+
+  <line x1="380" y1="280" x2="380" y2="296" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#a32)"/>
+  <rect x="230" y="300" width="300" height="26" rx="6" fill="#2f6f9f"/>
+  <text x="380" y="318" text-anchor="middle" fill="#fff" font-size="11.5" font-weight="bold">ここまで決まって、初めてクエリを書く</text>
+  </g>
+</svg>
+<figcaption><b>図32-1</b>　要件定義。<strong>②が決まっていないルールは導入してはいけません。</strong>「使うな」だけ言われても、開発者は手が止まります。</figcaption>
+</figure>
+
+<h2>32.2 段階的に作る</h2>
+
+<p>第25章の「広いところから絞る」を、そのまま実践します。各段階で件数を記録してください。</p>
+
+<h3>v1：名前で捕まえる</h3>
+
+<pre><code>match callExpr(
+  callee(functionDecl(hasAnyName("strcpy", "strcat", "sprintf")))
+).bind("call")</code></pre>
+
+<p>まず動くことを確認します。この時点では件数が多すぎるはずです。</p>
+
+<h3>v2：完全修飾で絞る</h3>
+
+<pre><code>match callExpr(
+  callee(functionDecl(hasAnyName("::strcpy", "::strcat", "::sprintf")))
+).bind("call")</code></pre>
+
+<p><code>::</code> を付けて、グローバル名前空間の関数に限定します（第27章）。自作の <code>MyString::strcpy</code> のようなメンバ関数を巻き込まなくなります。</p>
+
+<h3>v3：解析対象を絞る</h3>
+
+<pre><code>match callExpr(
+  callee(functionDecl(hasAnyName("::strcpy", "::strcat", "::sprintf"))),
+  isExpansionInMainFile()
+).bind("call")</code></pre>
+
+<p>ヘッダ由来を除外します。ヘッダ内のコードも検査したい場合は、これを外して <code>HeaderFilterRegex</code> 側で制御します（第10章）。</p>
+
+<h3>v4：例外を除外する</h3>
+
+<pre><code>match callExpr(
+  callee(functionDecl(hasAnyName("::strcpy", "::strcat", "::sprintf"))),
+  isExpansionInMainFile(),
+  unless(hasAncestor(functionDecl(matchesName("^::.*[Tt]est"))))
+).bind("call")</code></pre>
+
+<p>テスト関数の中を除外します。<strong>ただし、この方法には限界があります。</strong></p>
+
+<div class="warn">
+<span class="t">除外はクエリでやるべきか、設定でやるべきか</span>
+<p>「テストコードを除外」は、クエリの条件（<code>unless(hasAncestor(...))</code>）でも、ディレクトリ単位の設定（第7章の <code>InheritParentConfig</code>）でも実現できます。<strong>後者を優先してください。</strong></p>
+<ul style="margin-top:.5rem">
+  <li>クエリでやると、除外条件がチェックごとに散らばる</li>
+  <li>設定ファイルでやると、<code>tests/.clang-tidy</code> の1か所で全チェックに効く</li>
+  <li>命名規約に依存した除外（<code>matchesName("Test")</code>）は、命名が変わると壊れる</li>
+</ul>
+<p style="margin-top:.5rem">クエリでの除外は、<strong>ディレクトリでは分けられない例外</strong>（「この関数の中だけは許す」など）に限定するのが健全です。</p>
+</div>
+
+<figure>
+<svg viewBox="0 0 760 280" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="段階的な絞り込みの件数推移">
+  <g font-family="sans-serif">
+
+  <text x="30" y="28" font-size="12.5" font-weight="bold" fill="#5a6b7a" letter-spacing="1.5">各段階で件数を記録する</text>
+
+  <g font-size="11.5">
+  <rect x="30" y="44" width="90" height="30" rx="5" fill="#2f6f9f"/>
+  <text x="75" y="64" text-anchor="middle" fill="#fff" font-weight="bold">v1</text>
+  <rect x="128" y="44" width="470" height="30" rx="5" fill="#eef4f9" stroke="#2f6f9f"/>
+  <text x="144" y="64" fill="#1f2933">名前で捕まえる</text>
+  <rect x="608" y="44" width="122" height="30" rx="5" fill="#fff" stroke="#2f6f9f"/>
+  <text x="669" y="64" text-anchor="middle" fill="#2f6f9f" font-weight="bold">47 件</text>
+
+  <rect x="30" y="82" width="90" height="30" rx="5" fill="#2f6f9f"/>
+  <text x="75" y="102" text-anchor="middle" fill="#fff" font-weight="bold">v2</text>
+  <rect x="128" y="82" width="470" height="30" rx="5" fill="#eef4f9" stroke="#2f6f9f"/>
+  <text x="144" y="102" fill="#1f2933">完全修飾（<tspan font-family="monospace">::</tspan>）で絞る</text>
+  <rect x="608" y="82" width="122" height="30" rx="5" fill="#fff" stroke="#2f6f9f"/>
+  <text x="669" y="102" text-anchor="middle" fill="#2f6f9f" font-weight="bold">41 件</text>
+
+  <rect x="30" y="120" width="90" height="30" rx="5" fill="#b4661a"/>
+  <text x="75" y="140" text-anchor="middle" fill="#fff" font-weight="bold">v3</text>
+  <rect x="128" y="120" width="470" height="30" rx="5" fill="#fbf4ea" stroke="#b4661a"/>
+  <text x="144" y="140" fill="#1f2933">ヘッダを除外</text>
+  <rect x="608" y="120" width="122" height="30" rx="5" fill="#fff" stroke="#b4661a"/>
+  <text x="669" y="140" text-anchor="middle" fill="#b4661a" font-weight="bold">23 件</text>
+
+  <rect x="30" y="158" width="90" height="30" rx="5" fill="#3d7a52"/>
+  <text x="75" y="178" text-anchor="middle" fill="#fff" font-weight="bold">v4</text>
+  <rect x="128" y="158" width="470" height="30" rx="5" fill="#eef5f0" stroke="#3d7a52"/>
+  <text x="144" y="178" fill="#1f2933">third_party・テストをディレクトリ設定で除外</text>
+  <rect x="608" y="158" width="122" height="30" rx="5" fill="#fff" stroke="#3d7a52"/>
+  <text x="669" y="178" text-anchor="middle" fill="#3d7a52" font-weight="bold">9 件</text>
+  </g>
+
+  <rect x="30" y="200" width="700" height="66" rx="8" fill="#1f2933"/>
+  <text x="52" y="224" font-size="12" font-weight="bold" fill="#e8b075">9 件なら Tier 1（常時警告）にできる</text>
+  <text x="52" y="246" font-size="11.5" fill="#cfd8de">これが 300 件だったら Tier 2（差分のみ）から始める。<tspan fill="#fff" font-weight="bold">件数が Tier を決める（第22章）</tspan></text>
+  <text x="52" y="262" font-size="11" fill="#9fb3c0">「除外して 9 件にした」のか「見えなくして 9 件にした」のかは、自分で区別すること</text>
+  </g>
+</svg>
+<figcaption><b>図32-2</b>　件数の推移。除外を重ねるたびに、<strong>検出したい実例が消えていないか</strong>を確認する（第28章 28.7 節）。</figcaption>
+</figure>
+
+<h2>32.3 メッセージを完成させる</h2>
+
+<p>禁止 API のチェックでは、<strong>代替 API ごとにチェックを分ける</strong>のが有効です。メッセージを具体的にできるからです。</p>
+
+<pre><code>CustomChecks:
+  # 文字列コピー系
+  - Name: no-unsafe-string-copy
+    Query: |
+      match callExpr(
+        callee(functionDecl(hasAnyName("::strcpy", "::strcat", "::wcscpy", "::wcscat"))),
+        isExpansionInMainFile()
+      ).bind("call")
+    Diagnostic:
+      - BindName: call
+        Message: "境界チェックのない文字列コピーは禁止です。util::SafeCopy() を使ってください"
+        Level: Warning
+
+  # 書式出力系
+  - Name: no-unsafe-format
+    Query: |
+      match callExpr(
+        callee(functionDecl(hasAnyName("::sprintf", "::vsprintf", "::swprintf"))),
+        isExpansionInMainFile()
+      ).bind("call")
+    Diagnostic:
+      - BindName: call
+        Message: "sprintf 系は禁止です。std::format または std::print を使ってください（C++23）"
+        Level: Warning</code></pre>
+
+<div class="tip">
+<span class="t">チェックを分ける三つの利点</span>
+<ul style="margin-top:.4rem">
+  <li><strong>メッセージが具体的になる</strong>：代替 API を名指しできる</li>
+  <li><strong>段階導入ができる</strong>：文字列コピーは Tier 1、書式出力は Tier 2、といった配置が可能</li>
+  <li><strong>抑制が細かくできる</strong>：<code>NOLINT(custom-no-unsafe-format)</code> で片方だけ許可できる</li>
+</ul>
+</div>
+
+<h2>32.4 Windows 固有の事情</h2>
+
+<p>Windows の C++ コードでは、次の点に注意が必要です。</p>
+
+<table>
+<tr><th>事情</th><th>対処</th></tr>
+<tr><td>Microsoft の安全版（<code>strcpy_s</code> など）がある</td><td>それを推奨するなら、メッセージに書く。禁止リストには入れない</td></tr>
+<tr><td><code>TCHAR</code> 系マクロ（<code>_tcscpy</code>）</td><td>マクロは展開後の名前（<code>strcpy</code> / <code>wcscpy</code>）で AST に現れる。<strong>展開後の名前で捕まる</strong></td></tr>
+<tr><td>Windows SDK のヘッダが大量の関数を宣言している</td><td><code>isExpansionInMainFile()</code> やヘッダフィルタで除外（第10章）</td></tr>
+<tr><td>C4996（非推奨警告）が既に出ている</td><td>重複する。コンパイラ警告と自作チェックのどちらを正とするか決める</td></tr>
+</table>
+
+<div class="note">
+<span class="t">マクロ経由の呼び出し</span>
+<p><code>_tcscpy(a, b)</code> は、ビルド設定に応じて <code>strcpy</code> または <code>wcscpy</code> に展開されます。AST には展開後の姿が現れるので、<strong>クエリは展開後の名前で書きます。</strong> 一方、警告が出る位置はマクロの使用箇所か定義箇所かで変わりえます（第9章 9.3 節）。<code>NOLINT</code> が効かないときは、この点を疑ってください。</p>
+</div>
+
+<h2>32.5 【ハンズオン】実運用に耐える形まで作る</h2>
+
+<div class="hands">
+<div class="hd">HANDS-ON 32　禁止 API チェックを完成させる</div>
+<div class="bd">
+<ol>
+  <li><strong>要件を書く。</strong> 図32-1 の4欄を、<code>docs\clang-tidy-decisions.md</code>（第22章）に追記する形で埋めます。
+<pre><code>## custom-no-unsafe-string-copy
+- 禁止: strcpy, strcat, wcscpy, wcscat
+- 代替: util::SafeCopy()
+- 例外: third_party/ 配下、tests/ 配下
+- 既存件数: （手順3で記録）</code></pre>
+  </li>
+
+  <li><strong>検証ファイルを充実させる。</strong> <code>tests\custom-checks\unsafe-api.cpp</code> を作り、<strong>検出されるべき例と、されるべきでない例を両方</strong>入れます。
+<pre><code>#include &lt;cstring&gt;
+#include &lt;cstdio&gt;
+
+namespace util { void SafeCopy(char*, const char*, size_t); }
+
+struct MyString {
+    static void strcpy(char* d, const char* s) {}   // 同名の自作関数（検出しない）
+};
+
+void bad(char* d, const char* s) {
+    strcpy(d, s);                    // 検出する
+    strcat(d, s);                    // 検出する
+    sprintf(d, "%s", s);             // 検出する（別チェック）
+}
+
+void good(char* d, const char* s, size_t n) {
+    util::SafeCopy(d, s, n);         // 検出しない
+    strncpy(d, s, n);                // 検出しない
+    MyString::strcpy(d, s);          // 検出しない ← v2 の効果
+}</code></pre>
+  </li>
+
+  <li><strong>v1 から順に作る。</strong> <code>clang-query</code> で v1 → v2 → v3 を実行し、<strong>各段階の件数を記録</strong>します。特に v1 と v2 の間で <code>MyString::strcpy</code> が消えることを確認してください。</li>
+
+  <li><strong>設定ファイルに移す。</strong> 32.3 節の内容を <code>.clang-tidy</code> に書きます。2つのチェックに分けてください。</li>
+
+  <li><strong>件数を突き合わせる。</strong>
+<pre><code>clang-tidy --experimental-custom-checks unsafe-api.cpp -- -std=c++23</code></pre>
+    <code>clang-query</code> での件数と一致することを確認します。</li>
+
+  <li><strong>ディレクトリ単位の除外を作る。</strong> <code>tests\.clang-tidy</code> を作り、カスタムチェックを無効にします。
+<pre><code>InheritParentConfig: true
+Checks: '-custom-no-unsafe-string-copy,-custom-no-unsafe-format'</code></pre>
+    <strong>クエリの条件ではなく設定で除外する</strong>という 32.2 節 v4 の方針の実装です。ただし今回の検証ファイルは <code>tests\</code> 配下にあるので、確認のときは一時的に外してください。</li>
+
+  <li><strong>抑制の粒度を確認する。</strong>
+<pre><code>    sprintf(d, "%s", s);   // NOLINT(custom-no-unsafe-format)</code></pre>
+    書式出力の警告だけが消え、文字列コピーの警告は残ることを確認します。<strong>チェックを分けた効果です。</strong></li>
+
+  <li><strong>Tier を決める。</strong> 実プロジェクト（<code>TidyLab</code> 全体）に対して実行し、既存件数を数えます。
+    <ul>
+      <li>0〜十数件 → <code>Checks</code> に入れて Tier 1。さらに <code>WarningsAsErrors</code> で Tier 0 も検討</li>
+      <li>数十件以上 → Tier 2 の設定ファイル（第22章 22.5 節）に入れ、差分解析でのみ適用</li>
+    </ul>
+    決めた内容を判断記録に書きます。</li>
+
+  <li><strong>期待動作を記録する。</strong> <code>tests\custom-checks\README.md</code> の表に、今回のチェックを追加します。
+<pre><code>| custom-no-unsafe-string-copy | unsafe-api.cpp | 2 | strcpy/strcat | MyString::strcpy, strncpy |
+| custom-no-unsafe-format      | unsafe-api.cpp | 1 | sprintf       | ─ |</code></pre>
+  </li>
+</ol>
+</div>
+</div>
+
+<div class="summary">
+<h2>この章のまとめ</h2>
+<ul>
+  <li>クエリを書く前に4欄を埋める。<strong>①何を禁止 ②代わりに何を使う ③例外 ④既存件数。</strong></li>
+  <li><strong>②が決まっていないルールは導入しない。</strong>「使うな」だけでは開発者の手が止まる。</li>
+  <li>段階的に絞る。名前 → 完全修飾（<code>::</code>）→ 解析対象 → 例外。各段階で件数を記録する。</li>
+  <li><strong>除外はクエリの条件より、ディレクトリ単位の設定を優先する。</strong> 条件が散らばらず、命名規約の変更にも強い。</li>
+  <li><strong>代替 API ごとにチェックを分ける。</strong> メッセージが具体的になり、段階導入と個別抑制ができる。</li>
+  <li>マクロ経由の呼び出しは<strong>展開後の名前</strong>で AST に現れる。クエリは展開後の名前で書く。</li>
+  <li>既存件数が Tier を決める。件数を見てから配置を決める。</li>
+</ul>
+</div>
+
+<p class="next"><strong>次章：</strong> 第33章「実践2：型と所有権のルールを縛る」では、呼び出しではなく<strong>宣言</strong>を対象にしたルールを作ります。「生ポインタへの <code>new</code> を禁止」のような、設計に関わるルールです。</p>
+
+</div>
+</body>
+</html>

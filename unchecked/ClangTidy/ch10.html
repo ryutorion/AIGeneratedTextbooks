@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第10章 ヘッダファイルの扱い ─ Clang-Tidy入門</title>
+<style>
+  :root{
+    --ink:#1f2933; --sub:#5a6b7a; --line:#d8dee4; --bg:#ffffff;
+    --code-bg:#f6f8fa; --code-line:#e2e8ee;
+    --accent:#2f6f9f; --accent-bg:#eef4f9;
+    --warn:#b4661a; --warn-bg:#fbf4ea;
+    --ok:#3d7a52; --ok-bg:#eef5f0;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0; background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Noto Sans JP","Meiryo",sans-serif;
+    font-size:16px; line-height:1.95; font-feature-settings:"palt" 1;}
+  .page{max-width:47rem; margin:0 auto; padding:3.5rem 1.6rem 6rem}
+  .chap-no{font-size:.8rem; letter-spacing:.22em; color:var(--accent); font-weight:700; margin:0 0 .5rem}
+  h1{font-size:1.85rem; line-height:1.5; margin:0 0 .6rem; letter-spacing:.01em}
+  .lede{color:var(--sub); font-size:1rem; margin:0 0 2.2rem; padding-bottom:1.6rem; border-bottom:2px solid var(--ink)}
+  h2{font-size:1.28rem; margin:3rem 0 1rem; padding-left:.7rem; border-left:4px solid var(--accent); line-height:1.6}
+  h3{font-size:1.05rem; margin:2.2rem 0 .7rem}
+  h3::before{content:"◆ "; color:var(--accent); font-size:.8em}
+  p{margin:0 0 1.1rem}
+  ul,ol{margin:0 0 1.2rem; padding-left:1.6rem}
+  li{margin:.35rem 0}
+  code{font-family:"Cascadia Mono","Consolas","SFMono-Regular",monospace; font-size:.9em;
+       background:var(--code-bg); border:1px solid var(--code-line); border-radius:4px; padding:.08em .35em}
+  pre{background:var(--code-bg); border:1px solid var(--code-line); border-radius:8px;
+      padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.7}
+  pre code{background:none; border:none; padding:0; font-size:.86rem}
+  pre.term{background:#1f2933; border-color:#1f2933; color:#e6edf3}
+  pre.term code{color:#e6edf3}
+  pre.term .p{color:#7fb2d6}
+  pre.term .o{color:#9fb3c0}
+  .cap{font-size:.82rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+  figure{margin:2rem 0 2.2rem}
+  figure svg{display:block; width:100%; height:auto; border:1px solid var(--line); border-radius:8px; background:#fff}
+  figcaption{font-size:.85rem; color:var(--sub); margin-top:.6rem}
+  figcaption b{color:var(--ink)}
+  .box{border-radius:8px; padding:1rem 1.2rem; margin:1.6rem 0; font-size:.94rem}
+  .box p:last-child{margin-bottom:0}
+  .box .t{font-weight:700; display:block; margin-bottom:.35rem; font-size:.88rem; letter-spacing:.04em}
+  .note{background:var(--accent-bg); border-left:4px solid var(--accent)} .note .t{color:var(--accent)}
+  .warn{background:var(--warn-bg); border-left:4px solid var(--warn)} .warn .t{color:var(--warn)}
+  .tip{background:var(--ok-bg); border-left:4px solid var(--ok)} .tip .t{color:var(--ok)}
+  .hands{border:1px solid var(--line); border-radius:10px; margin:2rem 0; overflow:hidden}
+  .hands>.hd{background:var(--ink); color:#fff; padding:.55rem 1.1rem; font-size:.85rem; letter-spacing:.1em; font-weight:700}
+  .hands>.bd{padding:1.3rem 1.3rem .4rem}
+  .hands ol{counter-reset:step; list-style:none; padding-left:0}
+  .hands ol>li{counter-increment:step; position:relative; padding-left:2.4rem; margin:0 0 1.2rem}
+  .hands ol>li::before{content:counter(step); position:absolute; left:0; top:.25rem;
+    width:1.7rem; height:1.7rem; border-radius:50%; background:var(--accent); color:#fff;
+    font-size:.82rem; font-weight:700; display:flex; align-items:center; justify-content:center; line-height:1}
+  table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+  th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+  th{background:var(--code-bg); font-weight:700}
+  .summary{border:2px solid var(--ink); border-radius:10px; padding:1.3rem 1.5rem; margin:3rem 0 1rem}
+  .summary h2{margin:0 0 .8rem; border:none; padding:0; font-size:1.1rem}
+  .summary ul{margin-bottom:0}
+  .next{color:var(--sub); font-size:.94rem; border-top:1px solid var(--line); padding-top:1.2rem; margin-top:2.5rem}
+  @media (max-width:600px){ body{font-size:15px} .page{padding:2.2rem 1.1rem 4rem} h1{font-size:1.5rem} }
+</style>
+</head>
+<body>
+<div class="page">
+
+<p class="chap-no">第 10 章</p>
+<h1>ヘッダファイルの扱い</h1>
+<p class="lede">Clang-Tidy は翻訳単位（.cpp 1本）ごとに解析します。ヘッダはその過程で何度も読まれ、その都度警告を生みます。何も設定しないと、同じ警告が10回も20回も並びます。逆に絞りすぎると、ヘッダに書いたコードが一切チェックされなくなります。この章では表示の仕組みを理解し、適切な線を引きます。</p>
+
+<h2>10.1 なぜヘッダの警告は重複するのか</h2>
+
+<p>C++ のビルドは翻訳単位ごとに独立しています。<code>#include</code> はテキストの取り込みなので、あるヘッダが5つの <code>.cpp</code> から include されていれば、そのヘッダは <strong>5回パースされ、5回解析されます</strong>。</p>
+
+<figure>
+<svg viewBox="0 0 760 360" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="同じヘッダが複数の翻訳単位で繰り返し解析される仕組み">
+  <defs>
+    <marker id="k" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5a6b7a"/>
+    </marker>
+  </defs>
+  <g font-family="sans-serif">
+
+  <rect x="290" y="16" width="180" height="42" rx="8" fill="#b4661a"/>
+  <text x="380" y="34" text-anchor="middle" fill="#fff" font-size="12.5" font-weight="bold">config_loader.h</text>
+  <text x="380" y="51" text-anchor="middle" fill="#fde9d0" font-size="10.5">この中に警告1件があるとする</text>
+
+  <path d="M320,58 L140,90" fill="none" stroke="#d8dee4" stroke-width="1.4"/>
+  <path d="M380,58 L380,90" fill="none" stroke="#d8dee4" stroke-width="1.4"/>
+  <path d="M440,58 L620,90" fill="none" stroke="#d8dee4" stroke-width="1.4"/>
+
+  <!-- TUs -->
+  <g>
+    <rect x="40" y="94" width="200" height="120" rx="8" fill="#eef4f9" stroke="#2f6f9f" stroke-width="1.5"/>
+    <text x="140" y="118" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#2f6f9f">翻訳単位 ①</text>
+    <text x="140" y="138" text-anchor="middle" font-size="11.5" font-family="monospace" fill="#1f2933">main.cpp</text>
+    <rect x="58" y="150" width="164" height="24" rx="4" fill="#fff" stroke="#c5d6e4"/>
+    <text x="140" y="167" text-anchor="middle" font-size="10.5" fill="#5a6b7a">+ config_loader.h</text>
+    <rect x="58" y="180" width="164" height="24" rx="4" fill="#fbf4ea" stroke="#b4661a"/>
+    <text x="140" y="197" text-anchor="middle" font-size="10.5" fill="#b4661a" font-weight="bold">警告 1 件</text>
+  </g>
+
+  <g>
+    <rect x="280" y="94" width="200" height="120" rx="8" fill="#eef4f9" stroke="#2f6f9f" stroke-width="1.5"/>
+    <text x="380" y="118" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#2f6f9f">翻訳単位 ②</text>
+    <text x="380" y="138" text-anchor="middle" font-size="11.5" font-family="monospace" fill="#1f2933">config_loader.cpp</text>
+    <rect x="298" y="150" width="164" height="24" rx="4" fill="#fff" stroke="#c5d6e4"/>
+    <text x="380" y="167" text-anchor="middle" font-size="10.5" fill="#5a6b7a">+ config_loader.h</text>
+    <rect x="298" y="180" width="164" height="24" rx="4" fill="#fbf4ea" stroke="#b4661a"/>
+    <text x="380" y="197" text-anchor="middle" font-size="10.5" fill="#b4661a" font-weight="bold">警告 1 件</text>
+  </g>
+
+  <g>
+    <rect x="520" y="94" width="200" height="120" rx="8" fill="#eef4f9" stroke="#2f6f9f" stroke-width="1.5"/>
+    <text x="620" y="118" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#2f6f9f">翻訳単位 ③</text>
+    <text x="620" y="138" text-anchor="middle" font-size="11.5" font-family="monospace" fill="#1f2933">tests.cpp</text>
+    <rect x="538" y="150" width="164" height="24" rx="4" fill="#fff" stroke="#c5d6e4"/>
+    <text x="620" y="167" text-anchor="middle" font-size="10.5" fill="#5a6b7a">+ config_loader.h</text>
+    <rect x="538" y="180" width="164" height="24" rx="4" fill="#fbf4ea" stroke="#b4661a"/>
+    <text x="620" y="197" text-anchor="middle" font-size="10.5" fill="#b4661a" font-weight="bold">警告 1 件</text>
+  </g>
+
+  <path d="M140,214 L140,238 L380,238" fill="none" stroke="#5a6b7a" stroke-width="1.4"/>
+  <path d="M380,214 L380,238" fill="none" stroke="#5a6b7a" stroke-width="1.4"/>
+  <path d="M620,214 L620,238 L380,238" fill="none" stroke="#5a6b7a" stroke-width="1.4"/>
+  <line x1="380" y1="238" x2="380" y2="262" stroke="#5a6b7a" stroke-width="1.6" marker-end="url(#k)"/>
+
+  <rect x="200" y="266" width="360" height="46" rx="8" fill="#1f2933"/>
+  <text x="380" y="286" text-anchor="middle" fill="#fff" font-size="13" font-weight="bold">エラー一覧には同じ警告が 3 件</text>
+  <text x="380" y="304" text-anchor="middle" fill="#b8c4cd" font-size="11">ヘッダ1件の問題が、include された数だけ増える</text>
+
+  <text x="380" y="340" text-anchor="middle" font-size="12" fill="#5a6b7a">大規模プロジェクトでは、共通ヘッダの警告1件が数百件になることもある</text>
+  </g>
+</svg>
+<figcaption><b>図10-1</b>　ヘッダの警告が重複する仕組み。Clang-Tidy が「壊れている」のではなく、翻訳単位ごとに独立して解析する以上、必然的にこうなる。</figcaption>
+</figure>
+
+<p>これを制御するのが、この章で扱う3つの設定です。</p>
+
+<h2>10.2 表示のフィルタは4段構え</h2>
+
+<p>ある診断が最終的に表示されるかどうかは、次の順で決まります。</p>
+
+<figure>
+<svg viewBox="0 0 760 430" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="診断が表示されるまでのフィルタ順">
+  <defs>
+    <marker id="l" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5a6b7a"/>
+    </marker>
+  </defs>
+  <g font-family="sans-serif">
+
+  <rect x="280" y="14" width="200" height="38" rx="19" fill="#1f2933"/>
+  <text x="380" y="39" text-anchor="middle" fill="#fff" font-size="12.5" font-weight="bold">チェックが診断を出した</text>
+  <line x1="380" y1="52" x2="380" y2="70" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#l)"/>
+
+  <!-- 1 -->
+  <path d="M380,74 L520,104 L380,134 L240,104 Z" fill="#eef5f0" stroke="#3d7a52" stroke-width="1.5"/>
+  <text x="380" y="101" text-anchor="middle" font-size="12" fill="#1f2933" font-weight="bold">メインファイル（.cpp）</text>
+  <text x="380" y="118" text-anchor="middle" font-size="12" fill="#1f2933" font-weight="bold">の中か？</text>
+  <line x1="520" y1="104" x2="586" y2="104" stroke="#3d7a52" stroke-width="1.6" marker-end="url(#l)"/>
+  <text x="536" y="96" font-size="11" fill="#3d7a52" font-weight="bold">はい</text>
+  <rect x="590" y="84" width="146" height="40" rx="8" fill="#3d7a52"/>
+  <text x="663" y="109" text-anchor="middle" fill="#fff" font-size="12.5" font-weight="bold">必ず表示</text>
+
+  <line x1="380" y1="134" x2="380" y2="152" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#l)"/>
+  <text x="394" y="148" font-size="11" fill="#5a6b7a">ヘッダ内</text>
+
+  <!-- 2 -->
+  <path d="M380,156 L520,186 L380,216 L240,186 Z" fill="#eef4f9" stroke="#2f6f9f" stroke-width="1.5"/>
+  <text x="380" y="183" text-anchor="middle" font-size="12" fill="#1f2933" font-weight="bold">システムヘッダか？</text>
+  <text x="380" y="200" text-anchor="middle" font-size="10.5" fill="#5a6b7a">（&lt;vector&gt; など）</text>
+  <line x1="240" y1="186" x2="180" y2="186" stroke="#a04a34" stroke-width="1.6" marker-end="url(#l)"/>
+  <text x="186" y="178" font-size="10.5" fill="#a04a34" font-weight="bold">はい</text>
+  <rect x="24" y="166" width="152" height="40" rx="8" fill="#f7e9e5" stroke="#a04a34"/>
+  <text x="100" y="184" text-anchor="middle" fill="#a04a34" font-size="11.5" font-weight="bold">破棄</text>
+  <text x="100" y="199" text-anchor="middle" fill="#5a6b7a" font-size="10">SystemHeaders: true で表示</text>
+
+  <line x1="380" y1="216" x2="380" y2="234" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#l)"/>
+
+  <!-- 3 -->
+  <path d="M380,238 L540,270 L380,302 L220,270 Z" fill="#fbf4ea" stroke="#b4661a" stroke-width="1.8"/>
+  <text x="380" y="265" text-anchor="middle" font-size="12" fill="#1f2933" font-weight="bold">HeaderFilterRegex に</text>
+  <text x="380" y="282" text-anchor="middle" font-size="12" fill="#1f2933" font-weight="bold">一致するか？</text>
+  <line x1="220" y1="270" x2="180" y2="270" stroke="#a04a34" stroke-width="1.6" marker-end="url(#l)"/>
+  <text x="182" y="262" font-size="10.5" fill="#a04a34" font-weight="bold">いいえ</text>
+  <rect x="24" y="250" width="152" height="40" rx="8" fill="#f7e9e5" stroke="#a04a34"/>
+  <text x="100" y="275" text-anchor="middle" fill="#a04a34" font-size="11.5" font-weight="bold">破棄</text>
+
+  <line x1="380" y1="302" x2="380" y2="320" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#l)"/>
+
+  <!-- 4 -->
+  <path d="M380,324 L550,356 L380,388 L210,356 Z" fill="#eef4f9" stroke="#2f6f9f" stroke-width="1.5"/>
+  <text x="380" y="351" text-anchor="middle" font-size="12" fill="#1f2933" font-weight="bold">ExcludeHeaderFilterRegex</text>
+  <text x="380" y="368" text-anchor="middle" font-size="12" fill="#1f2933" font-weight="bold">に一致するか？</text>
+  <line x1="210" y1="356" x2="180" y2="356" stroke="#a04a34" stroke-width="1.6" marker-end="url(#l)"/>
+  <text x="180" y="348" font-size="10.5" fill="#a04a34" font-weight="bold">はい</text>
+  <rect x="24" y="336" width="152" height="40" rx="8" fill="#f7e9e5" stroke="#a04a34"/>
+  <text x="100" y="361" text-anchor="middle" fill="#a04a34" font-size="11.5" font-weight="bold">破棄</text>
+
+  <line x1="550" y1="356" x2="586" y2="356" stroke="#3d7a52" stroke-width="1.6" marker-end="url(#l)"/>
+  <rect x="590" y="336" width="146" height="40" rx="8" fill="#3d7a52"/>
+  <text x="663" y="361" text-anchor="middle" fill="#fff" font-size="12.5" font-weight="bold">表示</text>
+  </g>
+</svg>
+<figcaption><b>図10-2</b>　診断が表示されるまでのフィルタ。<strong>メインファイルの診断は常に表示され、フィルタの影響を受けない。</strong></figcaption>
+</figure>
+
+<h2>10.3 三つの設定</h2>
+
+<h3><code>HeaderFilterRegex</code></h3>
+
+<p>診断を出すヘッダを正規表現で指定します。<strong>現在の既定値は <code>'.*'</code>、つまり非システムヘッダはすべて表示されます。</strong></p>
+
+<div class="warn">
+<span class="t">古い記事との食い違いに注意</span>
+<p>Web には「<code>header-filter</code> の既定は空なので、ヘッダの警告は表示されない」と説明した記事が多数あります。これは古いバージョンの挙動です。第4章で確認した自分のバージョンで、<code>--dump-config</code> を実行して実際の既定値を確かめてください。<strong>既定値がどちらかで、設定の書き方がまったく変わります。</strong></p>
+<pre style="margin-top:.6rem"><code>clang-tidy --dump-config | findstr HeaderFilterRegex</code></pre>
+</div>
+
+<p>既定が <code>'.*'</code> の場合、何もしないとサードパーティのヘッダまで診断対象になります。自分のコードだけに絞るなら、明示的に書きます。</p>
+
+<pre><code># TidyLab 配下のヘッダだけを対象にする
+HeaderFilterRegex: 'TidyLab'</code></pre>
+
+<h3><code>ExcludeHeaderFilterRegex</code></h3>
+
+<p>逆に「これだけ外す」を書きます。<strong><code>HeaderFilterRegex</code> と併用しなければなりません</strong>（コマンドラインの <code>--exclude-header-filter</code> は <code>--header-filter</code> と一緒に使う必要がある、と明記されています）。</p>
+
+<pre><code>HeaderFilterRegex: '.*'
+ExcludeHeaderFilterRegex: 'third_party|generated|_pb\.h'</code></pre>
+
+<p>「基本は全部見るが、外部と生成物だけは除く」という、実務で最も使いやすい形です。</p>
+
+<h3><code>SystemHeaders</code></h3>
+
+<pre><code>SystemHeaders: false   # 既定。&lt;vector&gt; などの診断を出さない</code></pre>
+
+<p><code>true</code> にする場面はほとんどありません。標準ライブラリの実装に対する警告を読みたい、という特殊な調査のときだけです。</p>
+
+<h2>10.4 正規表現の書き方</h2>
+
+<p>これらのオプションは POSIX 拡張正規表現（ERE）で、<strong>ヘッダのパス（ファイル名を含む）に対して部分一致</strong> で評価されます。完全一致ではないので、単純な部分文字列を書くだけでもかなり実用になります。</p>
+
+<table>
+<tr><th>書き方</th><th>意味</th></tr>
+<tr><td><code>TidyLab</code></td><td>パスに <code>TidyLab</code> を含むヘッダ</td></tr>
+<tr><td><code>config_loader\.h$</code></td><td>そのファイル名で終わるパス（<code>.</code> はエスケープ）</td></tr>
+<tr><td><code>third_party|vendor</code></td><td>どちらかを含む（<code>|</code> は OR）</td></tr>
+<tr><td><code>^C:</code></td><td>C ドライブ直下から始まるパス（絶対パス前提なので脆い）</td></tr>
+</table>
+
+<div class="note">
+<span class="t">Windows のパス区切り</span>
+<p>正規表現の中で <code>\</code> はエスケープ文字なので、パス区切りをそのまま書くと壊れます。ディレクトリ境界を明示したいときは <code>[\\/]</code> のように両方を許す文字クラスを使うのが無難です。ただし YAML の中でのバックスラッシュの扱いも絡むので、<strong>まずは区切り文字を含まない部分文字列（ディレクトリ名だけ）で書くのが確実です。</strong></p>
+</div>
+
+<h3>効いているか確かめる</h3>
+
+<p>正規表現は書いた本人でも間違えます。実際に何が表示され、何が抑制されたかは統計行で分かります（第9章）。</p>
+
+<pre class="term"><code><span class="p">&gt;</span> clang-tidy config_loader.cpp -- -std=c++23
+<span class="o">...
+Suppressed 142 warnings (140 in non-user code, 2 NOLINT).</span></code></pre>
+
+<p>この <code>in non-user code</code> が、ヘッダフィルタとシステムヘッダ判定によって表示されなかった数です。<strong>この数が異常に大きいときは、フィルタが自分のコードまで巻き込んでいる疑いがあります。</strong> 逆に、フィルタを緩めたときにこの数が急減し、代わりにサードパーティの警告が溢れることもあります。両方を試して、間の値を探してください。</p>
+
+<h2>10.5 それでも重複する問題</h2>
+
+<p>フィルタは「表示するかどうか」の制御であって、「重複を除く」機能ではありません。<code>config_loader.h</code> を対象に含めた以上、include している翻訳単位の数だけ同じ警告が出ます。</p>
+
+<p>これに対する現実的な手当ては次の3つです。</p>
+
+<ul>
+  <li><strong>気にしない</strong>：IDE で作業している間は、同じ箇所の警告が複数並んでも実害は小さい。直せば全部消えます。</li>
+  <li><strong>集計側で重複排除する</strong>：CI では出力を集約する際に「ファイル:行:チェック名」で一意化します（第40章）。</li>
+  <li><strong>修正の適用時は専用ツールを使う</strong>：自動修正を並列実行すると、複数のプロセスが同じヘッダを書き換えようとして壊れます。<code>--export-fixes</code> で修正案を書き出し、<code>clang-apply-replacements</code> で重複を解決しながら適用します（第11章・第15章）。</li>
+</ul>
+
+<h2>10.6 行単位で絞る ── <code>--line-filter</code></h2>
+
+<p>もう一段細かい絞り込みとして、ファイルと行範囲を指定するオプションがあります。範囲は両端を含みます。</p>
+
+<pre class="term"><code><span class="p">&gt;</span> clang-tidy --line-filter="[{\"name\":\"config_loader.cpp\",\"lines\":[[20,60]]}]" config_loader.cpp -- -std=c++23</code></pre>
+
+<p>手で書くものではありませんが、<strong>「変更した行だけをチェックする」仕組みの土台</strong> になっています。既存コードベースへの段階導入で使う <code>clang-tidy-diff</code> は、内部でこれを使っています（第15章・第39章）。</p>
+
+<h2>10.7 【ハンズオン】フィルタを設計する</h2>
+
+<div class="hands">
+<div class="hd">HANDS-ON 10　ヘッダの見え方を制御する</div>
+<div class="bd">
+<ol>
+  <li><strong>既定値を確認する。</strong>
+<pre><code>clang-tidy --dump-config | findstr HeaderFilterRegex</code></pre>
+    自分のバージョンでの既定値を記録します。以降の手順は、これを基準に読み替えてください。</li>
+
+  <li><strong>ヘッダに問題を仕込む。</strong> <code>config_loader.h</code> の <code>Entry</code> に、警告が出るメンバを追加します。
+<pre><code>struct Entry {
+    char name[32];
+    int  value;
+    int* raw = NULL;   // ← modernize-use-nullptr が反応する
+};</code></pre>
+  </li>
+
+  <li><strong>重複を観察する。</strong> <code>main.cpp</code> と <code>config_loader.cpp</code> の両方がこのヘッダを include している状態でビルドし、エラー一覧に <strong>同じ警告が2件</strong> 出ることを確認します。</li>
+
+  <li><strong>ヘッダを対象外にする。</strong> <code>.clang-tidy</code> に次を書いてビルドし、ヘッダ由来の警告が消えることを確認します。
+<pre><code>HeaderFilterRegex: 'nothing_matches_this'</code></pre>
+    同時に、<code>config_loader.cpp</code> 内の警告は<strong>消えない</strong>ことを確認してください。メインファイルの診断は常に表示されるからです（図10-2）。</li>
+
+  <li><strong>自分のヘッダだけに絞る。</strong>
+<pre><code>HeaderFilterRegex: 'TidyLab'</code></pre>
+    ヘッダの警告が戻ってくることを確認します。</li>
+
+  <li><strong>除外パターンを併用する。</strong> <code>third_party\legacy_api.h</code> を作り、警告が出るコードを入れ、<code>main.cpp</code> から include します。そのうえで、
+<pre><code>HeaderFilterRegex: '.*'
+ExcludeHeaderFilterRegex: 'third_party'</code></pre>
+    自分のヘッダの警告は出て、<code>third_party</code> のものは出ないことを確認します。</li>
+
+  <li><strong>統計を読む。</strong> 手順4・5・6 のそれぞれで、末尾の <code>Suppressed N warnings (M in non-user code, ...)</code> の M がどう変化したかを記録します。</li>
+
+  <li><strong>後片付け。</strong> 手順2で追加した <code>int* raw = NULL;</code> を削除し、<code>.clang-tidy</code> のフィルタ設定を実運用向けの形に整えます。<code>TidyLab</code> では次を採用します。
+<pre><code>HeaderFilterRegex: '.*'
+ExcludeHeaderFilterRegex: 'third_party'
+SystemHeaders: false</code></pre>
+  </li>
+</ol>
+</div>
+</div>
+
+<div class="tip">
+<span class="t">どこに線を引くか</span>
+<p>判断基準は <strong>「そのヘッダを自分たちが直せるか」</strong> です。直せるなら対象に含める。直せない（外部ライブラリ、生成コード、ベンダー提供）なら除外する。「直せるけど今は直さない」は除外ではなく、第39章の段階導入で扱う話です。フィルタで隠すと、直す気がなくなったこと自体が見えなくなります。</p>
+</div>
+
+<div class="summary">
+<h2>この章のまとめ</h2>
+<ul>
+  <li>翻訳単位ごとに解析するため、ヘッダの警告は include された数だけ重複する。これは仕様。</li>
+  <li>表示は4段のフィルタで決まる。<strong>メインファイルの診断は常に表示され、フィルタの影響を受けない。</strong></li>
+  <li><code>HeaderFilterRegex</code> の現在の既定値は <code>'.*'</code>（非システムヘッダは全部表示）。<strong>古い記事は既定が違うので、自分の版で <code>--dump-config</code> して確認する。</strong></li>
+  <li><code>ExcludeHeaderFilterRegex</code> は <code>HeaderFilterRegex</code> との併用が前提。「全部見て、外部だけ除く」が実務的。</li>
+  <li>正規表現は部分一致。Windows のパス区切りは扱いが面倒なので、ディレクトリ名だけの部分文字列が確実。</li>
+  <li>フィルタは重複排除ではない。自動修正の重複は <code>--export-fixes</code> と <code>clang-apply-replacements</code> で扱う。</li>
+  <li>線引きの基準は「自分たちが直せるか」。</li>
+</ul>
+</div>
+
+<p class="next"><strong>次章：</strong> 第11章「自動修正を体験する」で第2部が完結します。Clang-Tidy の警告の多くは修正案（FixIt）を伴います。これを安全に当てる手順と、当ててはいけない場面を扱います。</p>
+
+</div>
+</body>
+</html>

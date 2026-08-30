@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第3章 ハンズオン環境を作る ─ Clang-Tidy入門</title>
+<style>
+  :root{
+    --ink:#1f2933; --sub:#5a6b7a; --line:#d8dee4; --bg:#ffffff;
+    --code-bg:#f6f8fa; --code-line:#e2e8ee;
+    --accent:#2f6f9f; --accent-bg:#eef4f9;
+    --warn:#b4661a; --warn-bg:#fbf4ea;
+    --ok:#3d7a52; --ok-bg:#eef5f0;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Noto Sans JP","Meiryo",sans-serif;
+    font-size:16px; line-height:1.95; font-feature-settings:"palt" 1;
+  }
+  .page{max-width:47rem; margin:0 auto; padding:3.5rem 1.6rem 6rem}
+  .chap-no{font-size:.8rem; letter-spacing:.22em; color:var(--accent); font-weight:700; margin:0 0 .5rem}
+  h1{font-size:1.85rem; line-height:1.5; margin:0 0 .6rem; letter-spacing:.01em}
+  .lede{color:var(--sub); font-size:1rem; margin:0 0 2.2rem; padding-bottom:1.6rem; border-bottom:2px solid var(--ink)}
+  h2{font-size:1.28rem; margin:3rem 0 1rem; padding-left:.7rem; border-left:4px solid var(--accent); line-height:1.6}
+  h3{font-size:1.05rem; margin:2.2rem 0 .7rem; color:var(--ink)}
+  h3::before{content:"◆ "; color:var(--accent); font-size:.8em}
+  p{margin:0 0 1.1rem}
+  ul,ol{margin:0 0 1.2rem; padding-left:1.6rem}
+  li{margin:.35rem 0}
+  code{font-family:"Cascadia Mono","Consolas","SFMono-Regular",monospace; font-size:.9em;
+       background:var(--code-bg); border:1px solid var(--code-line); border-radius:4px; padding:.08em .35em}
+  pre{background:var(--code-bg); border:1px solid var(--code-line); border-radius:8px;
+      padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.7}
+  pre code{background:none; border:none; padding:0; font-size:.86rem}
+  .cap{font-size:.82rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+  figure{margin:2rem 0 2.2rem}
+  figure svg{display:block; width:100%; height:auto; border:1px solid var(--line); border-radius:8px; background:#fff}
+  figcaption{font-size:.85rem; color:var(--sub); margin-top:.6rem}
+  figcaption b{color:var(--ink)}
+  .box{border-radius:8px; padding:1rem 1.2rem; margin:1.6rem 0; font-size:.94rem}
+  .box p:last-child{margin-bottom:0}
+  .box .t{font-weight:700; display:block; margin-bottom:.35rem; font-size:.88rem; letter-spacing:.04em}
+  .note{background:var(--accent-bg); border-left:4px solid var(--accent)}
+  .note .t{color:var(--accent)}
+  .warn{background:var(--warn-bg); border-left:4px solid var(--warn)}
+  .warn .t{color:var(--warn)}
+  .tip{background:var(--ok-bg); border-left:4px solid var(--ok)}
+  .tip .t{color:var(--ok)}
+  .hands{border:1px solid var(--line); border-radius:10px; margin:2rem 0; overflow:hidden}
+  .hands>.hd{background:var(--ink); color:#fff; padding:.55rem 1.1rem; font-size:.85rem; letter-spacing:.1em; font-weight:700}
+  .hands>.bd{padding:1.3rem 1.3rem .4rem}
+  .hands ol{counter-reset:step; list-style:none; padding-left:0}
+  .hands ol>li{counter-increment:step; position:relative; padding-left:2.4rem; margin:0 0 1.2rem}
+  .hands ol>li::before{content:counter(step); position:absolute; left:0; top:.25rem;
+    width:1.7rem; height:1.7rem; border-radius:50%; background:var(--accent); color:#fff;
+    font-size:.82rem; font-weight:700; display:flex; align-items:center; justify-content:center; line-height:1}
+  table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+  th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+  th{background:var(--code-bg); font-weight:700}
+  .path{font-family:"Cascadia Mono","Consolas",monospace; font-size:.86rem; background:#1f2933; color:#e6edf3;
+        padding:.9rem 1.1rem; border-radius:8px; overflow-x:auto; margin:0 0 1.4rem; line-height:1.8}
+  .summary{border:2px solid var(--ink); border-radius:10px; padding:1.3rem 1.5rem; margin:3rem 0 1rem}
+  .summary h2{margin:0 0 .8rem; border:none; padding:0; font-size:1.1rem}
+  .summary ul{margin-bottom:0}
+  .next{color:var(--sub); font-size:.94rem; border-top:1px solid var(--line); padding-top:1.2rem; margin-top:2.5rem}
+  @media (max-width:600px){ body{font-size:15px} .page{padding:2.2rem 1.1rem 4rem} h1{font-size:1.5rem} }
+</style>
+</head>
+<body>
+<div class="page">
+
+<p class="chap-no">第 3 章</p>
+<h1>ハンズオン環境を作る</h1>
+<p class="lede">ここから手を動かします。Visual Studio 2026 に必要なコンポーネントを入れ、C++23 を有効にし、本書を通して使うソリューション <code>TidyLab</code> を組み立てます。地味な章ですが、ここで C++23 の指定を「二箇所」に入れる意味を理解しておかないと、第12章以降で必ず詰まります。</p>
+
+<h2>3.1 必要なコンポーネント</h2>
+
+<p>Visual Studio Installer を開き、次のものが入っているか確認します。</p>
+
+<figure>
+<svg viewBox="0 0 760 340" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Visual Studio 2026 に必要なコンポーネントの構成">
+  <g font-family="sans-serif">
+  <rect x="24" y="20" width="712" height="300" rx="10" fill="#fafbfc" stroke="#d8dee4"/>
+  <text x="44" y="48" font-size="13" font-weight="bold" fill="#5a6b7a" letter-spacing="1.5">Visual Studio Installer</text>
+
+  <!-- workload -->
+  <rect x="44" y="66" width="320" height="230" rx="8" fill="#eef4f9" stroke="#2f6f9f" stroke-width="1.8"/>
+  <text x="64" y="92" font-size="13.5" font-weight="bold" fill="#2f6f9f">ワークロード</text>
+  <rect x="62" y="104" width="284" height="34" rx="5" fill="#2f6f9f"/>
+  <text x="76" y="126" font-size="12.5" fill="#fff" font-weight="bold">☑ C++ によるデスクトップ開発</text>
+
+  <text x="76" y="164" font-size="11.5" fill="#5a6b7a">これを選ぶと自動的に入るもの：</text>
+  <text x="86" y="188" font-size="12" fill="#1f2933">・MSVC v14.x ビルドツール</text>
+  <text x="86" y="210" font-size="12" fill="#1f2933">・Windows SDK</text>
+  <text x="86" y="232" font-size="12" fill="#1f2933">・C++ CMake ツール</text>
+  <text x="86" y="254" font-size="12" fill="#1f2933">・MSBuild / IDE 統合</text>
+  <text x="76" y="284" font-size="11" fill="#5a6b7a">※ 本書のビルドはこれで足りる</text>
+
+  <!-- individual -->
+  <rect x="392" y="66" width="320" height="230" rx="8" fill="#fbf4ea" stroke="#b4661a" stroke-width="2.2"/>
+  <text x="412" y="92" font-size="13.5" font-weight="bold" fill="#b4661a">個別のコンポーネント</text>
+  <rect x="410" y="104" width="284" height="34" rx="5" fill="#b4661a"/>
+  <text x="424" y="126" font-size="12.5" fill="#fff" font-weight="bold">☑ Windows 用 C++ Clang ツール</text>
+
+  <text x="424" y="164" font-size="11.5" fill="#5a6b7a">これで入るもの：</text>
+  <text x="434" y="188" font-size="12" fill="#1f2933">・clang.exe / clang-cl.exe</text>
+  <text x="434" y="210" font-size="12" fill="#1f2933">・<tspan font-weight="bold">clang-tidy.exe</tspan> ← 本書の主役</text>
+  <text x="434" y="232" font-size="12" fill="#1f2933">・clang-format.exe</text>
+  <text x="434" y="254" font-size="12" fill="#1f2933">・LLVM ランタイム一式</text>
+  <text x="424" y="284" font-size="11" fill="#b4661a" font-weight="bold">※ これを入れ忘れる人が多い</text>
+  </g>
+</svg>
+<figcaption><b>図3-1</b>　ワークロードと個別コンポーネントの関係。Clang-Tidy 本体はワークロードには含まれず、個別コンポーネント側にある。</figcaption>
+</figure>
+
+<div class="warn">
+<span class="t">Clang ツールを入れなくても Clang-Tidy は動くことがある</span>
+<p>プロパティに「Clang-Tidy を有効にする」項目は表示されるので、コンポーネントを入れ忘れていても設定はできてしまいます。しかし実行時に「clang-tidy が見つからない」となるか、あるいは何も起きずに終わります。<strong>警告が0件だったときは、まず本当に走ったのかを疑ってください。</strong> 確認方法は第4章で扱います。</p>
+</div>
+
+<div class="note">
+<span class="t">MSVC ツールセットのままで構わない</span>
+<p>「Windows 用 C++ Clang ツール」を入れても、プロジェクトのコンパイラが Clang に変わるわけではありません。ビルドは従来どおり MSVC で行い、Clang-Tidy は解析のためだけに Clang フロントエンドを使います（第2章の図2-1）。ツールセットを LLVM に切り替える必要はありません。</p>
+</div>
+
+<h2>3.2 C++23 を有効にする ── 設定は「二箇所」ある</h2>
+
+<p>ここが本章で最も重要な節です。</p>
+
+<p>Visual Studio でプロジェクトの言語規格を C++23 に設定すると、それは <strong>MSVC に対する指定</strong> です。ところが Clang-Tidy は Clang でソースを読みます。Clang には別途 <code>-std=c++23</code> を伝えなければなりません。この二重構造を最初に押さえておきます。</p>
+
+<figure>
+<svg viewBox="0 0 760 400" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="C++23 の指定が MSVC と Clang-Tidy の二箇所に必要であること">
+  <defs>
+    <marker id="c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5a6b7a"/>
+    </marker>
+  </defs>
+  <g font-family="sans-serif">
+
+  <rect x="280" y="18" width="200" height="46" rx="8" fill="#1f2933"/>
+  <text x="380" y="40" text-anchor="middle" fill="#fff" font-size="13" font-weight="bold">同じ .cpp ファイル</text>
+  <text x="380" y="56" text-anchor="middle" fill="#b8c4cd" font-size="11">std::println / C++23 の構文</text>
+
+  <path d="M330,64 L200,64 L200,104" fill="none" stroke="#5a6b7a" stroke-width="1.6" marker-end="url(#c)"/>
+  <path d="M430,64 L560,64 L560,104" fill="none" stroke="#5a6b7a" stroke-width="1.6" marker-end="url(#c)"/>
+
+  <!-- MSVC lane -->
+  <rect x="40" y="110" width="320" height="230" rx="10" fill="#eef4f9" stroke="#2f6f9f" stroke-width="1.8"/>
+  <text x="200" y="138" text-anchor="middle" font-size="14" font-weight="bold" fill="#2f6f9f">ビルド経路（MSVC）</text>
+  <text x="200" y="160" text-anchor="middle" font-size="11.5" fill="#5a6b7a">実行ファイルを作る</text>
+
+  <rect x="62" y="176" width="276" height="52" rx="6" fill="#fff" stroke="#c5d6e4"/>
+  <text x="200" y="197" text-anchor="middle" font-size="11.5" fill="#5a6b7a">構成プロパティ &gt; C/C++ &gt; 言語</text>
+  <text x="200" y="216" text-anchor="middle" font-size="12.5" fill="#1f2933" font-weight="bold">C++ 言語標準</text>
+
+  <text x="200" y="252" text-anchor="middle" font-size="12" fill="#1f2933">↓ 実際に渡る引数</text>
+  <rect x="62" y="262" width="276" height="34" rx="6" fill="#2f6f9f"/>
+  <text x="200" y="284" text-anchor="middle" font-size="12.5" fill="#fff" font-family="monospace" font-weight="bold">/std:c++23preview</text>
+  <text x="200" y="318" text-anchor="middle" font-size="11" fill="#5a6b7a">（項目名は VS のバージョンで異なる。</text>
+  <text x="200" y="333" text-anchor="middle" font-size="11" fill="#5a6b7a">無ければ /std:c++latest を選ぶ）</text>
+
+  <!-- clang-tidy lane -->
+  <rect x="400" y="110" width="320" height="230" rx="10" fill="#fbf4ea" stroke="#b4661a" stroke-width="2.4"/>
+  <text x="560" y="138" text-anchor="middle" font-size="14" font-weight="bold" fill="#b4661a">解析経路（Clang-Tidy）</text>
+  <text x="560" y="160" text-anchor="middle" font-size="11.5" fill="#5a6b7a">AST を作る</text>
+
+  <rect x="422" y="176" width="276" height="52" rx="6" fill="#fff" stroke="#e6d5bd"/>
+  <text x="560" y="197" text-anchor="middle" font-size="11.5" fill="#5a6b7a">構成プロパティ &gt; コード分析 &gt; Clang-Tidy</text>
+  <text x="560" y="216" text-anchor="middle" font-size="12.5" fill="#1f2933" font-weight="bold">Clang-Tidy 追加オプション</text>
+
+  <text x="560" y="252" text-anchor="middle" font-size="12" fill="#1f2933">↓ --extra-args で渡る引数</text>
+  <rect x="422" y="262" width="276" height="34" rx="6" fill="#b4661a"/>
+  <text x="560" y="284" text-anchor="middle" font-size="12.5" fill="#fff" font-family="monospace" font-weight="bold">-std=c++23</text>
+  <text x="560" y="318" text-anchor="middle" font-size="11" fill="#b4661a" font-weight="bold">ここを忘れると C++23 の構文で</text>
+  <text x="560" y="333" text-anchor="middle" font-size="11" fill="#b4661a" font-weight="bold">パースエラーになる</text>
+
+  <rect x="40" y="356" width="680" height="34" rx="6" fill="#f4f6f8" stroke="#d8dee4"/>
+  <text x="380" y="378" text-anchor="middle" font-size="12" fill="#1f2933">同じソースを <tspan font-weight="bold">二つのコンパイラが別々に読む</tspan>。規格の指定もそれぞれに必要になる</text>
+  </g>
+</svg>
+<figcaption><b>図3-2</b>　C++23 指定が二箇所必要な理由。ビルドは MSVC、解析は Clang。両者は独立しているので、片方だけ設定しても噛み合わない。</figcaption>
+</figure>
+
+<div class="tip">
+<span class="t">MSBuild なら自動で伝わることもある</span>
+<p>Visual Studio の MSBuild 統合は、プロジェクトの設定から言語規格やインクルードパスを Clang-Tidy にある程度自動で引き継ぎます。うまく動いているうちは追加設定は要りません。しかし <strong>C++23 のような新しい規格や、プレビュー扱いのオプションでは引き継ぎが不完全になることがある</strong> ため、「C++23 の構文だけパースエラーになる」という症状が出たら図3-2 の右側を疑ってください。切り分け手順は第4章と第12章で扱います。</p>
+</div>
+
+<h3>なぜモジュールを使わないのか</h3>
+
+<p>本書では C++23 を使いますが、<strong>モジュール（<code>import</code> / <code>export</code>）は使いません</strong>。理由は静的解析ツールの都合です。</p>
+
+<ul>
+  <li>モジュールのビルドには、事前にビルド済みモジュールインターフェイス（BMI）が必要で、しかも BMI はコンパイラごとに互換性がありません。MSVC が作った BMI を Clang は読めません。</li>
+  <li>つまり Clang-Tidy は、モジュールを使ったコードを解析するために <strong>Clang 自身でモジュールをビルドし直す</strong> 必要があります。ビルドシステムとの連携が一気に複雑になります。</li>
+  <li>ヘッダインクルード方式なら、Clang-Tidy は <code>-I</code> の設定さえ合っていれば単独で AST を作れます。</li>
+</ul>
+
+<p>Clang-Tidy そのものを学ぶことが目的なので、余計な変数を持ち込まない、という判断です。<code>#include</code> ベースで進めます。</p>
+
+<h2>3.3 ソリューション TidyLab を作る</h2>
+
+<p>本書全体で使う作業場を作ります。構成はシンプルです。</p>
+
+<div class="path">TidyLab\
+├─ TidyLab.sln
+├─ .clang-tidy              ← 第7章で作成。当面は空
+├─ .gitignore
+├─ TidyLab\                 ← メインのプロジェクト（コンソールアプリ）
+│   ├─ TidyLab.vcxproj
+│   ├─ main.cpp
+│   ├─ config_loader.h      ← 第1章のリスト1-1
+│   ├─ config_loader.cpp
+│   └─ app.ini              ← テスト用の設定ファイル
+└─ samples\                 ← 章ごとの小さな検証用ソース
+    └─ ch05_first_run.cpp</div>
+
+<figure>
+<svg viewBox="0 0 760 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="TidyLab の各要素がどの部で使われるか">
+  <g font-family="sans-serif">
+  <text x="30" y="28" font-size="12.5" font-weight="bold" fill="#5a6b7a" letter-spacing="1.5">TidyLab の各要素と、本書での使われ方</text>
+
+  <rect x="30" y="44" width="180" height="76" rx="8" fill="#1f2933"/>
+  <text x="120" y="70" text-anchor="middle" fill="#fff" font-size="13" font-weight="bold">config_loader.cpp</text>
+  <text x="120" y="90" text-anchor="middle" fill="#b8c4cd" font-size="11">問題を含んだ題材コード</text>
+  <text x="120" y="108" text-anchor="middle" fill="#b8c4cd" font-size="11">全編を通して改善していく</text>
+
+  <rect x="30" y="136" width="180" height="76" rx="8" fill="#2f6f9f"/>
+  <text x="120" y="162" text-anchor="middle" fill="#fff" font-size="13" font-weight="bold">.clang-tidy</text>
+  <text x="120" y="182" text-anchor="middle" fill="#d6e6f2" font-size="11">有効チェック・オプション</text>
+  <text x="120" y="200" text-anchor="middle" fill="#d6e6f2" font-size="11">カスタムチェックの定義</text>
+
+  <rect x="30" y="228" width="180" height="56" rx="8" fill="#4a5b6a"/>
+  <text x="120" y="252" text-anchor="middle" fill="#fff" font-size="13" font-weight="bold">samples\</text>
+  <text x="120" y="271" text-anchor="middle" fill="#cfd8de" font-size="11">章ごとの最小検証コード</text>
+
+  <!-- lanes -->
+  <line x1="230" y1="40" x2="230" y2="290" stroke="#d8dee4"/>
+
+  <rect x="248" y="44" width="150" height="34" rx="5" fill="#eef4f9" stroke="#2f6f9f"/>
+  <text x="323" y="66" text-anchor="middle" font-size="11.5" fill="#2f6f9f" font-weight="bold">第2部 チェック選択</text>
+
+  <rect x="248" y="86" width="150" height="34" rx="5" fill="#eef4f9" stroke="#2f6f9f"/>
+  <text x="323" y="108" text-anchor="middle" font-size="11.5" fill="#2f6f9f" font-weight="bold">第4部 標準チェック</text>
+
+  <rect x="416" y="44" width="150" height="34" rx="5" fill="#fbf4ea" stroke="#b4661a"/>
+  <text x="491" y="66" text-anchor="middle" font-size="11.5" fill="#b4661a" font-weight="bold">第5部 AST Matcher</text>
+
+  <rect x="416" y="86" width="150" height="76" rx="5" fill="#b4661a"/>
+  <text x="491" y="112" text-anchor="middle" font-size="11.5" fill="#fff" font-weight="bold">第6部</text>
+  <text x="491" y="130" text-anchor="middle" font-size="11.5" fill="#fff" font-weight="bold">Query Based</text>
+  <text x="491" y="148" text-anchor="middle" font-size="11.5" fill="#fff" font-weight="bold">Custom Check</text>
+
+  <rect x="584" y="44" width="146" height="34" rx="5" fill="#eef5f0" stroke="#3d7a52"/>
+  <text x="657" y="66" text-anchor="middle" font-size="11.5" fill="#3d7a52" font-weight="bold">第7部 CI 運用</text>
+
+  <path d="M210,82 L248,61" fill="none" stroke="#c5d6e4" stroke-width="1.5"/>
+  <path d="M210,82 L248,103" fill="none" stroke="#c5d6e4" stroke-width="1.5"/>
+  <path d="M210,82 L416,61" fill="none" stroke="#e6d5bd" stroke-width="1.5"/>
+  <path d="M210,174 L416,124" fill="none" stroke="#e6d5bd" stroke-width="1.8"/>
+  <path d="M210,174 L584,61" fill="none" stroke="#c9dfd1" stroke-width="1.5"/>
+  <path d="M210,256 L416,150" fill="none" stroke="#e6d5bd" stroke-width="1.5"/>
+
+  </g>
+</svg>
+<figcaption><b>図3-3</b>　TidyLab の各要素と、本書のどの部で主役になるか。<code>.clang-tidy</code> は第2部から第6部までずっと育て続けるファイル。</figcaption>
+</figure>
+
+<h2>3.4 【ハンズオン】TidyLab を組み立てる</h2>
+
+<div class="hands">
+<div class="hd">HANDS-ON 3　作業場を作り、C++23 でビルドする</div>
+<div class="bd">
+<ol>
+  <li><strong>コンポーネントを確認する。</strong> Visual Studio Installer を起動し、「変更」から
+    <ul>
+      <li>ワークロード：<strong>C++ によるデスクトップ開発</strong></li>
+      <li>個別のコンポーネント：<strong>Windows 用 C++ Clang ツール</strong></li>
+    </ul>
+    の両方にチェックが入っていることを確認します。入っていなければ追加してインストールします。</li>
+
+  <li><strong>ソリューションを作る。</strong> 「新しいプロジェクトの作成」から <strong>コンソール アプリ</strong>（C++）を選び、プロジェクト名 <code>TidyLab</code>、ソリューション名も <code>TidyLab</code> で作成します。「ソリューションとプロジェクトを同じディレクトリに配置する」は <strong>チェックを外して</strong> ください。ソリューション直下に <code>.clang-tidy</code> を置きたいためです。</li>
+
+  <li><strong>題材コードを追加する。</strong> 第1章のリスト1-1 を <code>config_loader.h</code> / <code>config_loader.cpp</code> として追加し、<code>main.cpp</code> を次の内容にします。
+<pre><code>#include "config_loader.h"
+#include &lt;print&gt;
+
+int main() {
+    ConfigLoader loader("app.ini");
+    if (!loader.load()) {
+        std::println("load failed");
+        return 1;
+    }
+    for (const auto&amp; e : loader.entries()) {
+        std::println("{} = {}", e.name, e.value);
+    }
+    return 0;
+}</code></pre>
+  </li>
+
+  <li><strong>テスト用の設定ファイルを置く。</strong> プロジェクトフォルダに <code>app.ini</code> を作り、次を書きます。実行時のカレントディレクトリに置かれるよう、プロパティで「出力ディレクトリにコピー」を設定してもよいですし、手でコピーしても構いません。
+<pre><code>width=1920
+height=1080
+title=TidyLab</code></pre>
+  </li>
+
+  <li><strong>C++23 を有効にする。</strong> プロジェクトのプロパティを開き、<code>構成プロパティ &gt; C/C++ &gt; 言語 &gt; C++ 言語標準</code> で C++23 に相当する項目を選びます。ドロップダウンの表記は VS のバージョンによって異なります。
+    <ul>
+      <li>「ISO C++23 標準（プレビュー）(/std:c++23preview)」があればそれを選ぶ</li>
+      <li>なければ「最新の C++ ドラフト標準 (/std:c++latest)」を選ぶ</li>
+    </ul>
+    <strong>すべての構成（Debug / Release、x64 / x86）に対して設定してください。</strong> 構成を切り替えたら C++23 が外れていた、というのは定番の事故です。</li>
+
+  <li><strong>警告レベルを上げる。</strong> <code>構成プロパティ &gt; C/C++ &gt; 全般 &gt; 警告レベル</code> を <strong>/W4</strong> にします。静的解析はコンパイラ警告の代わりではありません（第1章）。</li>
+
+  <li><strong>ビルドして実行する。</strong> <code>Ctrl+F5</code> で実行し、<code>width = 1920</code> のような出力が3行出れば成功です。<code>std::println</code> でエラーになる場合は手順5の言語規格設定を確認してください。</li>
+
+  <li><strong>空の <code>.clang-tidy</code> を置く。</strong> ソリューション直下（<code>TidyLab.sln</code> と同じ階層）に、中身が次の1行だけのファイル <code>.clang-tidy</code> を作ります。
+<pre><code>Checks: '-*'</code></pre>
+    中身は第7章で本格的に書きます。いまは「置き場所を確保した」だけです。</li>
+</ol>
+</div>
+</div>
+
+<div class="warn">
+<span class="t">ファイル名の先頭がドットで作れないとき</span>
+<p>エクスプローラーからは <code>.clang-tidy</code> という名前のファイルを作れないことがあります。その場合は Visual Studio の「新しい項目の追加」でテキストファイルとして <code>.clang-tidy</code> を指定するか、コマンドプロンプトで <code>type nul &gt; .clang-tidy</code> とします。拡張子は付けません。<code>.clang-tidy.txt</code> になっていると一切読まれず、しかもエラーも出ないので注意してください。</p>
+</div>
+
+<h2>3.5 バージョン管理に載せる場合</h2>
+
+<p>チームで使うことを見据えるなら、この段階で <code>.gitignore</code> を用意しておきます。ビルド成果物は除外し、<strong><code>.clang-tidy</code> は必ずリポジトリに含めます</strong>。設定ファイルを共有することが、Clang-Tidy 運用の前提だからです（第38章）。</p>
+
+<pre><code># .gitignore
+/.vs/
+[Bb]in/
+[Oo]bj/
+[Dd]ebug/
+[Rr]elease/
+x64/
+*.user
+
+# .clang-tidy は除外しない（チームで共有する）</code></pre>
+
+<h2>3.6 この時点で確認できること</h2>
+
+<p>ここまでで、次の状態になっているはずです。</p>
+
+<ul>
+  <li>C++23 でビルドが通り、実行できる</li>
+  <li>Clang ツールがインストールされている（ただし、まだ動かしていない）</li>
+  <li><code>.clang-tidy</code> の置き場所が決まっている（ただし、まだ空）</li>
+</ul>
+
+<p>次章では、インストールした <code>clang-tidy.exe</code> を初めて直接叩きます。目的はバージョンの確認です。<strong>本書の中心テーマである Query Based Custom Check は、比較的新しいバージョンでしか使えません。</strong> Visual Studio に同梱されているものがそれを満たしているとは限らないので、先に確かめておく必要があります。</p>
+
+<div class="summary">
+<h2>この章のまとめ</h2>
+<ul>
+  <li>Clang-Tidy 本体はワークロードではなく、個別コンポーネント「Windows 用 C++ Clang ツール」に含まれる。</li>
+  <li>C++23 の指定は <strong>MSVC 向け（<code>/std:c++23preview</code> など）と Clang-Tidy 向け（<code>-std=c++23</code>）の二箇所</strong> に関わる。同じソースを二つのコンパイラが別々に読むため。</li>
+  <li>本書がモジュールを使わないのは、BMI がコンパイラ間で互換でなく、Clang-Tidy 側で解析用に作り直す必要が生じるため。</li>
+  <li>ソリューション <code>TidyLab</code> を作り、題材コードと空の <code>.clang-tidy</code> を配置した。<code>.clang-tidy</code> はソリューション直下に置き、リポジトリで共有する。</li>
+</ul>
+</div>
+
+<p class="next"><strong>次章：</strong> 第4章「同梱 clang-tidy のバージョンを確認する」では、実際に <code>clang-tidy.exe</code> を探して <code>--version</code> を叩きます。本書の主題である Query Based Custom Check が使えるかどうかは、ここで決まります。</p>
+
+</div>
+</body>
+</html>

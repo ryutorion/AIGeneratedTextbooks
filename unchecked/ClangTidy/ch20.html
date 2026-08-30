@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第20章 readability-* と命名規則 ─ Clang-Tidy入門</title>
+<style>
+  :root{
+    --ink:#1f2933; --sub:#5a6b7a; --line:#d8dee4; --bg:#ffffff;
+    --code-bg:#f6f8fa; --code-line:#e2e8ee;
+    --accent:#2f6f9f; --accent-bg:#eef4f9;
+    --warn:#b4661a; --warn-bg:#fbf4ea;
+    --ok:#3d7a52; --ok-bg:#eef5f0;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0; background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Noto Sans JP","Meiryo",sans-serif;
+    font-size:16px; line-height:1.95; font-feature-settings:"palt" 1;}
+  .page{max-width:47rem; margin:0 auto; padding:3.5rem 1.6rem 6rem}
+  .chap-no{font-size:.8rem; letter-spacing:.22em; color:var(--accent); font-weight:700; margin:0 0 .5rem}
+  h1{font-size:1.85rem; line-height:1.5; margin:0 0 .6rem; letter-spacing:.01em}
+  .lede{color:var(--sub); font-size:1rem; margin:0 0 2.2rem; padding-bottom:1.6rem; border-bottom:2px solid var(--ink)}
+  h2{font-size:1.28rem; margin:3rem 0 1rem; padding-left:.7rem; border-left:4px solid var(--accent); line-height:1.6}
+  h3{font-size:1.05rem; margin:2.2rem 0 .7rem}
+  h3::before{content:"◆ "; color:var(--accent); font-size:.8em}
+  p{margin:0 0 1.1rem}
+  ul,ol{margin:0 0 1.2rem; padding-left:1.6rem}
+  li{margin:.35rem 0}
+  code{font-family:"Cascadia Mono","Consolas","SFMono-Regular",monospace; font-size:.9em;
+       background:var(--code-bg); border:1px solid var(--code-line); border-radius:4px; padding:.08em .35em}
+  pre{background:var(--code-bg); border:1px solid var(--code-line); border-radius:8px;
+      padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.7}
+  pre code{background:none; border:none; padding:0; font-size:.86rem}
+  pre.term{background:#1f2933; border-color:#1f2933; color:#e6edf3}
+  pre.term code{color:#e6edf3}
+  pre.term .p{color:#7fb2d6}
+  pre.term .o{color:#9fb3c0}
+  .cap{font-size:.82rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+  figure{margin:2rem 0 2.2rem}
+  figure svg{display:block; width:100%; height:auto; border:1px solid var(--line); border-radius:8px; background:#fff}
+  figcaption{font-size:.85rem; color:var(--sub); margin-top:.6rem}
+  figcaption b{color:var(--ink)}
+  .box{border-radius:8px; padding:1rem 1.2rem; margin:1.6rem 0; font-size:.94rem}
+  .box p:last-child{margin-bottom:0}
+  .box .t{font-weight:700; display:block; margin-bottom:.35rem; font-size:.88rem; letter-spacing:.04em}
+  .note{background:var(--accent-bg); border-left:4px solid var(--accent)} .note .t{color:var(--accent)}
+  .warn{background:var(--warn-bg); border-left:4px solid var(--warn)} .warn .t{color:var(--warn)}
+  .tip{background:var(--ok-bg); border-left:4px solid var(--ok)} .tip .t{color:var(--ok)}
+  .hands{border:1px solid var(--line); border-radius:10px; margin:2rem 0; overflow:hidden}
+  .hands>.hd{background:var(--ink); color:#fff; padding:.55rem 1.1rem; font-size:.85rem; letter-spacing:.1em; font-weight:700}
+  .hands>.bd{padding:1.3rem 1.3rem .4rem}
+  .hands ol{counter-reset:step; list-style:none; padding-left:0}
+  .hands ol>li{counter-increment:step; position:relative; padding-left:2.4rem; margin:0 0 1.2rem}
+  .hands ol>li::before{content:counter(step); position:absolute; left:0; top:.25rem;
+    width:1.7rem; height:1.7rem; border-radius:50%; background:var(--accent); color:#fff;
+    font-size:.82rem; font-weight:700; display:flex; align-items:center; justify-content:center; line-height:1}
+  table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+  th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+  th{background:var(--code-bg); font-weight:700}
+  .summary{border:2px solid var(--ink); border-radius:10px; padding:1.3rem 1.5rem; margin:3rem 0 1rem}
+  .summary h2{margin:0 0 .8rem; border:none; padding:0; font-size:1.1rem}
+  .summary ul{margin-bottom:0}
+  .next{color:var(--sub); font-size:.94rem; border-top:1px solid var(--line); padding-top:1.2rem; margin-top:2.5rem}
+  @media (max-width:600px){ body{font-size:15px} .page{padding:2.2rem 1.1rem 4rem} h1{font-size:1.5rem} }
+</style>
+</head>
+<body>
+<div class="page">
+
+<p class="chap-no">第 20 章</p>
+<h1><code>readability-*</code> と命名規則</h1>
+<p class="lede">これまでのモジュールは「正しさ」を扱ってきました。ここからは違います。<code>readability-*</code> が扱うのは<strong>好み</strong>です。だから技術的な判断より先に、チームの合意が要ります。合意なしにこのモジュールを有効にすると、レビューが宗教戦争になります。逆に、合意さえあれば <code>readability-identifier-naming</code> は本書で最も実用的なチェックの一つです。</p>
+
+<h2>20.1 順序を間違えない</h2>
+
+<figure>
+<svg viewBox="0 0 760 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="可読性チェック導入の正しい順序">
+  <defs>
+    <marker id="a20" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5a6b7a"/>
+    </marker>
+  </defs>
+  <g font-family="sans-serif">
+
+  <text x="30" y="28" font-size="12.5" font-weight="bold" fill="#3d7a52" letter-spacing="1">○ 正しい順序</text>
+
+  <rect x="30" y="40" width="150" height="56" rx="8" fill="#3d7a52"/>
+  <text x="105" y="64" text-anchor="middle" fill="#fff" font-size="12" font-weight="bold">① 合意する</text>
+  <text x="105" y="82" text-anchor="middle" fill="#d5e6da" font-size="10.5">人間が話し合う</text>
+  <line x1="180" y1="68" x2="206" y2="68" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#a20)"/>
+
+  <rect x="210" y="40" width="150" height="56" rx="8" fill="#2f6f9f"/>
+  <text x="285" y="64" text-anchor="middle" fill="#fff" font-size="12" font-weight="bold">② 設定に書く</text>
+  <text x="285" y="82" text-anchor="middle" fill="#d6e6f2" font-size="10.5">.clang-tidy</text>
+  <line x1="360" y1="68" x2="386" y2="68" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#a20)"/>
+
+  <rect x="390" y="40" width="150" height="56" rx="8" fill="#b4661a"/>
+  <text x="465" y="64" text-anchor="middle" fill="#fff" font-size="12" font-weight="bold">③ 一括適用</text>
+  <text x="465" y="82" text-anchor="middle" fill="#fde9d0" font-size="10.5">既存コードを揃える</text>
+  <line x1="540" y1="68" x2="566" y2="68" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#a20)"/>
+
+  <rect x="570" y="40" width="160" height="56" rx="8" fill="#1f2933"/>
+  <text x="650" y="64" text-anchor="middle" fill="#fff" font-size="12" font-weight="bold">④ CI で維持</text>
+  <text x="650" y="82" text-anchor="middle" fill="#b8c4cd" font-size="10.5">以後は自動で守られる</text>
+
+  <line x1="30" y1="124" x2="730" y2="124" stroke="#d8dee4"/>
+
+  <text x="30" y="152" font-size="12.5" font-weight="bold" fill="#a04a34" letter-spacing="1">✕ よくある失敗</text>
+
+  <rect x="30" y="164" width="190" height="56" rx="8" fill="#f7e9e5" stroke="#a04a34"/>
+  <text x="125" y="188" text-anchor="middle" fill="#1f2933" font-size="12" font-weight="bold">とりあえず有効にする</text>
+  <text x="125" y="206" text-anchor="middle" fill="#5a6b7a" font-size="10.5">readability-* をまるごと</text>
+  <line x1="220" y1="192" x2="246" y2="192" stroke="#a04a34" stroke-width="1.5" marker-end="url(#a20)"/>
+
+  <rect x="250" y="164" width="190" height="56" rx="8" fill="#f7e9e5" stroke="#a04a34"/>
+  <text x="345" y="188" text-anchor="middle" fill="#1f2933" font-size="12" font-weight="bold">数千件の警告</text>
+  <text x="345" y="206" text-anchor="middle" fill="#5a6b7a" font-size="10.5">既存コード全体が違反</text>
+  <line x1="440" y1="192" x2="466" y2="192" stroke="#a04a34" stroke-width="1.5" marker-end="url(#a20)"/>
+
+  <rect x="470" y="164" width="260" height="56" rx="8" fill="#a04a34"/>
+  <text x="600" y="188" text-anchor="middle" fill="#fff" font-size="12" font-weight="bold">「この規約おかしくない？」</text>
+  <text x="600" y="206" text-anchor="middle" fill="#f0d5cf" font-size="10.5">警告が出てから議論が始まる → 紛糾</text>
+
+  <rect x="30" y="240" width="700" height="48" rx="8" fill="#1f2933"/>
+  <text x="380" y="262" text-anchor="middle" fill="#fff" font-size="12" font-weight="bold">合意を「警告で作ろう」としてはいけない</text>
+  <text x="380" y="280" text-anchor="middle" fill="#b8c4cd" font-size="11">ツールは合意を実行する道具であって、合意を形成する道具ではない</text>
+  </g>
+</svg>
+<figcaption><b>図20-1</b>　可読性チェック導入の順序。①を飛ばすと必ず紛糾する。</figcaption>
+</figure>
+
+<h2>20.2 命名規約を設計する</h2>
+
+<p><code>readability-identifier-naming</code> は、識別子の種類ごとに命名形式を指定できます（第8章の図8-2）。設計するときは、次の表を埋める作業だと考えると進みます。</p>
+
+<figure>
+<svg viewBox="0 0 760 420" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="命名規約の設計シート">
+  <g font-family="sans-serif">
+
+  <rect x="24" y="16" width="712" height="34" rx="6" fill="#1f2933"/>
+  <text x="380" y="39" text-anchor="middle" fill="#fff" font-size="13" font-weight="bold">命名規約 設計シート ── この表を埋めてから設定を書く</text>
+
+  <g font-size="11.5">
+  <rect x="24" y="56" width="230" height="30" rx="4" fill="#f6f8fa" stroke="#d8dee4"/>
+  <text x="40" y="76" fill="#1f2933" font-weight="bold">識別子の種類</text>
+  <rect x="258" y="56" width="200" height="30" rx="4" fill="#f6f8fa" stroke="#d8dee4"/>
+  <text x="274" y="76" fill="#1f2933" font-weight="bold">オプション名</text>
+  <rect x="462" y="56" width="274" height="30" rx="4" fill="#f6f8fa" stroke="#d8dee4"/>
+  <text x="478" y="76" fill="#1f2933" font-weight="bold">TidyLab での決定（例）</text>
+
+  <g fill="#1f2933">
+  <text x="40" y="112">クラス・構造体</text>
+  <text x="274" y="112" font-family="monospace" font-size="10.5">ClassCase / StructCase</text>
+  <text x="478" y="112" font-family="monospace" font-size="10.5" font-weight="bold">CamelCase</text>
+
+  <text x="40" y="140">列挙型</text>
+  <text x="274" y="140" font-family="monospace" font-size="10.5">EnumCase</text>
+  <text x="478" y="140" font-family="monospace" font-size="10.5" font-weight="bold">CamelCase</text>
+
+  <text x="40" y="168">列挙子</text>
+  <text x="274" y="168" font-family="monospace" font-size="10.5">EnumConstantCase</text>
+  <text x="478" y="168" font-family="monospace" font-size="10.5" font-weight="bold">CamelCase</text>
+
+  <text x="40" y="196">関数・メソッド</text>
+  <text x="274" y="196" font-family="monospace" font-size="10.5">FunctionCase / MethodCase</text>
+  <text x="478" y="196" font-family="monospace" font-size="10.5" font-weight="bold">camelBack</text>
+
+  <text x="40" y="224">引数</text>
+  <text x="274" y="224" font-family="monospace" font-size="10.5">ParameterCase</text>
+  <text x="478" y="224" font-family="monospace" font-size="10.5" font-weight="bold">lower_case</text>
+
+  <text x="40" y="252">ローカル変数</text>
+  <text x="274" y="252" font-family="monospace" font-size="10.5">VariableCase</text>
+  <text x="478" y="252" font-family="monospace" font-size="10.5" font-weight="bold">lower_case</text>
+
+  <text x="40" y="280">private メンバ</text>
+  <text x="274" y="280" font-family="monospace" font-size="10.5">PrivateMemberCase / Suffix</text>
+  <text x="478" y="280" font-family="monospace" font-size="10.5" font-weight="bold">lower_case ＋ 接尾辞 "_"</text>
+
+  <text x="40" y="308">定数</text>
+  <text x="274" y="308" font-family="monospace" font-size="10.5">ConstantCase</text>
+  <text x="478" y="308" font-family="monospace" font-size="10.5" font-weight="bold">UPPER_CASE</text>
+
+  <text x="40" y="336">名前空間</text>
+  <text x="274" y="336" font-family="monospace" font-size="10.5">NamespaceCase</text>
+  <text x="478" y="336" font-family="monospace" font-size="10.5" font-weight="bold">lower_case</text>
+
+  <text x="40" y="364">マクロ</text>
+  <text x="274" y="364" font-family="monospace" font-size="10.5">MacroDefinitionCase</text>
+  <text x="478" y="364" font-family="monospace" font-size="10.5" font-weight="bold">UPPER_CASE</text>
+  </g>
+  </g>
+
+  <rect x="24" y="380" width="712" height="30" rx="6" fill="#eef5f0" stroke="#3d7a52"/>
+  <text x="380" y="400" text-anchor="middle" font-size="11.5" fill="#3d7a52" font-weight="bold">埋まらない行は「決めていない」ということ。決めていないものは設定に書かない</text>
+  </g>
+</svg>
+<figcaption><b>図20-2</b>　命名規約の設計シート。空欄のまま設定を書くと、既定値が意図せず適用されて混乱する。</figcaption>
+</figure>
+
+<p>決まった内容を <code>.clang-tidy</code> に落とします。</p>
+
+<pre><code>CheckOptions:
+  readability-identifier-naming.ClassCase: 'CamelCase'
+  readability-identifier-naming.StructCase: 'CamelCase'
+  readability-identifier-naming.EnumCase: 'CamelCase'
+  readability-identifier-naming.EnumConstantCase: 'CamelCase'
+  readability-identifier-naming.FunctionCase: 'camelBack'
+  readability-identifier-naming.MethodCase: 'camelBack'
+  readability-identifier-naming.ParameterCase: 'lower_case'
+  readability-identifier-naming.VariableCase: 'lower_case'
+  readability-identifier-naming.PrivateMemberCase: 'lower_case'
+  readability-identifier-naming.PrivateMemberSuffix: '_'
+  readability-identifier-naming.ConstantCase: 'UPPER_CASE'
+  readability-identifier-naming.NamespaceCase: 'lower_case'
+  readability-identifier-naming.MacroDefinitionCase: 'UPPER_CASE'</code></pre>
+
+<div class="note">
+<span class="t">指定できる形式</span>
+<p><code>lower_case</code> / <code>UPPER_CASE</code> / <code>camelBack</code> / <code>CamelCase</code> / <code>Camel_Snake_Case</code> / <code>camel_Snake_Back</code> / <code>aNy_CasE</code>（何でも許可）などがあります。<code>aNy_CasE</code> は「この種類はチェックしない」を明示したいときに使えます。</p>
+</div>
+
+<h2>20.3 一括リネームの威力と射程</h2>
+
+<p>このチェックには自動修正が付いており、<strong>定義と参照をまとめて書き換えます</strong>。ただし射程には限界があります。第10章のヘッダフィルタと第15章の実行範囲が、そのまま効いてきます。</p>
+
+<figure>
+<svg viewBox="0 0 760 340" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="一括リネームが届く範囲と届かない範囲">
+  <g font-family="sans-serif">
+
+  <rect x="24" y="20" width="712" height="34" rx="6" fill="#b4661a"/>
+  <text x="380" y="43" text-anchor="middle" fill="#fff" font-size="13" font-weight="bold">Buffer → buffer_ にリネームしたとき</text>
+
+  <rect x="24" y="66" width="350" height="248" rx="10" fill="#eef5f0" stroke="#3d7a52" stroke-width="1.8"/>
+  <text x="199" y="92" text-anchor="middle" font-size="13" font-weight="bold" fill="#3d7a52">届く範囲</text>
+  <g font-size="11.5" fill="#1f2933">
+  <text x="44" y="122">・解析対象になった翻訳単位の中の</text>
+  <text x="58" y="142">定義と参照</text>
+  <text x="44" y="172">・ヘッダフィルタに一致するヘッダ内の</text>
+  <text x="58" y="192">定義と参照</text>
+  <text x="44" y="222">・run-clang-tidy で回した全ファイル</text>
+  </g>
+  <rect x="44" y="244" width="310" height="52" rx="6" fill="#fff" stroke="#c9dfd1"/>
+  <text x="199" y="266" text-anchor="middle" font-size="11" fill="#3d7a52" font-weight="bold">→ だから全体を一度に回す</text>
+  <text x="199" y="284" text-anchor="middle" font-size="10.5" fill="#5a6b7a">1ファイルずつ当てると壊れる</text>
+
+  <rect x="386" y="66" width="350" height="248" rx="10" fill="#f7e9e5" stroke="#a04a34" stroke-width="2"/>
+  <text x="561" y="92" text-anchor="middle" font-size="13" font-weight="bold" fill="#a04a34">届かない範囲</text>
+  <g font-size="11.5" fill="#1f2933">
+  <text x="406" y="122">・解析対象外のファイル</text>
+  <text x="420" y="140" font-size="10.5" fill="#5a6b7a">（third_party を除外していた等）</text>
+  <text x="406" y="170">・マクロで組み立てられた名前</text>
+  <text x="420" y="188" font-size="10.5" font-family="monospace" fill="#5a6b7a">#define GET(x) get_##x</text>
+  <text x="406" y="218">・文字列リテラルの中の名前</text>
+  <text x="420" y="236" font-size="10.5" font-family="monospace" fill="#5a6b7a">log("Buffer is null")</text>
+  <text x="406" y="266">・外部に公開している API 名</text>
+  </g>
+  <rect x="406" y="278" width="310" height="26" rx="6" fill="#a04a34"/>
+  <text x="561" y="296" text-anchor="middle" font-size="11" fill="#fff" font-weight="bold">→ 適用後は必ずビルドで確認</text>
+  </g>
+</svg>
+<figcaption><b>図20-3</b>　一括リネームの射程。届かない箇所があるため、適用直後のビルドが安全網になる。</figcaption>
+</figure>
+
+<h2>20.4 構造を整えるチェック</h2>
+
+<p>命名以外にも、実用的なものが多数あります。自動修正付きで、意味を変えないものが中心です。</p>
+
+<table>
+<tr><th>チェック</th><th>内容</th></tr>
+<tr><td><code>readability-braces-around-statements</code></td><td>1行の <code>if</code> 文にも波括弧を付ける</td></tr>
+<tr><td><code>readability-else-after-return</code></td><td><code>return</code> の後の <code>else</code> を削り、ネストを浅くする</td></tr>
+<tr><td><code>readability-isolate-declaration</code></td><td><code>int a, *b;</code> を分割する</td></tr>
+<tr><td><code>readability-simplify-boolean-expr</code></td><td><code>if (x) return true; else return false;</code> → <code>return x;</code></td></tr>
+<tr><td><code>readability-container-size-empty</code></td><td><code>v.size() == 0</code> → <code>v.empty()</code></td></tr>
+<tr><td><code>readability-container-contains</code></td><td><code>m.count(k) &gt; 0</code> → <code>m.contains(k)</code>（C++20 以降）</td></tr>
+<tr><td><code>readability-qualified-auto</code></td><td>ポインタを受ける <code>auto</code> に <code>*</code> を付けて明示する</td></tr>
+<tr><td><code>readability-redundant-string-cstr</code></td><td>不要な <code>.c_str()</code> を削る</td></tr>
+<tr><td><code>readability-math-missing-parentheses</code></td><td>優先順位が紛らわしい算術式に括弧を足す</td></tr>
+<tr><td><code>readability-use-std-min-max</code></td><td><code>if (a &lt; b) a = b;</code> → <code>a = std::max(a, b);</code></td></tr>
+<tr><td><code>readability-duplicate-include</code></td><td>重複した <code>#include</code> を削る</td></tr>
+</table>
+
+<h3>複雑さを測る</h3>
+
+<table>
+<tr><th>チェック</th><th>内容</th></tr>
+<tr><td><code>readability-function-size</code></td><td>行数・文数・分岐数・引数の数・ネストの深さ・変数の数（第8章）</td></tr>
+<tr><td><code>readability-function-cognitive-complexity</code></td><td>「読んで理解する難しさ」を数値化する。ネストが深いほど重く数える</td></tr>
+</table>
+
+<div class="tip">
+<span class="t">複雑さの制限には副次効果がある</span>
+<p>第17章で見たとおり、フロー解析は関数が短いほど効きます。関数の複雑さに上限を設けることは、可読性の話であると同時に <strong>静的解析の精度を上げる施策</strong>でもあります。この二つの理由を並べると、チームの合意が取りやすくなります。</p>
+</div>
+
+<h2>20.5 荒れやすいチェック</h2>
+
+<table>
+<tr><th>チェック</th><th>なぜ荒れるか</th></tr>
+<tr><td><code>readability-implicit-bool-conversion</code></td><td><code>if (ptr)</code> や <code>if (count)</code> を全部書き換えさせる。件数が膨大になりやすい</td></tr>
+<tr><td><code>readability-identifier-length</code></td><td><code>i</code>, <code>x</code>, <code>n</code> が全部引っかかる。除外の正規表現が必須（第8章）</td></tr>
+<tr><td><code>readability-avoid-const-params-in-decls</code></td><td>宣言側の <code>const</code> を削らせる。意見が分かれる</td></tr>
+<tr><td><code>readability-uppercase-literal-suffix</code></td><td><code>1.0f</code> → <code>1.0F</code>。好みの問題で、価値が薄いという意見も多い</td></tr>
+<tr><td><code>readability-suspicious-call-argument</code></td><td>引数名と変数名の類似から取り違えを推測する。偽陽性が出やすい</td></tr>
+</table>
+
+<p>これらは <strong>「入れない」も立派な判断</strong>です。第22章で、不採用の理由を記録に残す方法を扱います。</p>
+
+<h2>20.6 【ハンズオン】命名規約を確定して適用する</h2>
+
+<div class="hands">
+<div class="hd">HANDS-ON 20　規約を決め、機械化し、維持する</div>
+<div class="bd">
+<ol>
+  <li><strong>現状を把握する。</strong> 命名について何も設定していない状態で、既定値のまま走らせて件数を見ます。
+<pre><code>clang-tidy --checks="-*,readability-identifier-naming" config_loader.cpp config_loader.h -- -std=c++23</code></pre>
+    <strong>設定していない種類には既定値が使われる</strong>ことを確認してください。意図しない規約が適用されている可能性があります。</li>
+
+  <li><strong>設計シートを埋める。</strong> 図20-2 の表を、自分のプロジェクトの実態に合わせて埋めます。既存コードの多数派に合わせるのが、移行コストが最も小さい選択です。</li>
+
+  <li><strong>設定を書く。</strong> 20.2 節の <code>CheckOptions</code> を <code>.clang-tidy</code> に追加します。<strong>決めていない種類は書かない</strong>でください。</li>
+
+  <li><strong>違反を数える。</strong> 全体を回して件数を確認します（第15章）。
+<pre><code>python "C:\Program Files\LLVM\bin\run-clang-tidy" -p out\build\ninja "" &gt; naming.log 2&gt;&amp;1
+findstr /c:"identifier-naming" naming.log | find /c /v ""</code></pre>
+  </li>
+
+  <li><strong>提案を先に読む。</strong> <code>--fix</code> を付けずに <code>-export-fixes</code> で書き出し、<strong>何ファイルの何箇所が書き換わるか</strong>を確認します（第11章の手順3）。
+<pre><code>python "C:\Program Files\LLVM\bin\run-clang-tidy" -p out\build\ninja -export-fixes naming-fixes</code></pre>
+  </li>
+
+  <li><strong>全体に一度で適用する。</strong> 作業ツリーをきれいにしてから、<strong>プロジェクト全体</strong>を対象に適用します。1ファイルずつ当ててはいけません（図20-3）。
+<pre><code>python "C:\Program Files\LLVM\bin\run-clang-tidy" -p out\build\ninja -fix
+git diff</code></pre>
+  </li>
+
+  <li><strong>ビルドで安全網を張る。</strong> ビルドが通ることを確認します。通らなければ、リネームが届かなかった参照があります。図20-3 の右側を確認してください。</li>
+
+  <li><strong>文字列リテラルを確認する。</strong> ログメッセージやエラー文言に古い名前が残っていないか、テキスト検索します。<strong>機械は文字列の中を書き換えません。</strong>
+<pre><code>findstr /s /i "Buffer" *.cpp *.h</code></pre>
+  </li>
+
+  <li><strong>構造系チェックを足す。</strong> 意味を変えない自動修正のものから追加し、同じ手順で適用します。
+<pre><code>  readability-braces-around-statements,
+  readability-else-after-return,
+  readability-container-size-empty,
+  readability-redundant-string-cstr,
+  readability-simplify-boolean-expr</code></pre>
+  </li>
+
+  <li><strong>複雑さの上限を決める。</strong> <code>readability-function-size</code> のしきい値を、現状より少し厳しい値に設定します（第8章）。既存コードが全滅しない値から始めてください。</li>
+
+  <li><strong>維持する仕組みにする。</strong> ここまでの設定を <code>.clang-tidy</code> にまとめ、CI の差分解析（第15章）で新規コードに効かせます。一括適用は一度きり、以後は差分で守る ── これが 20.1 節の④です。</li>
+</ol>
+</div>
+</div>
+
+<div class="summary">
+<h2>この章のまとめ</h2>
+<ul>
+  <li><code>readability-*</code> は好みを扱う。<strong>合意 → 設定 → 一括適用 → CI で維持</strong>の順序を守る。合意を警告で作ろうとしない。</li>
+  <li>命名規約は「識別子の種類 × 命名形式」の表を埋める作業。<strong>決めていない種類は設定に書かない</strong>（既定値が意図せず効く）。</li>
+  <li><code>readability-identifier-naming</code> の自動リネームは定義と参照をまとめて書き換えるが、解析対象外のファイル・マクロ・文字列リテラルには届かない。</li>
+  <li>だから<strong>プロジェクト全体に一度で適用し、直後にビルドする</strong>。1ファイルずつ当ててはいけない。</li>
+  <li>構造系（<code>braces-around-statements</code>, <code>else-after-return</code>, <code>container-size-empty</code> など）は意味を変えず安全。</li>
+  <li>関数の複雑さに上限を設けることは、可読性と<strong>静的解析の精度</strong>の両方に効く。</li>
+  <li><code>implicit-bool-conversion</code> や <code>identifier-length</code> は荒れやすい。「入れない」も立派な判断。</li>
+</ul>
+</div>
+
+<p class="next"><strong>次章：</strong> 第21章「<code>cppcoreguidelines-*</code> / <code>cert-*</code> / <code>misc-*</code>」では、コーディング標準を機械化したモジュール群を扱います。全部入れると破綻する理由と、エイリアスによる二重警告の見分け方が主題です。</p>
+
+</div>
+</body>
+</html>

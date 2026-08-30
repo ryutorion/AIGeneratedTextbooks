@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第13章 MSBuild プロジェクトでの解析 ─ Clang-Tidy入門</title>
+<style>
+  :root{
+    --ink:#1f2933; --sub:#5a6b7a; --line:#d8dee4; --bg:#ffffff;
+    --code-bg:#f6f8fa; --code-line:#e2e8ee;
+    --accent:#2f6f9f; --accent-bg:#eef4f9;
+    --warn:#b4661a; --warn-bg:#fbf4ea;
+    --ok:#3d7a52; --ok-bg:#eef5f0;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0; background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Noto Sans JP","Meiryo",sans-serif;
+    font-size:16px; line-height:1.95; font-feature-settings:"palt" 1;}
+  .page{max-width:47rem; margin:0 auto; padding:3.5rem 1.6rem 6rem}
+  .chap-no{font-size:.8rem; letter-spacing:.22em; color:var(--accent); font-weight:700; margin:0 0 .5rem}
+  h1{font-size:1.85rem; line-height:1.5; margin:0 0 .6rem; letter-spacing:.01em}
+  .lede{color:var(--sub); font-size:1rem; margin:0 0 2.2rem; padding-bottom:1.6rem; border-bottom:2px solid var(--ink)}
+  h2{font-size:1.28rem; margin:3rem 0 1rem; padding-left:.7rem; border-left:4px solid var(--accent); line-height:1.6}
+  h3{font-size:1.05rem; margin:2.2rem 0 .7rem}
+  h3::before{content:"◆ "; color:var(--accent); font-size:.8em}
+  p{margin:0 0 1.1rem}
+  ul,ol{margin:0 0 1.2rem; padding-left:1.6rem}
+  li{margin:.35rem 0}
+  code{font-family:"Cascadia Mono","Consolas","SFMono-Regular",monospace; font-size:.9em;
+       background:var(--code-bg); border:1px solid var(--code-line); border-radius:4px; padding:.08em .35em}
+  pre{background:var(--code-bg); border:1px solid var(--code-line); border-radius:8px;
+      padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.7}
+  pre code{background:none; border:none; padding:0; font-size:.86rem}
+  pre.term{background:#1f2933; border-color:#1f2933; color:#e6edf3}
+  pre.term code{color:#e6edf3}
+  pre.term .p{color:#7fb2d6}
+  pre.term .o{color:#9fb3c0}
+  .cap{font-size:.82rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+  figure{margin:2rem 0 2.2rem}
+  figure svg{display:block; width:100%; height:auto; border:1px solid var(--line); border-radius:8px; background:#fff}
+  figcaption{font-size:.85rem; color:var(--sub); margin-top:.6rem}
+  figcaption b{color:var(--ink)}
+  .box{border-radius:8px; padding:1rem 1.2rem; margin:1.6rem 0; font-size:.94rem}
+  .box p:last-child{margin-bottom:0}
+  .box .t{font-weight:700; display:block; margin-bottom:.35rem; font-size:.88rem; letter-spacing:.04em}
+  .note{background:var(--accent-bg); border-left:4px solid var(--accent)} .note .t{color:var(--accent)}
+  .warn{background:var(--warn-bg); border-left:4px solid var(--warn)} .warn .t{color:var(--warn)}
+  .tip{background:var(--ok-bg); border-left:4px solid var(--ok)} .tip .t{color:var(--ok)}
+  .hands{border:1px solid var(--line); border-radius:10px; margin:2rem 0; overflow:hidden}
+  .hands>.hd{background:var(--ink); color:#fff; padding:.55rem 1.1rem; font-size:.85rem; letter-spacing:.1em; font-weight:700}
+  .hands>.bd{padding:1.3rem 1.3rem .4rem}
+  .hands ol{counter-reset:step; list-style:none; padding-left:0}
+  .hands ol>li{counter-increment:step; position:relative; padding-left:2.4rem; margin:0 0 1.2rem}
+  .hands ol>li::before{content:counter(step); position:absolute; left:0; top:.25rem;
+    width:1.7rem; height:1.7rem; border-radius:50%; background:var(--accent); color:#fff;
+    font-size:.82rem; font-weight:700; display:flex; align-items:center; justify-content:center; line-height:1}
+  table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+  th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+  th{background:var(--code-bg); font-weight:700}
+  .summary{border:2px solid var(--ink); border-radius:10px; padding:1.3rem 1.5rem; margin:3rem 0 1rem}
+  .summary h2{margin:0 0 .8rem; border:none; padding:0; font-size:1.1rem}
+  .summary ul{margin-bottom:0}
+  .next{color:var(--sub); font-size:.94rem; border-top:1px solid var(--line); padding-top:1.2rem; margin-top:2.5rem}
+  @media (max-width:600px){ body{font-size:15px} .page{padding:2.2rem 1.1rem 4rem} h1{font-size:1.5rem} }
+</style>
+</head>
+<body>
+<div class="page">
+
+<p class="chap-no">第 13 章</p>
+<h1>MSBuild プロジェクトでの解析</h1>
+<p class="lede">前章でコマンドラインの仕組みが分かりました。この章では、Visual Studio がその引数をどう組み立てているのかを実際に覗きます。解析が走るタイミングは2種類あり、それぞれ用途と代償が違います。「ビルドが遅くなった」への対処も、ここで型を作っておきます。</p>
+
+<h2>13.1 二つの実行タイミング</h2>
+
+<figure>
+<svg viewBox="0 0 760 380" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="バックグラウンド解析とビルド時解析のタイムライン">
+  <defs>
+    <marker id="a13" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5a6b7a"/>
+    </marker>
+  </defs>
+  <g font-family="sans-serif">
+
+  <!-- background -->
+  <text x="30" y="28" font-size="12.5" font-weight="bold" fill="#2f6f9f" letter-spacing="1">① バックグラウンド解析（既定で有効）</text>
+
+  <rect x="30" y="40" width="700" height="126" rx="10" fill="#eef4f9" stroke="#2f6f9f" stroke-width="1.6"/>
+
+  <rect x="52" y="60" width="120" height="40" rx="6" fill="#fff" stroke="#c5d6e4"/>
+  <text x="112" y="85" text-anchor="middle" font-size="11.5" fill="#1f2933">編集する</text>
+  <line x1="172" y1="80" x2="204" y2="80" stroke="#5a6b7a" stroke-width="1.4" marker-end="url(#a13)"/>
+
+  <rect x="208" y="60" width="140" height="40" rx="6" fill="#fff" stroke="#c5d6e4"/>
+  <text x="278" y="78" text-anchor="middle" font-size="11.5" fill="#1f2933">保存・区切りを検知</text>
+  <text x="278" y="93" text-anchor="middle" font-size="10" fill="#5a6b7a">ビルドは不要</text>
+  <line x1="348" y1="80" x2="380" y2="80" stroke="#5a6b7a" stroke-width="1.4" marker-end="url(#a13)"/>
+
+  <rect x="384" y="60" width="140" height="40" rx="6" fill="#2f6f9f"/>
+  <text x="454" y="85" text-anchor="middle" font-size="11.5" fill="#fff" font-weight="bold">解析（裏で実行）</text>
+  <line x1="524" y1="80" x2="556" y2="80" stroke="#5a6b7a" stroke-width="1.4" marker-end="url(#a13)"/>
+
+  <rect x="560" y="60" width="148" height="40" rx="6" fill="#fff" stroke="#c5d6e4"/>
+  <text x="634" y="78" text-anchor="middle" font-size="11.5" fill="#1f2933">波線・エラー一覧</text>
+  <text x="634" y="93" text-anchor="middle" font-size="10" fill="#5a6b7a">書きながら気づける</text>
+
+  <text x="52" y="126" font-size="11.5" fill="#2f6f9f" font-weight="bold">長所：</text>
+  <text x="110" y="126" font-size="11.5" fill="#1f2933">フィードバックが最速。手が離れる前に直せる</text>
+  <text x="52" y="148" font-size="11.5" fill="#b4661a" font-weight="bold">短所：</text>
+  <text x="110" y="148" font-size="11.5" fill="#1f2933">結果がビルドログに残らない。CI と同じ結果とは限らない</text>
+
+  <!-- build -->
+  <text x="30" y="204" font-size="12.5" font-weight="bold" fill="#b4661a" letter-spacing="1">② ビルド時解析（「ビルドに対するコード分析を有効にする」）</text>
+
+  <rect x="30" y="216" width="700" height="126" rx="10" fill="#fbf4ea" stroke="#b4661a" stroke-width="2"/>
+
+  <rect x="52" y="236" width="120" height="40" rx="6" fill="#fff" stroke="#e6d5bd"/>
+  <text x="112" y="261" text-anchor="middle" font-size="11.5" fill="#1f2933">ビルド実行</text>
+  <line x1="172" y1="256" x2="204" y2="256" stroke="#5a6b7a" stroke-width="1.4" marker-end="url(#a13)"/>
+
+  <rect x="208" y="236" width="140" height="40" rx="6" fill="#fff" stroke="#e6d5bd"/>
+  <text x="278" y="254" text-anchor="middle" font-size="11.5" fill="#1f2933">コンパイル成功</text>
+  <text x="278" y="269" text-anchor="middle" font-size="10" fill="#5a6b7a">失敗したファイルは対象外</text>
+  <line x1="348" y1="256" x2="380" y2="256" stroke="#5a6b7a" stroke-width="1.4" marker-end="url(#a13)"/>
+
+  <rect x="384" y="236" width="140" height="40" rx="6" fill="#b4661a"/>
+  <text x="454" y="261" text-anchor="middle" font-size="11.5" fill="#fff" font-weight="bold">解析</text>
+  <line x1="524" y1="256" x2="556" y2="256" stroke="#5a6b7a" stroke-width="1.4" marker-end="url(#a13)"/>
+
+  <rect x="560" y="236" width="148" height="40" rx="6" fill="#fff" stroke="#e6d5bd"/>
+  <text x="634" y="254" text-anchor="middle" font-size="11.5" fill="#1f2933">ビルド出力に混ざる</text>
+  <text x="634" y="269" text-anchor="middle" font-size="10" fill="#5a6b7a">ログに残る</text>
+
+  <text x="52" y="302" font-size="11.5" fill="#3d7a52" font-weight="bold">長所：</text>
+  <text x="110" y="302" font-size="11.5" fill="#1f2933">CI と同じ形で結果が残る。「手元では出なかった」を防げる</text>
+  <text x="52" y="324" font-size="11.5" fill="#b4661a" font-weight="bold">短所：</text>
+  <text x="110" y="324" font-size="11.5" fill="#1f2933">ビルドが確実に遅くなる</text>
+
+  <rect x="30" y="356" width="700" height="1" fill="#d8dee4"/>
+  </g>
+</svg>
+<figcaption><b>図13-1</b>　二つの実行タイミング。日常は①、コミット前や特定の構成でだけ②、という使い分けが現実的。</figcaption>
+</figure>
+
+<div class="tip">
+<span class="t">おすすめの構成</span>
+<p><strong>Debug 構成ではバックグラウンド解析のみ、Release 構成（あるいは専用の Analysis 構成）でビルド時解析を有効にする</strong>、という分け方が扱いやすいです。日常の編集は速いまま、コミット前に一度だけ重い構成でビルドすれば、CI で落ちる前に気づけます。構成ごとの設定管理は 13.4 節で扱います。</p>
+</div>
+
+<h2>13.2 Visual Studio は何を渡しているのか</h2>
+
+<p>MSBuild 統合は、プロジェクトの設定を第12章のコマンドライン引数に変換して <code>clang-tidy.exe</code> を起動しています。対応関係は次のとおりです。</p>
+
+<figure>
+<svg viewBox="0 0 760 400" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="プロジェクト設定が clang-tidy の引数に変換される対応関係">
+  <defs>
+    <marker id="b13" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#b4661a"/>
+    </marker>
+  </defs>
+  <g font-family="sans-serif">
+
+  <text x="30" y="26" font-size="12" font-weight="bold" fill="#2f6f9f" letter-spacing="1">プロジェクトのプロパティ</text>
+  <text x="470" y="26" font-size="12" font-weight="bold" fill="#b4661a" letter-spacing="1">clang-tidy の引数</text>
+
+  <g font-size="11">
+  <rect x="30" y="38" width="330" height="34" rx="5" fill="#eef4f9" stroke="#2f6f9f"/>
+  <text x="46" y="59" fill="#1f2933">コード分析 &gt; Clang-Tidy &gt; Clang-Tidy チェック</text>
+  <line x1="360" y1="55" x2="466" y2="55" stroke="#b4661a" stroke-width="1.3" marker-end="url(#b13)"/>
+  <rect x="470" y="38" width="260" height="34" rx="5" fill="#fbf4ea" stroke="#b4661a"/>
+  <text x="486" y="59" font-family="monospace" fill="#1f2933">--checks=…</text>
+
+  <rect x="30" y="80" width="330" height="34" rx="5" fill="#eef4f9" stroke="#2f6f9f"/>
+  <text x="46" y="101" fill="#1f2933">Clang-Tidy 追加オプション</text>
+  <line x1="360" y1="97" x2="466" y2="97" stroke="#b4661a" stroke-width="1.3" marker-end="url(#b13)"/>
+  <rect x="470" y="80" width="260" height="34" rx="5" fill="#fbf4ea" stroke="#b4661a"/>
+  <text x="486" y="101" font-family="monospace" fill="#1f2933">--extra-args=…</text>
+
+  <rect x="30" y="122" width="330" height="34" rx="5" fill="#eef4f9" stroke="#2f6f9f"/>
+  <text x="46" y="143" fill="#1f2933">Clang-Tidy 事前追加オプション</text>
+  <line x1="360" y1="139" x2="466" y2="139" stroke="#b4661a" stroke-width="1.3" marker-end="url(#b13)"/>
+  <rect x="470" y="122" width="260" height="34" rx="5" fill="#fbf4ea" stroke="#b4661a"/>
+  <text x="486" y="143" font-family="monospace" fill="#1f2933">--extra-args-before=…</text>
+
+  <rect x="30" y="164" width="330" height="34" rx="5" fill="#eef4f9" stroke="#2f6f9f"/>
+  <text x="46" y="185" fill="#1f2933">Clang-Tidy ツール ディレクトリ</text>
+  <line x1="360" y1="181" x2="466" y2="181" stroke="#b4661a" stroke-width="1.3" marker-end="url(#b13)"/>
+  <rect x="470" y="164" width="260" height="34" rx="5" fill="#fbf4ea" stroke="#b4661a"/>
+  <text x="486" y="185" fill="#1f2933">起動する exe のパス</text>
+
+  <rect x="30" y="206" width="330" height="34" rx="5" fill="#eef4f9" stroke="#2f6f9f"/>
+  <text x="46" y="227" fill="#1f2933">プロセスの最大数</text>
+  <line x1="360" y1="223" x2="466" y2="223" stroke="#b4661a" stroke-width="1.3" marker-end="url(#b13)"/>
+  <rect x="470" y="206" width="260" height="34" rx="5" fill="#fbf4ea" stroke="#b4661a"/>
+  <text x="486" y="227" fill="#1f2933">同時に起動するプロセス数</text>
+
+  <rect x="30" y="248" width="330" height="52" rx="5" fill="#eef4f9" stroke="#2f6f9f"/>
+  <text x="46" y="268" fill="#1f2933">C/C++ &gt; 全般 &gt; 追加のインクルード ディレクトリ</text>
+  <text x="46" y="288" fill="#1f2933">C/C++ &gt; プリプロセッサ &gt; プリプロセッサの定義</text>
+  <text x="46" y="303" fill="#5a6b7a" font-size="10">C/C++ &gt; 言語 &gt; C++ 言語標準</text>
+  <line x1="360" y1="274" x2="466" y2="274" stroke="#b4661a" stroke-width="1.3" marker-end="url(#b13)"/>
+  <rect x="470" y="248" width="260" height="52" rx="5" fill="#fbf4ea" stroke="#b4661a"/>
+  <text x="486" y="270" font-family="monospace" fill="#1f2933">-- の後ろの引数</text>
+  <text x="486" y="290" fill="#5a6b7a" font-size="10">MSBuild が自動で組み立てる</text>
+  </g>
+
+  <rect x="30" y="316" width="700" height="70" rx="8" fill="#1f2933"/>
+  <text x="380" y="340" text-anchor="middle" fill="#fff" font-size="12.5" font-weight="bold">自動変換はあくまで「たいてい正しい」</text>
+  <text x="380" y="360" text-anchor="middle" fill="#b8c4cd" font-size="11">新しい規格やプレビュー扱いのオプションでは引き継ぎが不完全になることがある</text>
+  <text x="380" y="378" text-anchor="middle" fill="#b8c4cd" font-size="11">→ 事前追加オプションで -std=c++23 を明示するのが確実（第3章 図3-2）</text>
+  </g>
+</svg>
+<figcaption><b>図13-2</b>　プロジェクト設定から引数への変換。<code>-I</code> や <code>-D</code> は自分で書かなくてよいのが MSBuild 統合の利点。</figcaption>
+</figure>
+
+<h3>実際のコマンドラインを見る</h3>
+
+<p>推測ではなく事実を確認します。ビルド出力の詳細度を上げると、Visual Studio が組み立てたコマンドラインが出力ウィンドウに現れます。</p>
+
+<pre><code>ツール &gt; オプション &gt; プロジェクトおよびソリューション &gt; ビルド/実行
+  &gt; MSBuild プロジェクト ビルド出力の詳細度 : 「詳細」または「診断」</code></pre>
+
+<p>この状態でビルドし、出力ウィンドウ（「ビルド」）で <code>clang-tidy</code> を検索してください。<strong>解析が動いていない・引数が意図と違う、という問題の9割はここで判明します。</strong></p>
+
+<div class="note">
+<span class="t">.vcxproj を直接読むのも早い</span>
+<p>プロパティで設定した値は <code>.vcxproj</code> に XML 要素として保存されます。テキストエディタで開けば、どの構成にどの値が入っているかが一目で分かります。「Debug には入っているが Release には入っていない」といった設定漏れを見つけるには、GUI を構成ごとに切り替えるより速い方法です。</p>
+</div>
+
+<h2>13.3 速度の話</h2>
+
+<p>Clang-Tidy はソースを<strong>もう一度コンパイルします</strong>。ビルド時間が増えるのは避けられません。増え方はチェックの選び方に強く依存します。</p>
+
+<table>
+<tr><th>チェック</th><th>コスト</th><th>理由</th></tr>
+<tr><td><code>clang-analyzer-*</code></td><td><strong>高い</strong></td><td>実行経路を網羅的にたどる（第2章の②方式）</td></tr>
+<tr><td><code>bugprone-*</code> / <code>modernize-*</code> など</td><td>低い</td><td>AST の形を照合するだけ（①方式）</td></tr>
+<tr><td>ヘッダを広く対象にする設定</td><td>中〜高</td><td>翻訳単位ごとにヘッダを再解析（第10章）</td></tr>
+</table>
+
+<h3>並列度を上げる</h3>
+
+<p>「プロセスの最大数」で並列実行できます。<code>0</code> を指定すると論理プロセッサ数すべてを使います。</p>
+
+<div class="warn">
+<span class="t">並列化はメモリを食う</span>
+<p>各プロセスが独立して AST を構築します。テンプレートを多用したコードでは1プロセスあたりのメモリが大きく、並列度を上げすぎるとスワップして<strong>かえって遅くなる</strong>ことがあります。まず論理プロセッサ数の半分程度から試し、タスクマネージャでメモリを見ながら調整してください。</p>
+</div>
+
+<h3>それでも遅いときの手順</h3>
+
+<ol>
+  <li><strong>チェックを絞る。</strong> 日常のビルドでは <code>clang-analyzer-*</code> を外し、AST ベースのチェックだけにする。重い解析は CI に寄せる（第40章）。</li>
+  <li><strong>ヘッダの対象を狭める。</strong> <code>ExcludeHeaderFilterRegex</code> で外部ヘッダを外す（第10章）。</li>
+  <li><strong>構成で分ける。</strong> Debug は軽く、専用構成でだけ全部走らせる。</li>
+  <li><strong>そもそもビルド時解析を切る。</strong> バックグラウンド解析だけにして、全体解析は <code>run-clang-tidy</code> でまとめて回す（第15章）。</li>
+</ol>
+
+<h2>13.4 構成の組み合わせ爆発に備える</h2>
+
+<p>ここまでの章で何度も「すべての構成に設定してください」と書きました。実際、構成とプラットフォームの組み合わせは簡単に増えます。</p>
+
+<figure>
+<svg viewBox="0 0 760 330" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="構成ごとの設定重複とプロパティシートによる一元化">
+  <g font-family="sans-serif">
+
+  <text x="30" y="26" font-size="12.5" font-weight="bold" fill="#a04a34" letter-spacing="1">✕ 構成ごとに手で設定する</text>
+
+  <g font-size="11">
+  <rect x="30" y="38" width="150" height="44" rx="6" fill="#f7e9e5" stroke="#a04a34"/>
+  <text x="105" y="58" text-anchor="middle" fill="#1f2933" font-weight="bold">Debug | x64</text>
+  <text x="105" y="74" text-anchor="middle" fill="#5a6b7a">チェック・規格・ツール</text>
+
+  <rect x="192" y="38" width="150" height="44" rx="6" fill="#f7e9e5" stroke="#a04a34"/>
+  <text x="267" y="58" text-anchor="middle" fill="#1f2933" font-weight="bold">Release | x64</text>
+  <text x="267" y="74" text-anchor="middle" fill="#a04a34">設定を入れ忘れた</text>
+
+  <rect x="354" y="38" width="150" height="44" rx="6" fill="#f7e9e5" stroke="#a04a34"/>
+  <text x="429" y="58" text-anchor="middle" fill="#1f2933" font-weight="bold">Debug | x86</text>
+  <text x="429" y="74" text-anchor="middle" fill="#5a6b7a">値が古いまま</text>
+
+  <rect x="516" y="38" width="150" height="44" rx="6" fill="#f7e9e5" stroke="#a04a34"/>
+  <text x="591" y="58" text-anchor="middle" fill="#1f2933" font-weight="bold">Release | x86</text>
+  <text x="591" y="74" text-anchor="middle" fill="#5a6b7a">…</text>
+
+  <text x="690" y="64" font-size="20" fill="#a04a34">…</text>
+  </g>
+
+  <text x="380" y="106" text-anchor="middle" font-size="11.5" fill="#a04a34">プロジェクトが増えると、さらに掛け算になる</text>
+
+  <line x1="30" y1="124" x2="730" y2="124" stroke="#d8dee4"/>
+
+  <text x="30" y="152" font-size="12.5" font-weight="bold" fill="#3d7a52" letter-spacing="1">○ プロパティシートで一元化する</text>
+
+  <rect x="230" y="164" width="300" height="58" rx="8" fill="#3d7a52"/>
+  <text x="380" y="188" text-anchor="middle" fill="#fff" font-size="12.5" font-weight="bold">TidyLab.Analysis.props</text>
+  <text x="380" y="208" text-anchor="middle" fill="#d5e6da" font-size="11">Clang-Tidy 関連の設定をここに1回だけ書く</text>
+
+  <path d="M280,222 L120,258" fill="none" stroke="#c9dfd1" stroke-width="1.6"/>
+  <path d="M340,222 L282,258" fill="none" stroke="#c9dfd1" stroke-width="1.6"/>
+  <path d="M420,222 L444,258" fill="none" stroke="#c9dfd1" stroke-width="1.6"/>
+  <path d="M480,222 L606,258" fill="none" stroke="#c9dfd1" stroke-width="1.6"/>
+
+  <g font-size="11">
+  <rect x="45" y="262" width="150" height="40" rx="6" fill="#eef5f0" stroke="#3d7a52"/>
+  <text x="120" y="286" text-anchor="middle" fill="#1f2933" font-weight="bold">Debug | x64</text>
+  <rect x="207" y="262" width="150" height="40" rx="6" fill="#eef5f0" stroke="#3d7a52"/>
+  <text x="282" y="286" text-anchor="middle" fill="#1f2933" font-weight="bold">Release | x64</text>
+  <rect x="369" y="262" width="150" height="40" rx="6" fill="#eef5f0" stroke="#3d7a52"/>
+  <text x="444" y="286" text-anchor="middle" fill="#1f2933" font-weight="bold">Debug | x86</text>
+  <rect x="531" y="262" width="150" height="40" rx="6" fill="#eef5f0" stroke="#3d7a52"/>
+  <text x="606" y="286" text-anchor="middle" fill="#1f2933" font-weight="bold">Release | x86</text>
+  </g>
+
+  <text x="380" y="322" text-anchor="middle" font-size="11.5" fill="#5a6b7a">設定漏れが構造的に起こらなくなる。差分もレビューしやすい</text>
+  </g>
+</svg>
+<figcaption><b>図13-3</b>　プロパティシートによる一元化。プロジェクトが増えても、シートを参照させるだけで設定が揃う。</figcaption>
+</figure>
+
+<p>プロパティシートは「プロパティ マネージャー」ウィンドウから追加します（<code>表示 &gt; その他のウィンドウ &gt; プロパティ マネージャー</code>）。<code>.props</code> ファイルを作り、すべての構成に対して追加すれば、そこに書いた設定が全構成に効きます。</p>
+
+<div class="tip">
+<span class="t">設定の置き場所の整理</span>
+<p>ここまでで設定の置き場所が3つになりました。役割を分けておくと混乱しません。</p>
+<ul style="margin-top:.5rem">
+  <li><strong><code>.clang-tidy</code></strong>：チェックの選択、オプション、フィルタ、カスタムチェック。<strong>解析の中身</strong>。リポジトリで共有し、CI でもそのまま使う。</li>
+  <li><strong><code>.props</code></strong>：Clang-Tidy を有効にするか、どの実行ファイルを使うか、並列度。<strong>Visual Studio での動かし方</strong>。</li>
+  <li><strong>プロパティページ直書き</strong>：一時的な実験のみ。恒久的な設定は置かない。</li>
+</ul>
+</div>
+
+<h2>13.5 【ハンズオン】計測して制御する</h2>
+
+<div class="hands">
+<div class="hd">HANDS-ON 13　解析のコストを測り、設定を一元化する</div>
+<div class="bd">
+<ol>
+  <li><strong>基準を測る。</strong> Clang-Tidy を無効にした状態でソリューションをリビルドし、出力ウィンドウ末尾の経過時間を記録します。</li>
+
+  <li><strong>ビルド時解析を有効にする。</strong> <code>構成プロパティ &gt; コード分析 &gt; 全般</code> で「ビルドに対するコード分析を有効にする」を「はい」にします。<code>.clang-tidy</code> の <code>Checks</code> は第2部で作った内容（<code>bugprone-*</code>、<code>clang-analyzer-*</code>、<code>performance-*</code> など）のままにします。</li>
+
+  <li><strong>コストを測る。</strong> リビルドし、経過時間を記録します。手順1と比べて何倍になったかを確認します。</li>
+
+  <li><strong>重いチェックを外して測る。</strong> <code>.clang-tidy</code> から <code>clang-analyzer-*</code> だけを外してリビルドし、時間を記録します。<strong>フロー解析がコストの大半を占めていることを、自分の数字で確認してください。</strong></li>
+
+  <li><strong>並列度を変えて測る。</strong> <code>clang-analyzer-*</code> を戻し、「プロセスの最大数」を <code>0</code>（全論理プロセッサ）にしてリビルドします。時間とメモリ使用量を見て、適切な値を決めます。</li>
+
+  <li><strong>実際のコマンドラインを見る。</strong> ビルド出力の詳細度を「詳細」にしてリビルドし、出力ウィンドウで <code>clang-tidy</code> を検索します。<code>--checks</code>、<code>--extra-args</code>、<code>-I</code>、<code>-D</code> がどう渡っているかを読みます。</li>
+
+  <li><strong>プロパティシートに移す。</strong>
+    <ul>
+      <li>プロパティ マネージャーを開き、<code>TidyLab</code> プロジェクトの構成の一つを右クリックして「新しいプロジェクト プロパティ シートの追加」を選び、<code>TidyLab.Analysis.props</code> を作ります。</li>
+      <li>作ったシートのプロパティで、Clang-Tidy の有効化・ツールディレクトリ・事前追加オプション（<code>-std=c++23</code>）・プロセスの最大数を設定します。</li>
+      <li>他のすべての構成に、同じシートを「既存のプロパティ シートの追加」で追加します。</li>
+      <li>プロジェクト側に直接書いていた値を<strong>削除</strong>し、シートの設定だけで動くことを確認します。</li>
+    </ul>
+  </li>
+
+  <li><strong>構成を切り替えて確認する。</strong> Debug / Release、x64 / x86 を切り替えてビルドし、<strong>どの構成でも同じ警告が出る</strong>ことを確認します。これが一元化の成果です。</li>
+</ol>
+</div>
+</div>
+
+<div class="summary">
+<h2>この章のまとめ</h2>
+<ul>
+  <li>解析のタイミングは2つ。バックグラウンド解析（既定・速い・ログに残らない）と、ビルド時解析（遅い・ログに残る・CI に近い）。</li>
+  <li>MSBuild 統合はプロジェクト設定を <code>--checks</code> や <code>-I</code> / <code>-D</code> に変換して <code>clang-tidy.exe</code> を起動している。</li>
+  <li>ビルド出力の詳細度を上げれば、実際のコマンドラインが出力ウィンドウで確認できる。トラブルの9割はここで判明する。</li>
+  <li>コストの大半は <code>clang-analyzer-*</code>。日常ビルドから外し、CI に寄せるのが定石。</li>
+  <li>並列化はメモリを消費する。上げすぎると逆効果。</li>
+  <li>構成の組み合わせ爆発には<strong>プロパティシート</strong>で対処する。設定の置き場所は「解析の中身は <code>.clang-tidy</code>、動かし方は <code>.props</code>」と分ける。</li>
+</ul>
+</div>
+
+<p class="next"><strong>次章：</strong> 第14章「CMake プロジェクトで使う」では、CMakePresets.json の設定と <code>compile_commands.json</code> を扱います。MSBuild とは前提が違い、<strong>ツールセットの制約</strong>という落とし穴があります。</p>
+
+</div>
+</body>
+</html>

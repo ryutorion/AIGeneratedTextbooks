@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第27章 Matcher を書きやすくする道具 ─ Clang-Tidy入門</title>
+<style>
+  :root{
+    --ink:#1f2933; --sub:#5a6b7a; --line:#d8dee4; --bg:#ffffff;
+    --code-bg:#f6f8fa; --code-line:#e2e8ee;
+    --accent:#2f6f9f; --accent-bg:#eef4f9;
+    --warn:#b4661a; --warn-bg:#fbf4ea;
+    --ok:#3d7a52; --ok-bg:#eef5f0;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0; background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Noto Sans JP","Meiryo",sans-serif;
+    font-size:16px; line-height:1.95; font-feature-settings:"palt" 1;}
+  .page{max-width:47rem; margin:0 auto; padding:3.5rem 1.6rem 6rem}
+  .chap-no{font-size:.8rem; letter-spacing:.22em; color:var(--accent); font-weight:700; margin:0 0 .5rem}
+  h1{font-size:1.85rem; line-height:1.5; margin:0 0 .6rem; letter-spacing:.01em}
+  .lede{color:var(--sub); font-size:1rem; margin:0 0 2.2rem; padding-bottom:1.6rem; border-bottom:2px solid var(--ink)}
+  h2{font-size:1.28rem; margin:3rem 0 1rem; padding-left:.7rem; border-left:4px solid var(--accent); line-height:1.6}
+  h3{font-size:1.05rem; margin:2.2rem 0 .7rem}
+  h3::before{content:"◆ "; color:var(--accent); font-size:.8em}
+  p{margin:0 0 1.1rem}
+  ul,ol{margin:0 0 1.2rem; padding-left:1.6rem}
+  li{margin:.35rem 0}
+  code{font-family:"Cascadia Mono","Consolas","SFMono-Regular",monospace; font-size:.9em;
+       background:var(--code-bg); border:1px solid var(--code-line); border-radius:4px; padding:.08em .35em}
+  pre{background:var(--code-bg); border:1px solid var(--code-line); border-radius:8px;
+      padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.7}
+  pre code{background:none; border:none; padding:0; font-size:.86rem}
+  pre.term{background:#1f2933; border-color:#1f2933; color:#e6edf3}
+  pre.term code{color:#e6edf3}
+  pre.term .p{color:#7fb2d6}
+  pre.term .o{color:#9fb3c0}
+  pre.term .y{color:#e8b075}
+  .cap{font-size:.82rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+  figure{margin:2rem 0 2.2rem}
+  figure svg{display:block; width:100%; height:auto; border:1px solid var(--line); border-radius:8px; background:#fff}
+  figcaption{font-size:.85rem; color:var(--sub); margin-top:.6rem}
+  figcaption b{color:var(--ink)}
+  .box{border-radius:8px; padding:1rem 1.2rem; margin:1.6rem 0; font-size:.94rem}
+  .box p:last-child{margin-bottom:0}
+  .box .t{font-weight:700; display:block; margin-bottom:.35rem; font-size:.88rem; letter-spacing:.04em}
+  .note{background:var(--accent-bg); border-left:4px solid var(--accent)} .note .t{color:var(--accent)}
+  .warn{background:var(--warn-bg); border-left:4px solid var(--warn)} .warn .t{color:var(--warn)}
+  .tip{background:var(--ok-bg); border-left:4px solid var(--ok)} .tip .t{color:var(--ok)}
+  .hands{border:1px solid var(--line); border-radius:10px; margin:2rem 0; overflow:hidden}
+  .hands>.hd{background:var(--ink); color:#fff; padding:.55rem 1.1rem; font-size:.85rem; letter-spacing:.1em; font-weight:700}
+  .hands>.bd{padding:1.3rem 1.3rem .4rem}
+  .hands ol{counter-reset:step; list-style:none; padding-left:0}
+  .hands ol>li{counter-increment:step; position:relative; padding-left:2.4rem; margin:0 0 1.2rem}
+  .hands ol>li::before{content:counter(step); position:absolute; left:0; top:.25rem;
+    width:1.7rem; height:1.7rem; border-radius:50%; background:var(--accent); color:#fff;
+    font-size:.82rem; font-weight:700; display:flex; align-items:center; justify-content:center; line-height:1}
+  table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+  th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+  th{background:var(--code-bg); font-weight:700}
+  .summary{border:2px solid var(--ink); border-radius:10px; padding:1.3rem 1.5rem; margin:3rem 0 1rem}
+  .summary h2{margin:0 0 .8rem; border:none; padding:0; font-size:1.1rem}
+  .summary ul{margin-bottom:0}
+  .next{color:var(--sub); font-size:.94rem; border-top:1px solid var(--line); padding-top:1.2rem; margin-top:2.5rem}
+  @media (max-width:600px){ body{font-size:15px} .page{padding:2.2rem 1.1rem 4rem} h1{font-size:1.5rem} }
+</style>
+</head>
+<body>
+<div class="page">
+
+<p class="chap-no">第 27 章</p>
+<h1>Matcher を書きやすくする道具</h1>
+<p class="lede">前章の最後で、<code>new[]</code> と <code>delete</code> のクエリがうまく書けなかったはずです。原因は第23章で予告した<strong>暗黙ノード</strong>です。ソースに書かれていない <code>ImplicitCastExpr</code> が木に挟まっていて、素直に書いた条件が通らない。この章でその問題を片付け、あわせてクエリを保守しやすくする道具を揃えます。</p>
+
+<h2>27.1 暗黙ノードという壁</h2>
+
+<p><code>int* p = new int[10];</code> という単純な行が、AST ではこうなっています。</p>
+
+<figure>
+<svg viewBox="0 0 760 380" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="AsIs と IgnoreUnlessSpelledInSource での木の見え方の違い">
+  <g font-family="sans-serif">
+
+  <rect x="24" y="16" width="712" height="34" rx="6" fill="#1f2933"/>
+  <text x="380" y="39" text-anchor="middle" font-size="12.5" font-family="monospace" fill="#a3d9a5">int* p = new int[10];</text>
+
+  <!-- AsIs -->
+  <rect x="24" y="62" width="350" height="290" rx="10" fill="#f7e9e5" stroke="#a04a34" stroke-width="1.8"/>
+  <text x="199" y="88" text-anchor="middle" font-size="13" font-weight="bold" fill="#a04a34">set traversal AsIs（既定）</text>
+  <text x="199" y="108" text-anchor="middle" font-size="10.5" fill="#5a6b7a">木をありのままに見る</text>
+
+  <rect x="50" y="122" width="180" height="26" rx="5" fill="#2f6f9f"/>
+  <text x="140" y="140" text-anchor="middle" font-size="10.5" font-family="monospace" fill="#fff">VarDecl p</text>
+
+  <line x1="70" y1="148" x2="70" y2="166" stroke="#c5d6e4" stroke-width="1.3"/>
+  <line x1="70" y1="166" x2="86" y2="166" stroke="#c5d6e4" stroke-width="1.3"/>
+  <rect x="90" y="154" width="200" height="26" rx="5" fill="#f4f6f8" stroke="#a04a34" stroke-dasharray="3 2" stroke-width="1.6"/>
+  <text x="190" y="172" text-anchor="middle" font-size="10" font-family="monospace" fill="#a04a34">ImplicitCastExpr</text>
+
+  <line x1="110" y1="180" x2="110" y2="198" stroke="#d8dee4" stroke-width="1.3"/>
+  <line x1="110" y1="198" x2="126" y2="198" stroke="#d8dee4" stroke-width="1.3"/>
+  <rect x="130" y="186" width="200" height="26" rx="5" fill="#f4f6f8" stroke="#a04a34" stroke-dasharray="3 2" stroke-width="1.6"/>
+  <text x="230" y="204" text-anchor="middle" font-size="10" font-family="monospace" fill="#a04a34">（環境により更に挟まる）</text>
+
+  <line x1="150" y1="212" x2="150" y2="230" stroke="#d8dee4" stroke-width="1.3"/>
+  <line x1="150" y1="230" x2="166" y2="230" stroke="#d8dee4" stroke-width="1.3"/>
+  <rect x="170" y="218" width="170" height="26" rx="5" fill="#3d7a52"/>
+  <text x="255" y="236" text-anchor="middle" font-size="10.5" font-family="monospace" fill="#fff" font-weight="bold">CXXNewExpr</text>
+
+  <rect x="44" y="262" width="310" height="76" rx="6" fill="#fff" stroke="#e0c4bc"/>
+  <text x="199" y="284" text-anchor="middle" font-size="11" fill="#a04a34" font-weight="bold">素直に書くと通らない</text>
+  <text x="58" y="306" font-size="9.5" font-family="monospace" fill="#5a6b7a">varDecl(hasInitializer(cxxNewExpr()))</text>
+  <text x="199" y="326" text-anchor="middle" font-size="10.5" fill="#a04a34">→ 0 matches.（間に別ノードがある）</text>
+
+  <!-- Ignore -->
+  <rect x="386" y="62" width="350" height="290" rx="10" fill="#eef5f0" stroke="#3d7a52" stroke-width="2"/>
+  <text x="561" y="88" text-anchor="middle" font-size="12" font-weight="bold" fill="#3d7a52">set traversal IgnoreUnlessSpelledInSource</text>
+  <text x="561" y="108" text-anchor="middle" font-size="10.5" fill="#5a6b7a">ソースに書かれたものだけを見る</text>
+
+  <rect x="412" y="140" width="180" height="26" rx="5" fill="#2f6f9f"/>
+  <text x="502" y="158" text-anchor="middle" font-size="10.5" font-family="monospace" fill="#fff">VarDecl p</text>
+
+  <line x1="432" y1="166" x2="432" y2="196" stroke="#c9dfd1" stroke-width="1.3"/>
+  <line x1="432" y1="196" x2="448" y2="196" stroke="#c9dfd1" stroke-width="1.3"/>
+  <rect x="452" y="184" width="170" height="26" rx="5" fill="#3d7a52"/>
+  <text x="537" y="202" text-anchor="middle" font-size="10.5" font-family="monospace" fill="#fff" font-weight="bold">CXXNewExpr</text>
+
+  <text x="561" y="234" text-anchor="middle" font-size="11" fill="#3d7a52">暗黙ノードが消えて、木が浅くなる</text>
+
+  <rect x="406" y="262" width="310" height="76" rx="6" fill="#fff" stroke="#c9dfd1"/>
+  <text x="561" y="284" text-anchor="middle" font-size="11" fill="#3d7a52" font-weight="bold">素直に書いたクエリが通る</text>
+  <text x="420" y="306" font-size="9.5" font-family="monospace" fill="#5a6b7a">varDecl(hasInitializer(cxxNewExpr()))</text>
+  <text x="561" y="326" text-anchor="middle" font-size="10.5" fill="#3d7a52">→ 1 match.</text>
+  </g>
+</svg>
+<figcaption><b>図27-1</b>　走査モードの違い。<code>IgnoreUnlessSpelledInSource</code> は「ソースに書かれていないノードを飛ばす」モード。</figcaption>
+</figure>
+
+<pre class="term"><code><span class="p">clang-query&gt;</span> <span class="y">set traversal IgnoreUnlessSpelledInSource</span></code></pre>
+
+<div class="tip">
+<span class="t">最初にこれを打つ</span>
+<p><code>clang-query</code> を起動したら、まず <code>set traversal IgnoreUnlessSpelledInSource</code> を打つ ── これを習慣にしてください。<strong>初学者が「クエリが通らない」と悩む原因の大半は、暗黙ノードです。</strong></p>
+<p style="margin-top:.5rem">逆に、暗黙の型変換そのものを検出したい場合（<code>bugprone-narrowing-conversions</code> のようなチェックを自作したい場合）は <code>AsIs</code> でなければなりません。<strong>「何を見たいか」でモードを選びます。</strong></p>
+</div>
+
+<h2>27.2 設定ファイルに移すときの注意</h2>
+
+<p><code>set traversal</code> は <strong>clang-query のセッション設定</strong>です。第6部で <code>.clang-tidy</code> にクエリを移すとき、この設定はそのままでは持っていけません。</p>
+
+<p>解決策は2つあります。</p>
+
+<h3>方法1：<code>traverse()</code> を式の中に書く</h3>
+
+<p>走査モードを Matcher 式の一部として埋め込みます。</p>
+
+<pre><code>traverse(TK_IgnoreUnlessSpelledInSource,
+  varDecl(hasInitializer(cxxNewExpr(isArray()).bind("alloc"))).bind("var")
+)</code></pre>
+
+<p>この形なら、式そのものにモードが含まれるので、どこに持っていっても同じ結果になります。</p>
+
+<h3>方法2：暗黙ノードを飛ばす Matcher を明示する</h3>
+
+<p>特定の位置だけ暗黙ノードを無視します。</p>
+
+<table>
+<tr><th>Matcher</th><th>飛ばすもの</th></tr>
+<tr><td><code>ignoringImplicit(M)</code></td><td>暗黙のノード全般</td></tr>
+<tr><td><code>ignoringParenImpCasts(M)</code></td><td>括弧と暗黙キャスト</td></tr>
+<tr><td><code>ignoringParenCasts(M)</code></td><td>括弧と（明示を含む）キャスト</td></tr>
+</table>
+
+<pre><code>varDecl(hasInitializer(ignoringImplicit(cxxNewExpr(isArray()).bind("alloc")))).bind("var")</code></pre>
+
+<div class="warn">
+<span class="t">どちらを使うか</span>
+<p><strong>方法2（明示的に飛ばす）を推奨します。</strong> どこで何を無視しているかが式に書かれているので、後から読んだ人が理解できます。方法1 は式全体の挙動を変えるため、思わぬ副作用が出ることがあります。</p>
+<p style="margin-top:.5rem">なお第29章で述べるとおり Query Based Custom Check は実験的機能であり、設定ファイル側でどの記法が受け付けられるかはバージョンによって変わりえます。<strong>移行したら必ず、設定ファイル経由でも同じ件数が出ることを確認してください。</strong></p>
+</div>
+
+<h2>27.3 <code>let</code> で名前を付けて再利用する</h2>
+
+<p>クエリは長くなります。同じ部分式を何度も書くのは苦痛ですし、間違いのもとです。</p>
+
+<figure>
+<svg viewBox="0 0 760 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="let による部分式の再利用">
+  <g font-family="sans-serif">
+
+  <text x="30" y="28" font-size="12.5" font-weight="bold" fill="#a04a34" letter-spacing="1">✕ 同じ部分式を繰り返す</text>
+  <rect x="30" y="40" width="700" height="76" rx="8" fill="#1f2933"/>
+  <text x="46" y="62" font-size="10" font-family="monospace" fill="#e6edf3">m callExpr(callee(functionDecl(hasAnyName("strcpy","strcat","sprintf"))),</text>
+  <text x="46" y="80" font-size="10" font-family="monospace" fill="#e6edf3">           hasAncestor(functionDecl(isExpansionInMainFile())))</text>
+  <text x="46" y="102" font-size="10" font-family="monospace" fill="#e08a74">m callExpr(callee(functionDecl(hasAnyName("strcpy","strcat","sprintf"))), unless(…))　← また書く</text>
+
+  <line x1="30" y1="134" x2="730" y2="134" stroke="#d8dee4"/>
+
+  <text x="30" y="162" font-size="12.5" font-weight="bold" fill="#3d7a52" letter-spacing="1">○ let で名前を付ける</text>
+  <rect x="30" y="174" width="700" height="52" rx="8" fill="#3d7a52"/>
+  <text x="46" y="196" font-size="10.5" font-family="monospace" fill="#fff">let unsafeCall  callExpr(callee(functionDecl(hasAnyName("strcpy","strcat","sprintf"))))</text>
+  <text x="46" y="216" font-size="10.5" font-family="monospace" fill="#d5e6da">let inOurCode   isExpansionInMainFile()</text>
+
+  <rect x="30" y="238" width="700" height="48" rx="8" fill="#1f2933"/>
+  <text x="46" y="260" font-size="10.5" font-family="monospace" fill="#a3d9a5">m unsafeCall</text>
+  <text x="46" y="278" font-size="10.5" font-family="monospace" fill="#a3d9a5">m callExpr(unsafeCall, hasAncestor(functionDecl(inOurCode)))</text>
+  </g>
+</svg>
+<figcaption><b>図27-2</b>　<code>let</code> による再利用。条件を1か所で直せるようになり、試行錯誤が速くなる。</figcaption>
+</figure>
+
+<pre class="term"><code><span class="p">clang-query&gt;</span> <span class="y">let unsafeName hasAnyName("strcpy", "strcat", "sprintf")</span>
+<span class="p">clang-query&gt;</span> <span class="y">m callExpr(callee(functionDecl(unsafeName))).bind("call")</span>
+<span class="p">clang-query&gt;</span> <span class="y">unlet unsafeName</span></code></pre>
+
+<div class="note">
+<span class="t"><code>let</code> はセッション限りの道具</span>
+<p><code>let</code> で定義した名前も、設定ファイルには持っていけません。<strong><code>let</code> は試行錯誤を速くするための道具</strong>と割り切り、確定したら展開した形で保存してください。第24章の <code>file</code> コマンドでクエリファイルを作るときは、<code>let</code> の行も一緒に書いておけば再現できます。</p>
+</div>
+
+<h2>27.4 デバッグの補助</h2>
+
+<h3><code>set print-matcher true</code></h3>
+
+<p>実行したクエリ式を結果の前に表示します。<code>let</code> を多用していると「いま何を実行したか」が分からなくなるので、そのときに有効です。</p>
+
+<h3><code>set enable-profile true</code></h3>
+
+<p>クエリの実行時間を計測します。<code>hasDescendant</code> や <code>hasAncestor</code> は木を広く歩くため重く、大きなファイルでは体感できるほど遅くなります。<strong>第6部で設定ファイルに入れるクエリは、解析のたびに全ファイルに対して実行されます。</strong> 重いクエリを入れる前に、ここで確認しておく価値があります。</p>
+
+<h2>27.5 マッチしない／しすぎるときの手順</h2>
+
+<figure>
+<svg viewBox="0 0 760 420" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="クエリのデバッグ手順">
+  <defs>
+    <marker id="a27" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5a6b7a"/>
+    </marker>
+  </defs>
+  <g font-family="sans-serif">
+
+  <!-- left: 0 matches -->
+  <rect x="24" y="20" width="350" height="380" rx="10" fill="#f7e9e5" stroke="#a04a34" stroke-width="1.8"/>
+  <text x="199" y="46" text-anchor="middle" font-size="13" font-weight="bold" fill="#a04a34">0 matches. のとき</text>
+
+  <rect x="44" y="60" width="310" height="40" rx="6" fill="#fff" stroke="#e0c4bc"/>
+  <text x="199" y="78" text-anchor="middle" font-size="11" fill="#1f2933" font-weight="bold">① 走査モードを疑う</text>
+  <text x="199" y="94" text-anchor="middle" font-size="10" font-family="monospace" fill="#5a6b7a">set traversal IgnoreUnlessSpelledInSource</text>
+  <line x1="199" y1="100" x2="199" y2="114" stroke="#5a6b7a" stroke-width="1.3" marker-end="url(#a27)"/>
+
+  <rect x="44" y="118" width="310" height="46" rx="6" fill="#fff" stroke="#e0c4bc"/>
+  <text x="199" y="136" text-anchor="middle" font-size="11" fill="#1f2933" font-weight="bold">② 条件を外側から1つずつ削る</text>
+  <text x="199" y="154" text-anchor="middle" font-size="10" fill="#5a6b7a">どの条件でマッチが消えたかを特定する</text>
+  <line x1="199" y1="164" x2="199" y2="178" stroke="#5a6b7a" stroke-width="1.3" marker-end="url(#a27)"/>
+
+  <rect x="44" y="182" width="310" height="46" rx="6" fill="#fff" stroke="#e0c4bc"/>
+  <text x="199" y="200" text-anchor="middle" font-size="11" fill="#1f2933" font-weight="bold">③ 犯人の条件の直前で dump する</text>
+  <text x="199" y="218" text-anchor="middle" font-size="10" font-family="monospace" fill="#5a6b7a">set output dump</text>
+  <line x1="199" y1="228" x2="199" y2="242" stroke="#5a6b7a" stroke-width="1.3" marker-end="url(#a27)"/>
+
+  <rect x="44" y="246" width="310" height="46" rx="6" fill="#fff" stroke="#e0c4bc"/>
+  <text x="199" y="264" text-anchor="middle" font-size="11" fill="#1f2933" font-weight="bold">④ 実際の木と条件を突き合わせる</text>
+  <text x="199" y="282" text-anchor="middle" font-size="10" fill="#5a6b7a">想定と違うノードが挟まっていないか</text>
+
+  <rect x="44" y="306" width="310" height="80" rx="6" fill="#a04a34"/>
+  <text x="199" y="330" text-anchor="middle" font-size="11.5" fill="#fff" font-weight="bold">よくある原因</text>
+  <text x="60" y="350" font-size="10" fill="#f0d5cf">・暗黙ノード（①で解決）</text>
+  <text x="60" y="366" font-size="10" fill="#f0d5cf">・名前空間（"strcpy" ではなく "::strcpy"）</text>
+  <text x="60" y="380" font-size="10" fill="#f0d5cf">・Matcher 名の綴り違い</text>
+
+  <!-- right: too many -->
+  <rect x="386" y="20" width="350" height="380" rx="10" fill="#fbf4ea" stroke="#b4661a" stroke-width="1.8"/>
+  <text x="561" y="46" text-anchor="middle" font-size="13" font-weight="bold" fill="#b4661a">多すぎるとき</text>
+
+  <rect x="406" y="60" width="310" height="46" rx="6" fill="#fff" stroke="#e6d5bd"/>
+  <text x="561" y="78" text-anchor="middle" font-size="11" fill="#1f2933" font-weight="bold">① ヘッダを除外する</text>
+  <text x="561" y="96" text-anchor="middle" font-size="10" font-family="monospace" fill="#5a6b7a">isExpansionInMainFile()</text>
+  <line x1="561" y1="106" x2="561" y2="120" stroke="#5a6b7a" stroke-width="1.3" marker-end="url(#a27)"/>
+
+  <rect x="406" y="124" width="310" height="46" rx="6" fill="#fff" stroke="#e6d5bd"/>
+  <text x="561" y="142" text-anchor="middle" font-size="11" fill="#1f2933" font-weight="bold">② 標準ライブラリを除外する</text>
+  <text x="561" y="160" text-anchor="middle" font-size="10" font-family="monospace" fill="#5a6b7a">unless(isInStdNamespace())</text>
+  <line x1="561" y1="170" x2="561" y2="184" stroke="#5a6b7a" stroke-width="1.3" marker-end="url(#a27)"/>
+
+  <rect x="406" y="188" width="310" height="46" rx="6" fill="#fff" stroke="#e6d5bd"/>
+  <text x="561" y="206" text-anchor="middle" font-size="11" fill="#1f2933" font-weight="bold">③ コンパイラ生成物を除外する</text>
+  <text x="561" y="224" text-anchor="middle" font-size="10" font-family="monospace" fill="#5a6b7a">unless(isImplicit())</text>
+  <line x1="561" y1="234" x2="561" y2="248" stroke="#5a6b7a" stroke-width="1.3" marker-end="url(#a27)"/>
+
+  <rect x="406" y="252" width="310" height="46" rx="6" fill="#fff" stroke="#e6d5bd"/>
+  <text x="561" y="270" text-anchor="middle" font-size="11" fill="#1f2933" font-weight="bold">④ 名前を完全修飾で書く</text>
+  <text x="561" y="288" text-anchor="middle" font-size="10" font-family="monospace" fill="#5a6b7a">hasName("::mylib::Foo")</text>
+
+  <rect x="406" y="312" width="310" height="74" rx="6" fill="#b4661a"/>
+  <text x="561" y="336" text-anchor="middle" font-size="11.5" fill="#fff" font-weight="bold">出力を1つずつ読む</text>
+  <text x="422" y="356" font-size="10" fill="#fde9d0">「これは検出したいものか？」を1件ずつ判定する。</text>
+  <text x="422" y="374" font-size="10" fill="#fde9d0">検出したくない例が、そのまま除外条件のヒントになる</text>
+  </g>
+</svg>
+<figcaption><b>図27-3</b>　デバッグの手順。<strong>条件を1つずつ削って犯人を特定する</strong>のが、遠回りに見えて最短。</figcaption>
+</figure>
+
+<div class="warn">
+<span class="t">名前の指定は完全修飾で</span>
+<p><code>hasName("strcpy")</code> は、名前の末尾が一致すればマッチします。自作の <code>MyClass::strcpy</code> も拾ってしまうということです。<strong>グローバルの <code>strcpy</code> だけを狙うなら <code>hasName("::strcpy")</code> と書きます。</strong> 先頭の <code>::</code> がグローバル名前空間を意味します。件数が想定より多いときは、まずここを疑ってください。</p>
+</div>
+
+<h2>27.6 【ハンズオン】積み残しを解決する</h2>
+
+<div class="hands">
+<div class="hd">HANDS-ON 27　暗黙ノードを越える</div>
+<div class="bd">
+<ol>
+  <li><strong>問題を再現する。</strong> <code>ch25_match.cpp</code> を読み込み、<strong>走査モードを既定のまま</strong>で次を実行します。
+<pre><code>m varDecl(hasInitializer(cxxNewExpr()))</code></pre>
+    <code>0 matches.</code> になることを確認します。</li>
+
+  <li><strong>木を見る。</strong>
+<pre><code>set output dump
+m varDecl(hasName("p"))</code></pre>
+    初期化式のところに <code>ImplicitCastExpr</code> などが挟まっていることを確認してください。<strong>これが 0 件の理由です。</strong></li>
+
+  <li><strong>走査モードを変える。</strong>
+<pre><code>set output diag
+set traversal IgnoreUnlessSpelledInSource
+m varDecl(hasInitializer(cxxNewExpr()))</code></pre>
+    今度はマッチすることを確認します。</li>
+
+  <li><strong>明示的に飛ばす形でも書く。</strong>
+<pre><code>set traversal AsIs
+m varDecl(hasInitializer(ignoringImplicit(cxxNewExpr())))</code></pre>
+    走査モードを戻しても、こちらの形ならマッチすることを確認します。<strong>設定ファイルに持っていくのはこの形です。</strong></li>
+
+  <li><strong>前章の積み残しを完成させる。</strong> 「<code>new[]</code> で確保したものを、配列でない <code>delete</code> で解放している」を検出します。
+<pre><code>m cxxDeleteExpr(
+    isExpansionInMainFile(),
+    unless(isArrayForm()),
+    has(ignoringImplicit(
+      declRefExpr(to(varDecl(
+        hasInitializer(ignoringImplicit(cxxNewExpr(isArray()).bind("alloc")))
+      )))
+    ))
+  ).bind("del")</code></pre>
+    <code>"del"</code> と <code>"alloc"</code> がそれぞれ <code>delete p;</code> と <code>new int[10]</code> を指すことを確認します。</li>
+
+  <li><strong><code>let</code> で整理する。</strong> 手順5 のクエリを分解します。
+<pre><code>let arrayAlloc  cxxNewExpr(isArray())
+let ourCode     isExpansionInMainFile()
+m cxxDeleteExpr(ourCode, unless(isArrayForm()),
+    has(ignoringImplicit(declRefExpr(to(varDecl(
+      hasInitializer(ignoringImplicit(arrayAlloc.bind("alloc")))))))))
+  .bind("del")</code></pre>
+    同じ結果が出ることを確認します。</li>
+
+  <li><strong>名前の指定を厳しくする。</strong> <code>strcpy</code> のクエリで、完全修飾の有無による件数の違いを確認します。
+<pre><code>m callExpr(callee(functionDecl(hasName("strcpy"))))
+m callExpr(callee(functionDecl(hasName("::strcpy"))))</code></pre>
+    検証用に <code>MyClass::strcpy</code> のようなメンバ関数を足してから試すと、差がはっきりします。</li>
+
+  <li><strong>コストを測る。</strong>
+<pre><code>set enable-profile true
+m callExpr(hasAncestor(functionDecl(hasDescendant(callExpr()))))</code></pre>
+    重いクエリの実行時間を確認します。<strong>第6部で設定ファイルに入れるクエリは、全ファイルに対して毎回実行されることを思い出してください。</strong></li>
+
+  <li><strong>クエリファイルにまとめる。</strong> <code>queries\new-delete-mismatch.txt</code> を作り、<code>let</code> の定義とコメント、確定したクエリを保存します。
+<pre><code># new[] で確保したものを delete で解放している箇所を検出する
+# → 第33章で .clang-tidy の CustomChecks に移す
+set traversal AsIs
+set output diag
+let arrayAlloc cxxNewExpr(isArray())
+m cxxDeleteExpr(isExpansionInMainFile(), unless(isArrayForm()),
+    has(ignoringImplicit(declRefExpr(to(varDecl(
+      hasInitializer(ignoringImplicit(arrayAlloc.bind("alloc")))))))))
+  .bind("del")</code></pre>
+  </li>
+</ol>
+</div>
+</div>
+
+<div class="summary">
+<h2>この章のまとめ</h2>
+<ul>
+  <li>AST にはソースに書かれていない<strong>暗黙ノード</strong>が挟まる。素直に書いたクエリが 0 件になる最大の原因。</li>
+  <li><code>set traversal IgnoreUnlessSpelledInSource</code> で暗黙ノードを飛ばせる。<strong>起動したらまずこれを打つ習慣を。</strong></li>
+  <li>ただし <code>set traversal</code> は<strong>セッション設定なので設定ファイルには持っていけない</strong>。移行時は <code>ignoringImplicit()</code> などで<strong>明示的に飛ばす形に書き換える</strong>。</li>
+  <li><code>let</code> で部分式に名前を付けて再利用できる。ただしこれもセッション限りの道具。</li>
+  <li><code>set print-matcher</code> と <code>set enable-profile</code> がデバッグを助ける。重いクエリは設定ファイルに入れる前に測る。</li>
+  <li>0 件のときは<strong>条件を外側から1つずつ削って犯人を特定</strong>する。多すぎるときは <code>isExpansionInMainFile()</code>、<code>unless(isInStdNamespace())</code>、<code>unless(isImplicit())</code> で削る。</li>
+  <li><code>hasName("strcpy")</code> は末尾一致。グローバルだけを狙うなら <code>hasName("::strcpy")</code>。</li>
+</ul>
+</div>
+
+<p class="next"><strong>次章：</strong> 第28章「Matcher レシピ集」で第5部が完結します。実務で頻出するパターンを、そのまま使える形で揃えます。第6部で書くカスタムチェックは、ほぼすべてこのレシピの組み合わせになります。</p>
+
+</div>
+</body>
+</html>

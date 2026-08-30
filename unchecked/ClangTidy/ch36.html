@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第36章 カスタムチェックのデバッグ手順 ─ Clang-Tidy入門</title>
+<style>
+  :root{
+    --ink:#1f2933; --sub:#5a6b7a; --line:#d8dee4; --bg:#ffffff;
+    --code-bg:#f6f8fa; --code-line:#e2e8ee;
+    --accent:#2f6f9f; --accent-bg:#eef4f9;
+    --warn:#b4661a; --warn-bg:#fbf4ea;
+    --ok:#3d7a52; --ok-bg:#eef5f0;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0; background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Noto Sans JP","Meiryo",sans-serif;
+    font-size:16px; line-height:1.95; font-feature-settings:"palt" 1;}
+  .page{max-width:47rem; margin:0 auto; padding:3.5rem 1.6rem 6rem}
+  .chap-no{font-size:.8rem; letter-spacing:.22em; color:var(--accent); font-weight:700; margin:0 0 .5rem}
+  h1{font-size:1.85rem; line-height:1.5; margin:0 0 .6rem; letter-spacing:.01em}
+  .lede{color:var(--sub); font-size:1rem; margin:0 0 2.2rem; padding-bottom:1.6rem; border-bottom:2px solid var(--ink)}
+  h2{font-size:1.28rem; margin:3rem 0 1rem; padding-left:.7rem; border-left:4px solid var(--accent); line-height:1.6}
+  h3{font-size:1.05rem; margin:2.2rem 0 .7rem}
+  h3::before{content:"◆ "; color:var(--accent); font-size:.8em}
+  p{margin:0 0 1.1rem}
+  ul,ol{margin:0 0 1.2rem; padding-left:1.6rem}
+  li{margin:.35rem 0}
+  code{font-family:"Cascadia Mono","Consolas","SFMono-Regular",monospace; font-size:.9em;
+       background:var(--code-bg); border:1px solid var(--code-line); border-radius:4px; padding:.08em .35em}
+  pre{background:var(--code-bg); border:1px solid var(--code-line); border-radius:8px;
+      padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.7}
+  pre code{background:none; border:none; padding:0; font-size:.86rem}
+  pre.term{background:#1f2933; border-color:#1f2933; color:#e6edf3}
+  pre.term code{color:#e6edf3}
+  pre.term .p{color:#7fb2d6}
+  pre.term .o{color:#9fb3c0}
+  .cap{font-size:.82rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+  figure{margin:2rem 0 2.2rem}
+  figure svg{display:block; width:100%; height:auto; border:1px solid var(--line); border-radius:8px; background:#fff}
+  figcaption{font-size:.85rem; color:var(--sub); margin-top:.6rem}
+  figcaption b{color:var(--ink)}
+  .box{border-radius:8px; padding:1rem 1.2rem; margin:1.6rem 0; font-size:.94rem}
+  .box p:last-child{margin-bottom:0}
+  .box .t{font-weight:700; display:block; margin-bottom:.35rem; font-size:.88rem; letter-spacing:.04em}
+  .note{background:var(--accent-bg); border-left:4px solid var(--accent)} .note .t{color:var(--accent)}
+  .warn{background:var(--warn-bg); border-left:4px solid var(--warn)} .warn .t{color:var(--warn)}
+  .tip{background:var(--ok-bg); border-left:4px solid var(--ok)} .tip .t{color:var(--ok)}
+  .hands{border:1px solid var(--line); border-radius:10px; margin:2rem 0; overflow:hidden}
+  .hands>.hd{background:var(--ink); color:#fff; padding:.55rem 1.1rem; font-size:.85rem; letter-spacing:.1em; font-weight:700}
+  .hands>.bd{padding:1.3rem 1.3rem .4rem}
+  .hands ol{counter-reset:step; list-style:none; padding-left:0}
+  .hands ol>li{counter-increment:step; position:relative; padding-left:2.4rem; margin:0 0 1.2rem}
+  .hands ol>li::before{content:counter(step); position:absolute; left:0; top:.25rem;
+    width:1.7rem; height:1.7rem; border-radius:50%; background:var(--accent); color:#fff;
+    font-size:.82rem; font-weight:700; display:flex; align-items:center; justify-content:center; line-height:1}
+  table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+  th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+  th{background:var(--code-bg); font-weight:700}
+  .summary{border:2px solid var(--ink); border-radius:10px; padding:1.3rem 1.5rem; margin:3rem 0 1rem}
+  .summary h2{margin:0 0 .8rem; border:none; padding:0; font-size:1.1rem}
+  .summary ul{margin-bottom:0}
+  .next{color:var(--sub); font-size:.94rem; border-top:1px solid var(--line); padding-top:1.2rem; margin-top:2.5rem}
+  @media (max-width:600px){ body{font-size:15px} .page{padding:2.2rem 1.1rem 4rem} h1{font-size:1.5rem} }
+</style>
+</head>
+<body>
+<div class="page">
+
+<p class="chap-no">第 36 章</p>
+<h1>カスタムチェックのデバッグ手順</h1>
+<p class="lede">ここまでのハンズオンで、必ず一度は「clang-query では動いたのに、設定ファイルでは何も出ない」に遭遇したはずです。原因は複数あり、しかも <strong>どれも静かに失敗します</strong>。この章で、切り分けの手順を体系化します。手順を持っていれば、5分で解決するものが1時間になりません。</p>
+
+<h2>36.1 静かに失敗する箇所</h2>
+
+<p>カスタムチェックは、次のどの段階でも「エラーを出さずに何も起きない」で終わりえます。</p>
+
+<figure>
+<svg viewBox="0 0 760 420" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="カスタムチェックが失敗しうる段階">
+  <defs>
+    <marker id="a36" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5a6b7a"/>
+    </marker>
+  </defs>
+  <g font-family="sans-serif">
+
+  <rect x="24" y="16" width="712" height="32" rx="6" fill="#1f2933"/>
+  <text x="380" y="37" text-anchor="middle" fill="#fff" font-size="12.5" font-weight="bold">どの段階で止まっても、症状は同じ「警告が出ない」</text>
+
+  <g font-size="11.5">
+  <rect x="60" y="62" width="470" height="40" rx="6" fill="#f7e9e5" stroke="#a04a34" stroke-width="1.6"/>
+  <text x="80" y="87" fill="#1f2933"><tspan font-weight="bold">① フラグ</tspan>　--experimental-custom-checks を渡していない</text>
+  <rect x="546" y="62" width="190" height="40" rx="6" fill="#fff" stroke="#a04a34"/>
+  <text x="641" y="87" text-anchor="middle" fill="#a04a34" font-weight="bold">エラー出ない</text>
+  <line x1="295" y1="102" x2="295" y2="116" stroke="#5a6b7a" stroke-width="1.3" marker-end="url(#a36)"/>
+
+  <rect x="60" y="120" width="470" height="40" rx="6" fill="#f7e9e5" stroke="#a04a34" stroke-width="1.6"/>
+  <text x="80" y="145" fill="#1f2933"><tspan font-weight="bold">② 設定ファイル</tspan>　そもそも読まれていない／YAML が壊れている</text>
+  <rect x="546" y="120" width="190" height="40" rx="6" fill="#fff" stroke="#a04a34"/>
+  <text x="641" y="145" text-anchor="middle" fill="#a04a34" font-weight="bold">エラー出ない</text>
+  <line x1="295" y1="160" x2="295" y2="174" stroke="#5a6b7a" stroke-width="1.3" marker-end="url(#a36)"/>
+
+  <rect x="60" y="178" width="470" height="40" rx="6" fill="#f7e9e5" stroke="#a04a34" stroke-width="1.6"/>
+  <text x="80" y="203" fill="#1f2933"><tspan font-weight="bold">③ 有効化</tspan>　Checks に custom- 接頭辞を付け忘れた</text>
+  <rect x="546" y="178" width="190" height="40" rx="6" fill="#fff" stroke="#a04a34"/>
+  <text x="641" y="203" text-anchor="middle" fill="#a04a34" font-weight="bold">エラー出ない</text>
+  <line x1="295" y1="218" x2="295" y2="232" stroke="#5a6b7a" stroke-width="1.3" marker-end="url(#a36)"/>
+
+  <rect x="60" y="236" width="470" height="40" rx="6" fill="#fbf4ea" stroke="#b4661a" stroke-width="1.6"/>
+  <text x="80" y="261" fill="#1f2933"><tspan font-weight="bold">④ クエリ</tspan>　走査モードや let に依存していた／構文が違う</text>
+  <rect x="546" y="236" width="190" height="40" rx="6" fill="#fff" stroke="#b4661a"/>
+  <text x="641" y="261" text-anchor="middle" fill="#b4661a" font-weight="bold">出る場合もある</text>
+  <line x1="295" y1="276" x2="295" y2="290" stroke="#5a6b7a" stroke-width="1.3" marker-end="url(#a36)"/>
+
+  <rect x="60" y="294" width="470" height="40" rx="6" fill="#f7e9e5" stroke="#a04a34" stroke-width="1.6"/>
+  <text x="80" y="319" fill="#1f2933"><tspan font-weight="bold">⑤ BindName</tspan>　bind した名前と綴りが違う</text>
+  <rect x="546" y="294" width="190" height="40" rx="6" fill="#fff" stroke="#a04a34"/>
+  <text x="641" y="319" text-anchor="middle" fill="#a04a34" font-weight="bold">エラー出ない</text>
+  <line x1="295" y1="334" x2="295" y2="348" stroke="#5a6b7a" stroke-width="1.3" marker-end="url(#a36)"/>
+
+  <rect x="60" y="352" width="470" height="40" rx="6" fill="#f7e9e5" stroke="#a04a34" stroke-width="1.6"/>
+  <text x="80" y="377" fill="#1f2933"><tspan font-weight="bold">⑥ フィルタ</tspan>　ヘッダフィルタや NOLINT で表示されていない</text>
+  <rect x="546" y="352" width="190" height="40" rx="6" fill="#fff" stroke="#a04a34"/>
+  <text x="641" y="377" text-anchor="middle" fill="#a04a34" font-weight="bold">統計行に出る</text>
+  </g>
+
+  <text x="380" y="410" text-anchor="middle" font-size="11.5" fill="#5a6b7a">推測で直そうとすると、6 通りを行き来することになる。<tspan font-weight="bold" fill="#1f2933">上から順に潰す</tspan></text>
+  </g>
+</svg>
+<figcaption><b>図36-1</b>　失敗しうる段階。<strong>すべて「警告が出ない」という同じ症状になる</strong>のが厄介な点。</figcaption>
+</figure>
+
+<h2>36.2 切り分けの手順</h2>
+
+<p>上から順に、各段階を確認するコマンドがあります。<strong>推測せず、段階ごとに事実を確認してください。</strong></p>
+
+<figure>
+<svg viewBox="0 0 760 400" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="段階ごとの確認コマンド">
+  <g font-family="sans-serif">
+
+  <rect x="24" y="16" width="712" height="32" rx="6" fill="#3d7a52"/>
+  <text x="380" y="37" text-anchor="middle" fill="#fff" font-size="12.5" font-weight="bold">各段階を「事実」で確認する</text>
+
+  <g font-size="11">
+  <rect x="24" y="60" width="140" height="52" rx="6" fill="#2f6f9f"/>
+  <text x="94" y="82" text-anchor="middle" fill="#fff" font-weight="bold">① フラグ</text>
+  <text x="94" y="100" text-anchor="middle" fill="#d6e6f2" font-size="10">機能が有効か</text>
+  <rect x="176" y="60" width="560" height="52" rx="6" fill="#1f2933"/>
+  <text x="192" y="82" font-family="monospace" fill="#a3d9a5">clang-tidy --help | findstr experimental-custom-checks</text>
+  <text x="192" y="100" font-family="monospace" fill="#9fb3c0">→ 行が出るか。出なければ第4章へ</text>
+
+  <rect x="24" y="120" width="140" height="52" rx="6" fill="#2f6f9f"/>
+  <text x="94" y="142" text-anchor="middle" fill="#fff" font-weight="bold">② 設定</text>
+  <text x="94" y="160" text-anchor="middle" fill="#d6e6f2" font-size="10">読まれているか</text>
+  <rect x="176" y="120" width="560" height="52" rx="6" fill="#1f2933"/>
+  <text x="192" y="142" font-family="monospace" fill="#a3d9a5">clang-tidy --experimental-custom-checks --dump-config &lt;file&gt; --</text>
+  <text x="192" y="160" font-family="monospace" fill="#9fb3c0">→ CustomChecks に自分のチェックが出るか</text>
+
+  <rect x="24" y="180" width="140" height="52" rx="6" fill="#b4661a"/>
+  <text x="94" y="202" text-anchor="middle" fill="#fff" font-weight="bold">③ 有効化</text>
+  <text x="94" y="220" text-anchor="middle" fill="#fde9d0" font-size="10">Checks に入ったか</text>
+  <rect x="176" y="180" width="560" height="52" rx="6" fill="#1f2933"/>
+  <text x="192" y="202" font-family="monospace" fill="#a3d9a5">clang-tidy --experimental-custom-checks --list-checks &lt;file&gt; --</text>
+  <text x="192" y="220" font-family="monospace" fill="#9fb3c0">→ 一覧に custom-〜 が出るか</text>
+
+  <rect x="24" y="240" width="140" height="52" rx="6" fill="#b4661a"/>
+  <text x="94" y="262" text-anchor="middle" fill="#fff" font-weight="bold">④ クエリ</text>
+  <text x="94" y="280" text-anchor="middle" fill="#fde9d0" font-size="10">マッチするか</text>
+  <rect x="176" y="240" width="560" height="52" rx="6" fill="#1f2933"/>
+  <text x="192" y="262" font-family="monospace" fill="#a3d9a5">clang-query &lt;file&gt; -- …　で同じ式を実行</text>
+  <text x="192" y="280" font-family="monospace" fill="#9fb3c0">→ 件数が一致するか。set traversal を外した状態で試す</text>
+
+  <rect x="24" y="300" width="140" height="52" rx="6" fill="#a04a34"/>
+  <text x="94" y="322" text-anchor="middle" fill="#fff" font-weight="bold">⑤⑥ 出力</text>
+  <text x="94" y="340" text-anchor="middle" fill="#f0d5cf" font-size="10">表示されているか</text>
+  <rect x="176" y="300" width="560" height="52" rx="6" fill="#1f2933"/>
+  <text x="192" y="322" font-family="monospace" fill="#a3d9a5">実行末尾の "Suppressed N warnings (…)" を読む</text>
+  <text x="192" y="340" font-family="monospace" fill="#9fb3c0">→ non-user code や NOLINT で消えていないか（第9・10章）</text>
+  </g>
+
+  <rect x="24" y="362" width="712" height="30" rx="6" fill="#eef5f0" stroke="#3d7a52" stroke-width="1.5"/>
+  <text x="380" y="382" text-anchor="middle" font-size="11.5" fill="#3d7a52" font-weight="bold">①〜③ が通っていれば、原因は④以降に絞られる。ここまで 30 秒で確認できる</text>
+  </g>
+</svg>
+<figcaption><b>図36-2</b>　段階ごとの確認コマンド。<strong>①②③は機械的に確認でき、しかも高速。</strong> ここを飛ばして④から始めないこと。</figcaption>
+</figure>
+
+<h2>36.3 <code>--dump-config</code> の読み方</h2>
+
+<p>段階②の確認が最も情報量があります。設定ファイルがどう解釈されたかが、そのまま出ます。</p>
+
+<pre class="term"><code><span class="p">&gt;</span> clang-tidy --experimental-custom-checks --dump-config notes.cpp -- -std=c++23
+<span class="o">---
+Checks:  '-*,custom-*'
+…
+CustomChecks:
+  - Name:  array-delete-mismatch
+    Query: |
+      match cxxDeleteExpr(…
+    Diagnostic:
+      - BindName: del
+        Message: '…'
+        Level:   Warning
+…</span></code></pre>
+
+<table>
+<tr><th>見えること</th><th>意味</th></tr>
+<tr><td><code>CustomChecks</code> がない</td><td>フラグを渡していないか、設定ファイルが読まれていない</td></tr>
+<tr><td><code>CustomChecks</code> はあるが自分のチェックがない</td><td>YAML が壊れているか、別の設定ファイルが使われている（第7章）</td></tr>
+<tr><td>チェックはあるが <code>Query</code> が途中で切れている</td><td>YAML のリテラルブロックのインデントミス</td></tr>
+<tr><td><code>Diagnostic</code> が空</td><td>インデントがずれてリストとして認識されていない</td></tr>
+<tr><td>すべて正しく見える</td><td>原因は④以降。<code>clang-query</code> に戻る</td></tr>
+</table>
+
+<div class="tip">
+<span class="t">どの設定ファイルが使われているかを疑う</span>
+<p>第7章で見たとおり、設定ファイルは<strong>解析対象ファイルの位置から親をたどって</strong>探されます。<code>tests\</code> にも <code>samples\</code> にも <code>.clang-tidy</code> を置いてきたので、意図しないものが使われている可能性があります。<code>--explain-config</code> で確認してください。</p>
+</div>
+
+<h2>36.4 YAML の罠</h2>
+
+<figure>
+<svg viewBox="0 0 760 340" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="YAML でよくある間違い">
+  <g font-family="sans-serif">
+
+  <rect x="24" y="16" width="712" height="30" rx="6" fill="#a04a34"/>
+  <text x="380" y="36" text-anchor="middle" fill="#fff" font-size="12.5" font-weight="bold">YAML は壊れても静かに壊れる</text>
+
+  <g font-size="10.5" font-family="monospace">
+  <rect x="24" y="58" width="350" height="126" rx="8" fill="#1f2933"/>
+  <text x="40" y="80" fill="#e08a74">CustomChecks:</text>
+  <text x="40" y="98" fill="#e08a74">  - Name: no-goto</text>
+  <text x="40" y="116" fill="#e08a74">  Query: |</text>
+  <text x="40" y="134" fill="#e08a74">      match gotoStmt().bind("g")</text>
+  <text x="40" y="152" fill="#e08a74">  Diagnostic:</text>
+  <text x="40" y="170" fill="#e08a74">    - BindName: g</text>
+  <rect x="386" y="58" width="350" height="126" rx="8" fill="#f7e9e5" stroke="#a04a34" stroke-width="1.6"/>
+  <text x="402" y="82" font-family="sans-serif" font-size="11.5" fill="#a04a34" font-weight="bold">✕ リスト要素のインデント不足</text>
+  <text x="402" y="106" font-family="sans-serif" font-size="11" fill="#1f2933">「- 」の後に続くキーは、</text>
+  <text x="402" y="126" font-family="sans-serif" font-size="11" fill="#1f2933">Name と同じ桁に揃える</text>
+  <text x="402" y="152" font-family="sans-serif" font-size="11" fill="#5a6b7a">→ Query が別の要素と解釈され、</text>
+  <text x="402" y="170" font-family="sans-serif" font-size="11" fill="#5a6b7a">　 チェックが不完全になる</text>
+
+  <rect x="24" y="196" width="350" height="126" rx="8" fill="#1f2933"/>
+  <text x="40" y="218" fill="#a3d9a5">CustomChecks:</text>
+  <text x="40" y="236" fill="#a3d9a5">  - Name: no-goto</text>
+  <text x="40" y="254" fill="#a3d9a5">    Query: |</text>
+  <text x="40" y="272" fill="#a3d9a5">      match gotoStmt().bind("g")</text>
+  <text x="40" y="290" fill="#a3d9a5">    Diagnostic:</text>
+  <text x="40" y="308" fill="#a3d9a5">      - BindName: g</text>
+  <rect x="386" y="196" width="350" height="126" rx="8" fill="#eef5f0" stroke="#3d7a52" stroke-width="1.8"/>
+  <text x="402" y="220" font-family="sans-serif" font-size="11.5" fill="#3d7a52" font-weight="bold">○ 正しいインデント</text>
+  <text x="402" y="244" font-family="sans-serif" font-size="11" fill="#1f2933">Name / Query / Diagnostic が同じ桁</text>
+  <text x="402" y="268" font-family="sans-serif" font-size="11" fill="#1f2933">Query の中身は 1 段深く</text>
+  <text x="402" y="292" font-family="sans-serif" font-size="11" fill="#1f2933">Diagnostic のリストも 1 段深く</text>
+  <text x="402" y="312" font-family="sans-serif" font-size="11" fill="#5a6b7a">タブは絶対に使わない</text>
+  </g>
+  </g>
+</svg>
+<figcaption><b>図36-3</b>　YAML のインデント。<strong>エディタで「空白を表示」を有効にして書くと事故が減ります。</strong></figcaption>
+</figure>
+
+<table>
+<tr><th>罠</th><th>症状</th><th>確認方法</th></tr>
+<tr><td>タブ文字</td><td>設定が読まれない</td><td>エディタで空白を可視化</td></tr>
+<tr><td>リテラルブロックのインデント不足</td><td>Query が空になる</td><td><code>--dump-config</code></td></tr>
+<tr><td>メッセージ中のコロン</td><td>値が途中で切れる</td><td>ダブルクォートで囲む</td></tr>
+<tr><td>メッセージ中の <code>#</code></td><td>以降がコメント扱い</td><td>ダブルクォートで囲む</td></tr>
+<tr><td>全角スペース</td><td>設定が読まれない</td><td>日本語メッセージを書いたときに要注意</td></tr>
+</table>
+
+<h2>36.5 clang-query では動くのに設定では動かない</h2>
+
+<p>段階③まで通っているのにマッチしない場合、原因は次のいずれかです。</p>
+
+<table>
+<tr><th>原因</th><th>確認</th><th>対処</th></tr>
+<tr><td><code>set traversal</code> に依存していた</td><td>clang-query で <code>set traversal AsIs</code> にして同じ式を試す</td><td><code>ignoringImplicit()</code> 等を式に入れる（第27章）</td></tr>
+<tr><td><code>let</code> で定義した名前を使っている</td><td>クエリ文字列に <code>let</code> の名前が残っていないか</td><td>展開して書く</td></tr>
+<tr><td><code>match</code> を書き忘れた／<code>m</code> のまま</td><td><code>--dump-config</code> で Query の中身を見る</td><td><code>match</code> に直す</td></tr>
+<tr><td>コンパイルオプションが違う</td><td>clang-query と clang-tidy で同じ <code>--</code> 以降を使っているか</td><td>揃える（第12章）</td></tr>
+<tr><td>解析対象ファイルが違う</td><td>そもそも別のファイルを見ていないか</td><td>─</td></tr>
+<tr><td><code>BindName</code> の綴り違い</td><td><code>--dump-config</code> と Query を突き合わせる</td><td>直す</td></tr>
+</table>
+
+<div class="warn">
+<span class="t">最も多いのは走査モード</span>
+<p>第27章で「起動したらまず <code>set traversal IgnoreUnlessSpelledInSource</code>」と習慣づけました。<strong>その習慣が、設定ファイルへの移行時に牙を剥きます。</strong> clang-query では動いていたのは、そのモードのおかげだったのです。移行前に必ず <code>set traversal AsIs</code> で動作確認してください。</p>
+</div>
+
+<h2>36.6 【ハンズオン】わざと壊して直す</h2>
+
+<div class="hands">
+<div class="hd">HANDS-ON 36　6つの症状を体験する</div>
+<div class="bd">
+<ol>
+  <li><strong>正常動作を確認する。</strong> 第35章までに作ったチェックが動く状態から始めます。件数を記録してください。</li>
+
+  <li><strong>症状① フラグを外す。</strong> <code>--experimental-custom-checks</code> を外して実行。警告が消えることを確認したら、図36-2 の①のコマンドで<strong>切り分け</strong>できることを確認します。</li>
+
+  <li><strong>症状② YAML を壊す。</strong> <code>Query:</code> のインデントを1つ減らして実行。次に <code>--dump-config</code> を実行し、<strong>Query がどう見えるか</strong>を確認します。</li>
+
+  <li><strong>症状③ 接頭辞を外す。</strong> <code>Checks</code> を <code>'-*,array-delete-mismatch'</code>（<code>custom-</code> なし）にして実行。次に <code>--list-checks</code> で<strong>一覧に出てこない</strong>ことを確認します。</li>
+
+  <li><strong>症状④ 走査モードに依存させる。</strong> クエリから <code>ignoringImplicit()</code> を削除して実行。マッチしなくなることを確認します。次に <code>clang-query</code> で、
+<pre><code>set traversal IgnoreUnlessSpelledInSource
+m cxxDeleteExpr(unless(isArrayForm()), has(declRefExpr(to(varDecl(hasInitializer(cxxNewExpr(isArray())))))))
+set traversal AsIs
+m cxxDeleteExpr(unless(isArrayForm()), has(declRefExpr(to(varDecl(hasInitializer(cxxNewExpr(isArray())))))))</code></pre>
+    を実行し、<strong>モードによって件数が変わる</strong>ことを確認します。これが第27章の警告の実証です。</li>
+
+  <li><strong>症状⑤ BindName を間違える。</strong> <code>BindName: del</code> を <code>BindName: dell</code> にして実行。挙動を記録します。</li>
+
+  <li><strong>症状⑥ フィルタで消す。</strong> 検証ファイルをヘッダ（<code>.h</code>）に移し、<code>isExpansionInMainFile()</code> のせいで検出されなくなることを確認します。実行末尾の <code>Suppressed N warnings</code> を読み、<code>in non-user code</code> の数を確認してください。</li>
+
+  <li><strong>手順書を作る。</strong> ここまでの体験をもとに、<code>docs\clang-tidy-troubleshooting.md</code> を作ります。
+<pre><code># カスタムチェックが動かないとき
+
+1. clang-tidy --help | findstr experimental-custom-checks
+2. clang-tidy --experimental-custom-checks --dump-config &lt;file&gt; --
+3. clang-tidy --experimental-custom-checks --list-checks &lt;file&gt; --
+4. clang-query で set traversal AsIs にして同じ式を実行
+5. 実行末尾の Suppressed 行を読む
+
+※ 1〜3 は 30 秒で終わる。必ず先に実行すること。</code></pre>
+    <strong>この5行が、この章の成果物です。</strong> チームで共有してください。</li>
+
+  <li><strong>すべて元に戻す。</strong> 壊した箇所を修復し、手順1の件数に戻ることを確認します。</li>
+</ol>
+</div>
+</div>
+
+<div class="summary">
+<h2>この章のまとめ</h2>
+<ul>
+  <li>カスタムチェックは6つの段階で失敗しうる。<strong>そのすべてが「警告が出ない」という同じ症状になる。</strong></li>
+  <li>推測せず、上から順に事実を確認する。<strong>①フラグ ②<code>--dump-config</code> ③<code>--list-checks</code> は 30 秒で終わる。</strong></li>
+  <li><code>--dump-config</code> は設定ファイルがどう解釈されたかをそのまま見せてくれる。最も情報量が多い。</li>
+  <li>意図しない設定ファイルが使われていないか、<code>--explain-config</code> で確認する。</li>
+  <li>YAML はタブ・インデント・コロン・<code>#</code>・全角スペースで静かに壊れる。<strong>エディタで空白を可視化する。</strong></li>
+  <li>clang-query では動くのに設定では動かない原因の第1位は <strong>走査モードへの依存</strong>。移行前に <code>set traversal AsIs</code> で確認する。</li>
+  <li>切り分け手順を文書にしてチームで共有する。</li>
+</ul>
+</div>
+
+<p class="next"><strong>次章：</strong> 第37章「誤検出とどう付き合うか」では、動くようになった後の話をします。<strong>自作チェックの偽陽性は、標準チェックのそれより厄介です。</strong> 直せるのが自分たちしかいないからです。</p>
+
+</div>
+</body>
+</html>

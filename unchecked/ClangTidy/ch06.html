@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第6章 チェック名の読み方 ─ Clang-Tidy入門</title>
+<style>
+  :root{
+    --ink:#1f2933; --sub:#5a6b7a; --line:#d8dee4; --bg:#ffffff;
+    --code-bg:#f6f8fa; --code-line:#e2e8ee;
+    --accent:#2f6f9f; --accent-bg:#eef4f9;
+    --warn:#b4661a; --warn-bg:#fbf4ea;
+    --ok:#3d7a52; --ok-bg:#eef5f0;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0; background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Noto Sans JP","Meiryo",sans-serif;
+    font-size:16px; line-height:1.95; font-feature-settings:"palt" 1;}
+  .page{max-width:47rem; margin:0 auto; padding:3.5rem 1.6rem 6rem}
+  .chap-no{font-size:.8rem; letter-spacing:.22em; color:var(--accent); font-weight:700; margin:0 0 .5rem}
+  h1{font-size:1.85rem; line-height:1.5; margin:0 0 .6rem; letter-spacing:.01em}
+  .lede{color:var(--sub); font-size:1rem; margin:0 0 2.2rem; padding-bottom:1.6rem; border-bottom:2px solid var(--ink)}
+  h2{font-size:1.28rem; margin:3rem 0 1rem; padding-left:.7rem; border-left:4px solid var(--accent); line-height:1.6}
+  h3{font-size:1.05rem; margin:2.2rem 0 .7rem}
+  h3::before{content:"◆ "; color:var(--accent); font-size:.8em}
+  p{margin:0 0 1.1rem}
+  ul,ol{margin:0 0 1.2rem; padding-left:1.6rem}
+  li{margin:.35rem 0}
+  code{font-family:"Cascadia Mono","Consolas","SFMono-Regular",monospace; font-size:.9em;
+       background:var(--code-bg); border:1px solid var(--code-line); border-radius:4px; padding:.08em .35em}
+  pre{background:var(--code-bg); border:1px solid var(--code-line); border-radius:8px;
+      padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.7}
+  pre code{background:none; border:none; padding:0; font-size:.86rem}
+  pre.term{background:#1f2933; border-color:#1f2933; color:#e6edf3}
+  pre.term code{color:#e6edf3}
+  pre.term .p{color:#7fb2d6}
+  pre.term .o{color:#9fb3c0}
+  pre.term .w{color:#e8b075}
+  .cap{font-size:.82rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+  figure{margin:2rem 0 2.2rem}
+  figure svg{display:block; width:100%; height:auto; border:1px solid var(--line); border-radius:8px; background:#fff}
+  figcaption{font-size:.85rem; color:var(--sub); margin-top:.6rem}
+  figcaption b{color:var(--ink)}
+  .box{border-radius:8px; padding:1rem 1.2rem; margin:1.6rem 0; font-size:.94rem}
+  .box p:last-child{margin-bottom:0}
+  .box .t{font-weight:700; display:block; margin-bottom:.35rem; font-size:.88rem; letter-spacing:.04em}
+  .note{background:var(--accent-bg); border-left:4px solid var(--accent)} .note .t{color:var(--accent)}
+  .warn{background:var(--warn-bg); border-left:4px solid var(--warn)} .warn .t{color:var(--warn)}
+  .tip{background:var(--ok-bg); border-left:4px solid var(--ok)} .tip .t{color:var(--ok)}
+  .hands{border:1px solid var(--line); border-radius:10px; margin:2rem 0; overflow:hidden}
+  .hands>.hd{background:var(--ink); color:#fff; padding:.55rem 1.1rem; font-size:.85rem; letter-spacing:.1em; font-weight:700}
+  .hands>.bd{padding:1.3rem 1.3rem .4rem}
+  .hands ol{counter-reset:step; list-style:none; padding-left:0}
+  .hands ol>li{counter-increment:step; position:relative; padding-left:2.4rem; margin:0 0 1.2rem}
+  .hands ol>li::before{content:counter(step); position:absolute; left:0; top:.25rem;
+    width:1.7rem; height:1.7rem; border-radius:50%; background:var(--accent); color:#fff;
+    font-size:.82rem; font-weight:700; display:flex; align-items:center; justify-content:center; line-height:1}
+  table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+  th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+  th{background:var(--code-bg); font-weight:700}
+  .summary{border:2px solid var(--ink); border-radius:10px; padding:1.3rem 1.5rem; margin:3rem 0 1rem}
+  .summary h2{margin:0 0 .8rem; border:none; padding:0; font-size:1.1rem}
+  .summary ul{margin-bottom:0}
+  .next{color:var(--sub); font-size:.94rem; border-top:1px solid var(--line); padding-top:1.2rem; margin-top:2.5rem}
+  @media (max-width:600px){ body{font-size:15px} .page{padding:2.2rem 1.1rem 4rem} h1{font-size:1.5rem} }
+</style>
+</head>
+<body>
+<div class="page">
+
+<p class="chap-no">第 6 章</p>
+<h1>チェック名の読み方</h1>
+<p class="lede">第5章では「Clang-Tidy チェック」欄に <code>clang-analyzer-*</code> と書きました。あの文字列には明確な文法があります。ワイルドカードで束ね、マイナスで削り、順番で上書きする。この文法を自在に扱えるかどうかが、Clang-Tidy を「使える」か「なんとなく使っている」かの分かれ目です。</p>
+
+<h2>6.1 名前の構造</h2>
+
+<p>チェック名は <code>モジュール名-チェック名</code> という2部構成です。チェック名の側はハイフン区切りの単語列になります。</p>
+
+<figure>
+<svg viewBox="0 0 760 200" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="チェック名の構造">
+  <g font-family="sans-serif">
+  <rect x="24" y="24" width="712" height="56" rx="8" fill="#1f2933"/>
+  <text x="60" y="60" font-size="19" font-family="monospace" fill="#e6edf3">
+    <tspan fill="#e8b075">bugprone</tspan><tspan fill="#9fb3c0">-</tspan><tspan fill="#a3d9a5">use-after-move</tspan>
+  </text>
+
+  <line x1="110" y1="80" x2="110" y2="112" stroke="#b4661a" stroke-width="1.4"/>
+  <line x1="230" y1="80" x2="230" y2="150" stroke="#3d7a52" stroke-width="1.4"/>
+
+  <text x="116" y="108" font-size="12.5" fill="#b4661a" font-weight="bold">モジュール名（＝チェックの出自・目的）</text>
+  <text x="116" y="128" font-size="11.5" fill="#5a6b7a">ここだけを <tspan font-family="monospace">bugprone-*</tspan> のように束ねて指定できる</text>
+
+  <text x="236" y="146" font-size="12.5" fill="#3d7a52" font-weight="bold">チェック名（＝個別のルール）</text>
+  <text x="236" y="166" font-size="11.5" fill="#5a6b7a">ハイフン区切りの英単語。何を検出するかを表す</text>
+
+  <rect x="24" y="176" width="712" height="1" fill="#d8dee4"/>
+  </g>
+</svg>
+<figcaption><b>図6-1</b>　チェック名の構造。モジュール名は指定の単位になるので、まずここを覚える。</figcaption>
+</figure>
+
+<p>例外が一つあります。<code>clang-analyzer-</code> モジュールだけは、Clang Static Analyzer 側の命名をそのまま引き継ぐため、ドットを含む名前になります。</p>
+
+<pre><code>clang-analyzer-core.NullDereference
+clang-analyzer-unix.Malloc
+clang-analyzer-cplusplus.NewDelete</code></pre>
+
+<p>ドットの前は Static Analyzer 側の「パッケージ」です。<code>clang-analyzer-core.*</code> のように、ここもワイルドカードで束ねられます。</p>
+
+<h2>6.2 グロブの文法</h2>
+
+<p>チェックの指定は <strong>カンマ区切りのグロブのリスト</strong> です。規則は3つだけです。</p>
+
+<table>
+<tr><th>記法</th><th>意味</th></tr>
+<tr><td><code>foo-bar</code></td><td>そのチェックを1つ有効にする</td></tr>
+<tr><td><code>foo-*</code></td><td><code>foo-</code> で始まるチェックをすべて有効にする（<code>*</code> は任意の文字列）</td></tr>
+<tr><td><code>-foo-bar</code> / <code>-foo-*</code></td><td>先頭の <code>-</code> で、一致するものを<strong>無効化</strong>する</td></tr>
+</table>
+
+<p>そして最も重要な規則が次です。</p>
+
+<div class="note">
+<span class="t">左から右へ順に適用され、後に書いたものが勝つ</span>
+<p>グロブのリストは「フィルタの列」として、書いた順に評価されます。同じチェックが複数のグロブに一致する場合、<strong>最後に一致したグロブの符号（有効か無効か）が採用されます</strong>。この一点さえ理解していれば、あとは組み合わせるだけです。</p>
+</div>
+
+<figure>
+<svg viewBox="0 0 760 340" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="グロブが左から右へフィルタとして適用される様子">
+  <defs>
+    <marker id="g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5a6b7a"/>
+    </marker>
+  </defs>
+  <g font-family="sans-serif">
+
+  <text x="30" y="28" font-size="12.5" font-weight="bold" fill="#5a6b7a" letter-spacing="1.5">指定：  -*,bugprone-*,readability-*,-readability-magic-numbers</text>
+
+  <!-- pool -->
+  <rect x="24" y="46" width="140" height="264" rx="8" fill="#f4f6f8" stroke="#d8dee4"/>
+  <text x="94" y="70" text-anchor="middle" font-size="12" font-weight="bold" fill="#5a6b7a">全チェック</text>
+  <text x="94" y="88" text-anchor="middle" font-size="11" fill="#5a6b7a">（数百件）</text>
+  <rect x="38" y="102" width="112" height="22" rx="4" fill="#fff" stroke="#d8dee4"/>
+  <text x="94" y="118" text-anchor="middle" font-size="10.5" fill="#1f2933" font-family="monospace">bugprone-*</text>
+  <rect x="38" y="130" width="112" height="22" rx="4" fill="#fff" stroke="#d8dee4"/>
+  <text x="94" y="146" text-anchor="middle" font-size="10.5" fill="#1f2933" font-family="monospace">readability-*</text>
+  <rect x="38" y="158" width="112" height="22" rx="4" fill="#fff" stroke="#d8dee4"/>
+  <text x="94" y="174" text-anchor="middle" font-size="10.5" fill="#1f2933" font-family="monospace">modernize-*</text>
+  <rect x="38" y="186" width="112" height="22" rx="4" fill="#fff" stroke="#d8dee4"/>
+  <text x="94" y="202" text-anchor="middle" font-size="10.5" fill="#1f2933" font-family="monospace">cert-*</text>
+  <text x="94" y="226" text-anchor="middle" font-size="11" fill="#5a6b7a">…</text>
+
+  <line x1="164" y1="178" x2="196" y2="178" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#g)"/>
+
+  <!-- filters -->
+  <g>
+    <rect x="200" y="60" width="118" height="236" rx="8" fill="#f7e9e5" stroke="#a04a34" stroke-width="1.6"/>
+    <text x="259" y="84" text-anchor="middle" font-size="12" font-weight="bold" fill="#a04a34">① -*</text>
+    <text x="259" y="110" text-anchor="middle" font-size="11" fill="#1f2933">全部を</text>
+    <text x="259" y="128" text-anchor="middle" font-size="11" fill="#1f2933">いったん無効に</text>
+    <rect x="212" y="150" width="94" height="120" rx="5" fill="#fff" stroke="#e0c4bc"/>
+    <text x="259" y="215" text-anchor="middle" font-size="11.5" fill="#a04a34" font-weight="bold">有効：0件</text>
+  </g>
+
+  <line x1="318" y1="178" x2="342" y2="178" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#g)"/>
+
+  <g>
+    <rect x="346" y="60" width="118" height="236" rx="8" fill="#fbf4ea" stroke="#b4661a" stroke-width="1.6"/>
+    <text x="405" y="84" text-anchor="middle" font-size="12" font-weight="bold" fill="#b4661a">② bugprone-*</text>
+    <text x="405" y="110" text-anchor="middle" font-size="11" fill="#1f2933">bugprone を</text>
+    <text x="405" y="128" text-anchor="middle" font-size="11" fill="#1f2933">有効に戻す</text>
+    <rect x="358" y="150" width="94" height="120" rx="5" fill="#fff" stroke="#e6d5bd"/>
+    <rect x="366" y="160" width="78" height="20" rx="4" fill="#b4661a"/>
+    <text x="405" y="175" text-anchor="middle" font-size="9.5" fill="#fff" font-family="monospace">bugprone-*</text>
+    <text x="405" y="215" text-anchor="middle" font-size="11.5" fill="#b4661a" font-weight="bold">有効：bugprone</text>
+  </g>
+
+  <line x1="464" y1="178" x2="488" y2="178" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#g)"/>
+
+  <g>
+    <rect x="492" y="60" width="118" height="236" rx="8" fill="#eef4f9" stroke="#2f6f9f" stroke-width="1.6"/>
+    <text x="551" y="84" text-anchor="middle" font-size="11.5" font-weight="bold" fill="#2f6f9f">③ readability-*</text>
+    <text x="551" y="110" text-anchor="middle" font-size="11" fill="#1f2933">readability も</text>
+    <text x="551" y="128" text-anchor="middle" font-size="11" fill="#1f2933">追加</text>
+    <rect x="504" y="150" width="94" height="120" rx="5" fill="#fff" stroke="#c5d6e4"/>
+    <rect x="512" y="160" width="78" height="20" rx="4" fill="#b4661a"/>
+    <text x="551" y="175" text-anchor="middle" font-size="9.5" fill="#fff" font-family="monospace">bugprone-*</text>
+    <rect x="512" y="186" width="78" height="20" rx="4" fill="#2f6f9f"/>
+    <text x="551" y="201" text-anchor="middle" font-size="9.5" fill="#fff" font-family="monospace">readability-*</text>
+    <text x="551" y="235" text-anchor="middle" font-size="11.5" fill="#2f6f9f" font-weight="bold">有効：2モジュール</text>
+  </g>
+
+  <line x1="610" y1="178" x2="628" y2="178" stroke="#5a6b7a" stroke-width="1.5" marker-end="url(#g)"/>
+
+  <g>
+    <rect x="632" y="60" width="104" height="236" rx="8" fill="#eef5f0" stroke="#3d7a52" stroke-width="1.8"/>
+    <text x="684" y="84" text-anchor="middle" font-size="10.5" font-weight="bold" fill="#3d7a52">④ -readability-</text>
+    <text x="684" y="99" text-anchor="middle" font-size="10.5" font-weight="bold" fill="#3d7a52">magic-numbers</text>
+    <text x="684" y="124" text-anchor="middle" font-size="11" fill="#1f2933">1件だけ</text>
+    <text x="684" y="142" text-anchor="middle" font-size="11" fill="#1f2933">また外す</text>
+    <rect x="642" y="156" width="84" height="114" rx="5" fill="#fff" stroke="#c9dfd1"/>
+    <text x="684" y="200" text-anchor="middle" font-size="11" fill="#3d7a52" font-weight="bold">最終結果</text>
+    <text x="684" y="220" text-anchor="middle" font-size="10.5" fill="#5a6b7a">bugprone 全部 ＋</text>
+    <text x="684" y="236" text-anchor="middle" font-size="10.5" fill="#5a6b7a">readability から</text>
+    <text x="684" y="252" text-anchor="middle" font-size="10.5" fill="#5a6b7a">1件を除いたもの</text>
+  </g>
+
+  <text x="380" y="330" text-anchor="middle" font-size="12" fill="#5a6b7a">順番が意味を持つ。<tspan font-weight="bold" fill="#1f2933">後に書いたグロブが前の判定を上書きする</tspan></text>
+  </g>
+</svg>
+<figcaption><b>図6-2</b>　グロブは左から順に適用されるフィルタの列。<code>-*</code> で全部落としてから必要なものを積み上げるのが定石。</figcaption>
+</figure>
+
+<h3>順番を間違えるとどうなるか</h3>
+
+<p>次の2つは、書いてある要素は同じですが結果がまったく違います。</p>
+
+<pre><code># ① 意図どおり：bugprone を全部有効にして、1件だけ除外
+bugprone-*,-bugprone-easily-swappable-parameters
+
+# ② 意図と違う：除外してから全部有効にしているので、除外が無効化される
+-bugprone-easily-swappable-parameters,bugprone-*</code></pre>
+
+<p>②では最後の <code>bugprone-*</code> が <code>bugprone-easily-swappable-parameters</code> にも一致してしまうため、せっかくの除外が打ち消されます。<strong>除外は必ず後ろに書く</strong>、と覚えてください。</p>
+
+<h2>6.3 定石のパターン</h2>
+
+<p>実務で使う指定は、だいたい次の型に収まります。</p>
+
+<h3>パターンA：白紙から積み上げる（推奨）</h3>
+<pre><code>-*,bugprone-*,clang-analyzer-*,performance-*</code></pre>
+<p>先頭の <code>-*</code> で全部落としてから、必要なモジュールだけを足します。<strong>「有効なチェックの集合が指定文字列だけで完全に決まる」</strong> のが利点です。バージョンが上がって新しいチェックが増えても、勝手に有効になりません。チームで使うならこの形にすべきです。</p>
+
+<h3>パターンB：全部入れて削る</h3>
+<pre><code>*,-llvmlibc-*,-fuchsia-*,-altera-*</code></pre>
+<p>実験や調査には便利ですが、運用には向きません。バージョンが上がるたびに新しいチェックが勝手に増え、警告件数が予告なく変動します。</p>
+
+<h3>パターンC：モジュールの一部だけ</h3>
+<pre><code>-*,readability-identifier-naming,readability-braces-around-statements</code></pre>
+<p>モジュール全体は重いが、特定のチェックだけ使いたいときの形です。</p>
+
+<div class="warn">
+<span class="t">重複するモジュールに注意</span>
+<p><code>cppcoreguidelines-*</code>、<code>hicpp-*</code>、<code>cert-*</code>、<code>google-*</code> には <strong>同じ内容のチェックが別名で入っている</strong> ものが多数あります。たとえば <code>hicpp-use-nullptr</code> は <code>modernize-use-nullptr</code> の別名です。両方を有効にすると、同じ箇所に2件の警告が出ます。件数が不自然に多いときは別名の重複を疑ってください。</p>
+</div>
+
+<h2>6.4 指定が意図どおりか確かめる</h2>
+
+<p>グロブは書けても、その結果が本当に意図どおりかは別問題です。確かめる手段が2つあります。</p>
+
+<h3><code>--list-checks</code> ── 結果の集合を見る</h3>
+
+<pre class="term"><code><span class="p">&gt;</span> clang-tidy --checks="-*,bugprone-*,-bugprone-easily-swappable-parameters" --list-checks
+<span class="o">Enabled checks:
+    bugprone-argument-comment
+    bugprone-assert-side-effect
+    ...
+    bugprone-use-after-move
+    bugprone-virtual-near-miss</span></code></pre>
+
+<p>ここに <code>bugprone-easily-swappable-parameters</code> が含まれていなければ、除外が効いています。件数を数えるなら次のようにします。</p>
+
+<pre class="term"><code><span class="p">&gt;</span> clang-tidy --checks="-*,bugprone-*" --list-checks | find /c "    "
+<span class="o">(有効なチェック数)</span></code></pre>
+
+<h3><code>--explain-config</code> ── どこで有効になったかを見る</h3>
+
+<p>チェックが「なぜ」有効になっているのかを説明させられます。設定ファイルが階層になっていると、これが効きます（第7章）。</p>
+
+<pre class="term"><code><span class="p">&gt;</span> clang-tidy --explain-config
+<span class="o">'bugprone-use-after-move' is enabled in the C:\dev\TidyLab\.clang-tidy.
+'readability-identifier-naming' is enabled in the command-line option '-checks'.</span></code></pre>
+
+<div class="warn">
+<span class="t">存在しないチェック名は黙って無視される</span>
+<p><code>bugprone-use-after-mov</code> のようにタイプミスをしても、エラーにはなりません。単に何にも一致しないグロブとして扱われます。<strong>「有効にしたはずのチェックが動かない」ときは、まず <code>--list-checks</code> でそのチェックが本当に有効になっているかを確認してください。</strong></p>
+</div>
+
+<h2>6.5 コマンドラインと設定ファイルの関係</h2>
+
+<p>第5章では Visual Studio のプロパティに直接チェックを書きました。あの値は、内部的に <code>--checks</code> オプションとして渡されます。一方、第3章でソリューション直下に置いた <code>.clang-tidy</code> にも <code>Checks:</code> があります。この2つはどう合成されるのでしょうか。</p>
+
+<p>公式ドキュメントの <code>--checks</code> の説明にはこう書かれています。「<strong>このオプションの値は、<code>.clang-tidy</code> ファイルの <code>Checks</code> オプションの値があれば、その後ろに追記される</strong>」。</p>
+
+<figure>
+<svg viewBox="0 0 760 260" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="設定ファイルの Checks とコマンドラインの --checks が連結される仕組み">
+  <g font-family="sans-serif">
+
+  <rect x="24" y="30" width="300" height="70" rx="8" fill="#2f6f9f"/>
+  <text x="44" y="54" font-size="12" fill="#d6e6f2" font-weight="bold">.clang-tidy の Checks</text>
+  <text x="44" y="80" font-size="13" fill="#fff" font-family="monospace">-*,bugprone-*</text>
+
+  <text x="342" y="72" font-size="24" fill="#5a6b7a" text-anchor="middle">+</text>
+
+  <rect x="366" y="30" width="370" height="70" rx="8" fill="#b4661a"/>
+  <text x="386" y="54" font-size="12" fill="#fde9d0" font-weight="bold">コマンドライン / VS プロパティの --checks</text>
+  <text x="386" y="80" font-size="13" fill="#fff" font-family="monospace">performance-*,-bugprone-branch-clone</text>
+
+  <path d="M380,104 L380,124" stroke="#5a6b7a" stroke-width="1.6"/>
+  <path d="M24,104 L24,114 L736,114 L736,104" fill="none" stroke="#5a6b7a" stroke-width="1.4"/>
+  <path d="M380,114 L380,132" stroke="#5a6b7a" stroke-width="1.6"/>
+  <polygon points="374,130 386,130 380,142" fill="#5a6b7a"/>
+
+  <rect x="24" y="148" width="712" height="64" rx="8" fill="#1f2933"/>
+  <text x="44" y="172" font-size="12" fill="#b8c4cd" font-weight="bold">実際に評価されるグロブ列（前が設定ファイル、後ろがコマンドライン）</text>
+  <text x="44" y="198" font-size="13.5" fill="#e6edf3" font-family="monospace">
+    <tspan fill="#7fb2d6">-*,bugprone-*</tspan><tspan fill="#9fb3c0">,</tspan><tspan fill="#e8b075">performance-*,-bugprone-branch-clone</tspan>
+  </text>
+
+  <text x="380" y="240" text-anchor="middle" font-size="12" fill="#5a6b7a">コマンドライン側が<tspan font-weight="bold" fill="#1f2933">後ろに来る</tspan>ので、衝突したときはコマンドラインが勝つ</text>
+  </g>
+</svg>
+<figcaption><b>図6-3</b>　設定ファイルとコマンドラインの合成。置き換えではなく連結。後ろに来るコマンドライン側が実質的に優先される。</figcaption>
+</figure>
+
+<p>この仕組みが分かると、第5章のトラブルシュートで触れた現象も説明できます。<code>.clang-tidy</code> に <code>Checks: '-*'</code> と書いた状態で、プロパティに <code>modernize-use-nullptr</code> と入れた場合、実際の評価列は <code>-*,modernize-use-nullptr</code> となり、これは正しく動きます。逆に、プロパティを空にして設定ファイルだけ <code>-*</code> なら、有効なチェックは0件です。</p>
+
+<div class="tip">
+<span class="t">推奨する運用</span>
+<p><strong>プロパティ側は空にして、<code>.clang-tidy</code> に一本化する</strong> のが最終的な姿です。設定がリポジトリに入り、コマンドラインでも CI でも同じ結果になります。プロパティ側は「一時的にこのチェックだけ足して試す」ための実験場として使います。この移行を第7章で行います。</p>
+</div>
+
+<h2>6.6 【ハンズオン】チェックセットを組み立てる</h2>
+
+<div class="hands">
+<div class="hd">HANDS-ON 6　グロブの挙動を体で覚える</div>
+<div class="bd">
+<ol>
+  <li><strong>全チェック数を数える。</strong> 開発者コマンドプロンプトで、
+<pre><code>clang-tidy --checks=* --list-checks | find /c "    "</code></pre>
+  </li>
+
+  <li><strong>モジュール単位で数える。</strong> 次の3つを実行し、件数を比べます。
+<pre><code>clang-tidy --checks="-*,bugprone-*" --list-checks | find /c "    "
+clang-tidy --checks="-*,modernize-*" --list-checks | find /c "    "
+clang-tidy --checks="-*,readability-*" --list-checks | find /c "    "</code></pre>
+  </li>
+
+  <li><strong>順番の効果を確かめる。</strong> 次の2つの件数を比較します。差が1件出るはずです。
+<pre><code>clang-tidy --checks="-*,bugprone-*,-bugprone-branch-clone" --list-checks | find /c "    "
+clang-tidy --checks="-*,-bugprone-branch-clone,bugprone-*" --list-checks | find /c "    "</code></pre>
+    後者では除外が打ち消されていることを、実際の一覧でも確認してください。</li>
+
+  <li><strong>タイプミスの挙動を確かめる。</strong>
+<pre><code>clang-tidy --checks="-*,bugprone-use-after-mov" --list-checks</code></pre>
+    エラーにならず、有効なチェックが0件になることを確認します。</li>
+
+  <li><strong>別名の重複を観察する。</strong> <code>TidyLab</code> のプロパティで「Clang-Tidy チェック」を次にしてビルドし、同じ箇所に2件警告が出ることを確認します。
+<pre><code>-*,modernize-use-nullptr,hicpp-use-nullptr</code></pre>
+  </li>
+
+  <li><strong>自分のセットを決める。</strong> 題材コード <code>config_loader.cpp</code> に対して、次を出発点として警告件数を記録します。
+<pre><code>-*,bugprone-*,clang-analyzer-*,performance-*</code></pre>
+    第22章で、このセットを本格的に育てていきます。</li>
+</ol>
+</div>
+</div>
+
+<div class="summary">
+<h2>この章のまとめ</h2>
+<ul>
+  <li>チェック名は <code>モジュール名-チェック名</code>。<code>clang-analyzer-</code> だけは <code>core.NullDereference</code> のようにドットを含む。</li>
+  <li>指定はカンマ区切りのグロブ列。<code>*</code> で束ね、先頭の <code>-</code> で除外する。</li>
+  <li><strong>左から右へ順に適用され、後に書いたものが勝つ。</strong> 除外は必ず後ろに書く。</li>
+  <li>運用では <code>-*</code> で白紙にしてから積み上げる。<code>*</code> で全部入れる形はバージョンアップで挙動が変わる。</li>
+  <li>存在しないチェック名は黙って無視される。意図どおりかは <code>--list-checks</code> と <code>--explain-config</code> で確認する。</li>
+  <li>コマンドラインの <code>--checks</code> は設定ファイルの <code>Checks</code> の<strong>後ろに連結</strong>される。だから衝突時はコマンドラインが勝つ。</li>
+  <li><code>cppcoreguidelines-*</code> / <code>hicpp-*</code> / <code>cert-*</code> には別名の重複が多い。二重警告の原因になる。</li>
+</ul>
+</div>
+
+<p class="next"><strong>次章：</strong> 第7章「<code>.clang-tidy</code> 設定ファイルへ移行する」では、プロパティに書いていた設定をファイルに移します。設定ファイルの探索規則と <code>InheritParentConfig</code> による階層的な設定が主題です。</p>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第41章 .clang-format との役割分担 ─ Clang-Tidy入門</title>
+<style>
+  :root{
+    --ink:#1f2933; --sub:#5a6b7a; --line:#d8dee4; --bg:#ffffff;
+    --code-bg:#f6f8fa; --code-line:#e2e8ee;
+    --accent:#2f6f9f; --accent-bg:#eef4f9;
+    --warn:#b4661a; --warn-bg:#fbf4ea;
+    --ok:#3d7a52; --ok-bg:#eef5f0;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0; background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Noto Sans JP","Meiryo",sans-serif;
+    font-size:16px; line-height:1.95; font-feature-settings:"palt" 1;}
+  .page{max-width:47rem; margin:0 auto; padding:3.5rem 1.6rem 6rem}
+  .chap-no{font-size:.8rem; letter-spacing:.22em; color:var(--accent); font-weight:700; margin:0 0 .5rem}
+  h1{font-size:1.85rem; line-height:1.5; margin:0 0 .6rem; letter-spacing:.01em}
+  .lede{color:var(--sub); font-size:1rem; margin:0 0 2.2rem; padding-bottom:1.6rem; border-bottom:2px solid var(--ink)}
+  h2{font-size:1.28rem; margin:3rem 0 1rem; padding-left:.7rem; border-left:4px solid var(--accent); line-height:1.6}
+  h3{font-size:1.05rem; margin:2.2rem 0 .7rem}
+  h3::before{content:"◆ "; color:var(--accent); font-size:.8em}
+  p{margin:0 0 1.1rem}
+  ul,ol{margin:0 0 1.2rem; padding-left:1.6rem}
+  li{margin:.35rem 0}
+  code{font-family:"Cascadia Mono","Consolas","SFMono-Regular",monospace; font-size:.9em;
+       background:var(--code-bg); border:1px solid var(--code-line); border-radius:4px; padding:.08em .35em}
+  pre{background:var(--code-bg); border:1px solid var(--code-line); border-radius:8px;
+      padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.7}
+  pre code{background:none; border:none; padding:0; font-size:.86rem}
+  pre.term{background:#1f2933; border-color:#1f2933; color:#e6edf3}
+  pre.term code{color:#e6edf3}
+  pre.term .p{color:#7fb2d6}
+  pre.term .o{color:#9fb3c0}
+  .cap{font-size:.82rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+  figure{margin:2rem 0 2.2rem}
+  figure svg{display:block; width:100%; height:auto; border:1px solid var(--line); border-radius:8px; background:#fff}
+  figcaption{font-size:.85rem; color:var(--sub); margin-top:.6rem}
+  figcaption b{color:var(--ink)}
+  .box{border-radius:8px; padding:1rem 1.2rem; margin:1.6rem 0; font-size:.94rem}
+  .box p:last-child{margin-bottom:0}
+  .box .t{font-weight:700; display:block; margin-bottom:.35rem; font-size:.88rem; letter-spacing:.04em}
+  .note{background:var(--accent-bg); border-left:4px solid var(--accent)} .note .t{color:var(--accent)}
+  .warn{background:var(--warn-bg); border-left:4px solid var(--warn)} .warn .t{color:var(--warn)}
+  .tip{background:var(--ok-bg); border-left:4px solid var(--ok)} .tip .t{color:var(--ok)}
+  .hands{border:1px solid var(--line); border-radius:10px; margin:2rem 0; overflow:hidden}
+  .hands>.hd{background:var(--ink); color:#fff; padding:.55rem 1.1rem; font-size:.85rem; letter-spacing:.1em; font-weight:700}
+  .hands>.bd{padding:1.3rem 1.3rem .4rem}
+  .hands ol{counter-reset:step; list-style:none; padding-left:0}
+  .hands ol>li{counter-increment:step; position:relative; padding-left:2.4rem; margin:0 0 1.2rem}
+  .hands ol>li::before{content:counter(step); position:absolute; left:0; top:.25rem;
+    width:1.7rem; height:1.7rem; border-radius:50%; background:var(--accent); color:#fff;
+    font-size:.82rem; font-weight:700; display:flex; align-items:center; justify-content:center; line-height:1}
+  table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+  th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+  th{background:var(--code-bg); font-weight:700}
+  .summary{border:2px solid var(--ink); border-radius:10px; padding:1.3rem 1.5rem; margin:3rem 0 1rem}
+  .summary h2{margin:0 0 .8rem; border:none; padding:0; font-size:1.1rem}
+  .summary ul{margin-bottom:0}
+  .partend{background:#1f2933; color:#fff; border-radius:10px; padding:1.4rem 1.6rem; margin:2.5rem 0 1rem}
+  .partend h2{color:#fff; border-left-color:#e8b075; margin:0 0 .8rem; font-size:1.1rem}
+  .partend p{color:#cfd8de; margin-bottom:.6rem}
+  .partend ul{color:#cfd8de; margin-bottom:0}
+  .next{color:var(--sub); font-size:.94rem; border-top:1px solid var(--line); padding-top:1.2rem; margin-top:2.5rem}
+  @media (max-width:600px){ body{font-size:15px} .page{padding:2.2rem 1.1rem 4rem} h1{font-size:1.5rem} }
+</style>
+</head>
+<body>
+<div class="page">
+
+<p class="chap-no">第 41 章</p>
+<h1><code>.clang-format</code> との役割分担</h1>
+<p class="lede">第7部の最終章です。<code>clang-format</code> は Clang-Tidy と同じ LLVM 由来のツールで、設定ファイルの名前も似ています。しかし守備範囲はきれいに分かれています。<strong>書式は clang-format、意味は clang-tidy。</strong> それでも接点はあり、そこを整理しないと自動修正のたびに差分が荒れます。</p>
+
+<h2>41.1 守備範囲</h2>
+
+<figure>
+<svg viewBox="0 0 760 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="clang-format と clang-tidy の守備範囲">
+  <g font-family="sans-serif">
+
+  <rect x="24" y="20" width="350" height="280" rx="10" fill="#eef4f9" stroke="#2f6f9f" stroke-width="1.8"/>
+  <text x="199" y="46" text-anchor="middle" font-size="13" font-weight="bold" fill="#2f6f9f">clang-format ── 書式</text>
+  <text x="199" y="66" text-anchor="middle" font-size="11" fill="#5a6b7a">「同じ意味のコードの、見た目」</text>
+  <g font-size="11.5" fill="#1f2933">
+  <text x="44" y="96">・インデント幅・タブかスペースか</text>
+  <text x="44" y="120">・波括弧の位置</text>
+  <text x="44" y="144">・1行の最大長と折り返し</text>
+  <text x="44" y="168">・ポインタの <tspan font-family="monospace">*</tspan> をどちらに寄せるか</text>
+  <text x="44" y="192">・include の並び順</text>
+  <text x="44" y="216">・空行の数</text>
+  </g>
+  <rect x="44" y="234" width="310" height="52" rx="6" fill="#fff" stroke="#c5d6e4"/>
+  <text x="199" y="256" text-anchor="middle" font-size="11" fill="#2f6f9f" font-weight="bold">実行しても意味は変わらない</text>
+  <text x="199" y="274" text-anchor="middle" font-size="10.5" fill="#5a6b7a">だから無条件に自動適用できる</text>
+
+  <rect x="386" y="20" width="350" height="280" rx="10" fill="#fbf4ea" stroke="#b4661a" stroke-width="2"/>
+  <text x="561" y="46" text-anchor="middle" font-size="13" font-weight="bold" fill="#b4661a">clang-tidy ── 意味</text>
+  <text x="561" y="66" text-anchor="middle" font-size="11" fill="#5a6b7a">「そのコードが何をするか」</text>
+  <g font-size="11.5" fill="#1f2933">
+  <text x="406" y="96">・危ういコードの検出</text>
+  <text x="406" y="120">・書き方の刷新（modernize）</text>
+  <text x="406" y="144">・識別子の名前</text>
+  <text x="406" y="168">・不要なコピー</text>
+  <text x="406" y="192">・チーム固有の規約</text>
+  <text x="406" y="216">・自動修正（意味が変わることもある）</text>
+  </g>
+  <rect x="406" y="234" width="310" height="52" rx="6" fill="#fff" stroke="#e6d5bd"/>
+  <text x="561" y="256" text-anchor="middle" font-size="11" fill="#b4661a" font-weight="bold">意味が変わりうる</text>
+  <text x="561" y="274" text-anchor="middle" font-size="10.5" fill="#5a6b7a">だから差分を読む必要がある（第11章）</text>
+  </g>
+</svg>
+<figcaption><b>図41-1</b>　守備範囲。<strong>「実行しても意味が変わらないか」が、両者を分ける基準。</strong></figcaption>
+</figure>
+
+<div class="note">
+<span class="t">境界にあるもの</span>
+<p><code>readability-braces-around-statements</code> は、<code>if (x) return;</code> に波括弧を付けます。<strong>これは書式のようで、実は意味の問題です。</strong> 波括弧がないと、後から行を足したときにスコープが変わってバグになる。だから clang-tidy が扱います。<br>
+一方 <code>clang-format</code> は、<strong>既にある波括弧をどこに置くか</strong>を決めます。付けるかどうかは決めません。</p>
+</div>
+
+<h2>41.2 実行順序</h2>
+
+<p>両方を自動適用する場合、順序が問題になります。</p>
+
+<figure>
+<svg viewBox="0 0 760 360" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="clang-format と clang-tidy の実行順序">
+  <defs>
+    <marker id="a41" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5a6b7a"/>
+    </marker>
+  </defs>
+  <g font-family="sans-serif">
+
+  <text x="30" y="28" font-size="12.5" font-weight="bold" fill="#a04a34" letter-spacing="1">✕ tidy → format の順に別々に走らせる</text>
+
+  <g font-size="11">
+  <rect x="30" y="42" width="150" height="44" rx="6" fill="#fbf4ea" stroke="#b4661a"/>
+  <text x="105" y="69" text-anchor="middle" fill="#1f2933" font-weight="bold">clang-tidy --fix</text>
+  <line x1="180" y1="64" x2="204" y2="64" stroke="#5a6b7a" stroke-width="1.4" marker-end="url(#a41)"/>
+  <rect x="208" y="42" width="180" height="44" rx="6" fill="#fff" stroke="#d8dee4"/>
+  <text x="298" y="62" text-anchor="middle" fill="#1f2933">修正で行が長くなる</text>
+  <text x="298" y="78" text-anchor="middle" fill="#5a6b7a" font-size="10">インデントが崩れる</text>
+  <line x1="388" y1="64" x2="412" y2="64" stroke="#5a6b7a" stroke-width="1.4" marker-end="url(#a41)"/>
+  <rect x="416" y="42" width="150" height="44" rx="6" fill="#eef4f9" stroke="#2f6f9f"/>
+  <text x="491" y="69" text-anchor="middle" fill="#1f2933" font-weight="bold">clang-format</text>
+  <line x1="566" y1="64" x2="590" y2="64" stroke="#5a6b7a" stroke-width="1.4" marker-end="url(#a41)"/>
+  <rect x="594" y="42" width="136" height="44" rx="6" fill="#f7e9e5" stroke="#a04a34"/>
+  <text x="662" y="62" text-anchor="middle" fill="#a04a34" font-weight="bold">差分が巨大に</text>
+  <text x="662" y="78" text-anchor="middle" fill="#5a6b7a" font-size="10">整形だけの変更が混ざる</text>
+  </g>
+
+  <line x1="30" y1="106" x2="730" y2="106" stroke="#d8dee4"/>
+
+  <text x="30" y="134" font-size="12.5" font-weight="bold" fill="#3d7a52" letter-spacing="1">○ FormatStyle で、修正した箇所だけ整形させる</text>
+
+  <g font-size="11">
+  <rect x="30" y="148" width="220" height="44" rx="6" fill="#3d7a52"/>
+  <text x="140" y="168" text-anchor="middle" fill="#fff" font-weight="bold">clang-tidy --fix</text>
+  <text x="140" y="184" text-anchor="middle" fill="#d5e6da" font-size="10">--format-style=file</text>
+  <line x1="250" y1="170" x2="274" y2="170" stroke="#5a6b7a" stroke-width="1.4" marker-end="url(#a41)"/>
+  <rect x="278" y="148" width="452" height="44" rx="6" fill="#eef5f0" stroke="#3d7a52"/>
+  <text x="298" y="168" fill="#1f2933">修正した箇所<tspan font-weight="bold">の周辺だけ</tspan>が、.clang-format の設定で整形される</text>
+  <text x="298" y="184" fill="#5a6b7a" font-size="10">→ 差分は修正内容そのものだけ。レビューできる</text>
+  </g>
+
+  <rect x="30" y="212" width="700" height="60" rx="10" fill="#1f2933"/>
+  <text x="52" y="236" font-size="12" font-weight="bold" fill="#e8b075">ファイル全体の整形は、別のタイミングで一度だけ</text>
+  <text x="52" y="258" font-size="11.5" fill="#cfd8de">導入時に <tspan font-family="monospace" fill="#fff">clang-format -i</tspan> を全ファイルに当て、以後は編集した箇所だけ整形する運用にする</text>
+
+  <rect x="30" y="286" width="700" height="62" rx="10" fill="#fbf4ea" stroke="#b4661a" stroke-width="1.6"/>
+  <text x="52" y="310" font-size="12" font-weight="bold" fill="#b4661a">全体整形は「1回のコミット」にする</text>
+  <text x="52" y="332" font-size="11.5" fill="#1f2933">git blame が汚れるので、<tspan font-weight="bold">整形だけのコミットを1つ作り、blame の無視リストに登録する</tspan>のが定石</text>
+  </g>
+</svg>
+<figcaption><b>図41-2</b>　実行順序。<strong><code>FormatStyle</code> を設定しておけば、この問題はほぼ起きません（第11章）。</strong></figcaption>
+</figure>
+
+<pre><code># .clang-tidy
+FormatStyle: file      # 修正箇所の周辺を .clang-format に従って整形する</code></pre>
+
+<h2>41.3 設定ファイルを並べる</h2>
+
+<p>2つの設定ファイルは、同じディレクトリに並べます。どちらもディレクトリ階層をたどって探されます。</p>
+
+<pre><code>MyProject\
+├─ .clang-format      ← 書式
+├─ .clang-tidy        ← 意味
+└─ …</code></pre>
+
+<p><code>.clang-format</code> の最小構成は次のようなものです。</p>
+
+<pre><code># .clang-format
+BasedOnStyle: Microsoft
+IndentWidth: 4
+ColumnLimit: 120
+PointerAlignment: Left
+SortIncludes: true</code></pre>
+
+<div class="tip">
+<span class="t">Visual Studio は <code>.clang-format</code> を既定で使う</span>
+<p>Visual Studio の C++ エディタは、<code>.clang-format</code> があればそれに従って整形します（<code>ツール &gt; オプション &gt; テキスト エディター &gt; C/C++ &gt; 書式設定</code>）。<strong>設定ファイルを置くだけで、チーム全員のエディタの整形が揃います。</strong> Clang-Tidy と違って追加の仕掛けは要りません。</p>
+</div>
+
+<h2>41.4 重なる領域の調停</h2>
+
+<p>両者の設定が食い違うと、直しては戻されるループが起きます。よくある組み合わせを整理します。</p>
+
+<table>
+<tr><th>clang-tidy 側</th><th>clang-format 側</th><th>調停</th></tr>
+<tr><td><code>readability-braces-around-statements</code></td><td><code>AllowShortIfStatementsOnASingleLine</code></td><td>tidy が波括弧を付け、format が配置を決める。<strong>矛盾しない</strong></td></tr>
+<tr><td><code>readability-isolate-declaration</code></td><td>─</td><td>tidy が宣言を分割。format は分割後を整形</td></tr>
+<tr><td><code>misc-include-cleaner</code></td><td><code>SortIncludes</code> / <code>IncludeCategories</code></td><td>tidy が include を追加、format が並べ替える。<strong>順序に注意</strong></td></tr>
+<tr><td><code>modernize-use-trailing-return-type</code></td><td><code>ColumnLimit</code></td><td>戻り値型が後置になると行が伸びる。format が折り返す</td></tr>
+</table>
+
+<div class="warn">
+<span class="t">include の扱いだけは順序が効く</span>
+<p><code>misc-include-cleaner</code> が include を追加したあと、<code>clang-format</code> の <code>SortIncludes</code> が並べ替えます。この2つを別々のタイミングで走らせると、<strong>「tidy が追加 → format が並べ替え → 次の tidy で位置が変わって再検出」</strong>のような揺れが起きることがあります。include に関わるチェックを入れる場合は、<code>FormatStyle: file</code> を設定して同じ実行の中で整形させてください。</p>
+</div>
+
+<h2>41.5 CI での組み合わせ</h2>
+
+<p>書式は「違反していたら落とす」が明快です。意味と違って、議論の余地がないからです。</p>
+
+<pre><code># .github/workflows/format.yml
+name: clang-format
+
+on:
+  pull_request:
+
+jobs:
+  format:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: Install LLVM
+        run: |
+          choco install llvm --version=22.1.0 -y --no-progress
+          echo "C:\Program Files\LLVM\bin" &gt;&gt; $env:GITHUB_PATH
+      - name: Check formatting of changed files
+        shell: pwsh
+        run: |
+          $files = git diff --name-only origin/${{ github.base_ref }}... |
+                   Where-Object { $_ -match '\.(cpp|h|hpp)$' }
+          if (-not $files) { exit 0 }
+          $bad = @()
+          foreach ($f in $files) {
+            $formatted = clang-format --style=file $f
+            $current   = Get-Content $f -Raw
+            if (($formatted -join "`n") -ne $current.TrimEnd()) { $bad += $f }
+          }
+          if ($bad) {
+            Write-Host "::error::次のファイルが整形されていません:"
+            $bad | ForEach-Object { Write-Host "  $_" }
+            exit 1
+          }</code></pre>
+
+<table>
+<tr><th></th><th>clang-format</th><th>clang-tidy</th></tr>
+<tr><td>CI で落とすか</td><td><strong>常に落とす</strong></td><td>Tier 0 のみ（第40章）</td></tr>
+<tr><td>理由</td><td>直し方が一意。議論の余地がない</td><td>判断が要る。段階導入が必要</td></tr>
+<tr><td>直す手間</td><td><code>clang-format -i</code> を実行するだけ</td><td>人間が考える</td></tr>
+</table>
+
+<h2>41.6 【ハンズオン】両者を共存させる</h2>
+
+<div class="hands">
+<div class="hd">HANDS-ON 41　書式と意味を分けて運用する</div>
+<div class="bd">
+<ol>
+  <li><strong><code>.clang-format</code> を作る。</strong> 41.3 節の内容をソリューション直下に置きます。既存コードの多数派に合わせて調整してください（第20章と同じ考え方です）。</li>
+
+  <li><strong>Visual Studio で効くことを確認する。</strong> エディタで <code>Ctrl+K, Ctrl+D</code>（ドキュメントのフォーマット）を実行し、<code>.clang-format</code> の設定に従うことを確認します。<code>IndentWidth</code> を変えて、挙動が変わることも見てください。</li>
+
+  <li><strong>全体整形を1コミットで行う。</strong>
+<pre><code>clang-format -i --style=file (対象ファイル群)
+git add -A
+git commit -m "style: apply clang-format to all sources"</code></pre>
+    <strong>このコミットのハッシュを記録してください。</strong></li>
+
+  <li><strong>blame の無視リストを作る。</strong> リポジトリ直下に <code>.git-blame-ignore-revs</code> を作り、手順3のコミットハッシュを書きます。
+<pre><code># 全体整形コミット（内容の変更なし）
+a1b2c3d4e5f6...</code></pre>
+<pre><code>git config blame.ignoreRevsFile .git-blame-ignore-revs</code></pre>
+    <code>git blame</code> で整形コミットが飛ばされることを確認します。</li>
+
+  <li><strong><code>FormatStyle</code> の効果を見る。</strong> <code>.clang-tidy</code> の <code>FormatStyle</code> を <code>none</code> にして自動修正を当て、差分を確認します。次に <code>file</code> にして同じ修正を当て、<strong>差分の見え方が変わる</strong>ことを確認してください。
+<pre><code>clang-tidy --checks="-*,modernize-use-nullptr" --fix --format-style=none config_loader.cpp -- -std=c++23
+git diff
+git checkout -- .
+clang-tidy --checks="-*,modernize-use-nullptr" --fix --format-style=file config_loader.cpp -- -std=c++23
+git diff</code></pre>
+  </li>
+
+  <li><strong>include の揺れを確認する。</strong> <code>misc-include-cleaner</code> を有効にして自動修正を当て、そのあと <code>clang-format -i</code> を実行します。<strong>include の位置が変わるかどうか</strong>を確認してください。変わるなら、<code>FormatStyle: file</code> を設定して同じ実行の中で整形させます。</li>
+
+  <li><strong>CI に書式チェックを追加する。</strong> 41.5 節の YAML を追加し、わざと整形を崩した PR で落ちることを確認します。<strong>エラーメッセージに「<code>clang-format -i</code> を実行してください」と書いておく</strong>と親切です。</li>
+
+  <li><strong>役割分担を文書化する。</strong> <code>docs\</code> に、次の1行を書きます。
+<pre><code>書式は clang-format、意味は clang-tidy。
+書式は CI で必ず落とす（直し方が一意なので議論不要）。
+意味は Tier 0 のみ落とす（判断が要るので段階導入）。</code></pre>
+    <strong>この分担が明文化されていれば、「なぜこっちは落ちてこっちは落ちないのか」という疑問が生まれません。</strong></li>
+</ol>
+</div>
+</div>
+
+<div class="partend">
+<h2>第7部の終わりに</h2>
+<p>作った仕組みを、実際のプロジェクトとチームに載せる方法が揃いました。</p>
+<ul>
+  <li>既存コードへの4つの導入戦略と、90日の順序を持っている（第39章）</li>
+  <li>差分解析・回帰テスト・全体解析の3ジョブを CI に実装した（第40章）</li>
+  <li>書式と意味の役割分担を明確にした（第41章）</li>
+</ul>
+<p style="margin-top:.8rem">ここまでで、<strong>Clang-Tidy を実務で運用するために必要なものは、ひととおり揃いました。</strong></p>
+<p style="margin-top:.6rem">最後に一つだけ残っています。第6部で「クエリでは書けないルール」に何度か触れました。もしそこに突き当たったら、次はどうするのか。第42章で、その道筋を示して本書を終えます。</p>
+</div>
+
+<div class="summary">
+<h2>この章のまとめ</h2>
+<ul>
+  <li><strong>書式は clang-format、意味は clang-tidy。</strong> 分ける基準は「実行しても意味が変わらないか」。</li>
+  <li>波括弧を<strong>付けるか</strong>は clang-tidy、<strong>どこに置くか</strong>は clang-format。</li>
+  <li><code>FormatStyle: file</code> を設定すれば、自動修正した箇所の周辺だけが整形される。<strong>差分が荒れない。</strong></li>
+  <li>全体整形は<strong>1コミットにまとめ、<code>.git-blame-ignore-revs</code> に登録する。</strong></li>
+  <li>include に関わるチェックは、format との実行順序で揺れることがある。同じ実行の中で整形させる。</li>
+  <li>CI では<strong>書式は常に落とし、意味は Tier 0 のみ落とす。</strong> 書式は直し方が一意で議論の余地がないため。</li>
+  <li>Visual Studio は <code>.clang-format</code> を既定で使う。<strong>置くだけで全員のエディタが揃う。</strong></li>
+</ul>
+</div>
+
+<p class="next"><strong>次章：</strong> 第8部、最終章です。第42章「Query Based Custom Check の限界と、その先」で、クエリで書けないルールに出会ったときの選択肢を示し、本書を締めくくります。</p>
+
+</div>
+</body>
+</html>

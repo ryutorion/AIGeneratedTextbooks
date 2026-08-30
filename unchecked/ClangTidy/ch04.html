@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第4章 同梱 clang-tidy のバージョンを確認する ─ Clang-Tidy入門</title>
+<style>
+  :root{
+    --ink:#1f2933; --sub:#5a6b7a; --line:#d8dee4; --bg:#ffffff;
+    --code-bg:#f6f8fa; --code-line:#e2e8ee;
+    --accent:#2f6f9f; --accent-bg:#eef4f9;
+    --warn:#b4661a; --warn-bg:#fbf4ea;
+    --ok:#3d7a52; --ok-bg:#eef5f0;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Noto Sans JP","Meiryo",sans-serif;
+    font-size:16px; line-height:1.95; font-feature-settings:"palt" 1;
+  }
+  .page{max-width:47rem; margin:0 auto; padding:3.5rem 1.6rem 6rem}
+  .chap-no{font-size:.8rem; letter-spacing:.22em; color:var(--accent); font-weight:700; margin:0 0 .5rem}
+  h1{font-size:1.85rem; line-height:1.5; margin:0 0 .6rem; letter-spacing:.01em}
+  .lede{color:var(--sub); font-size:1rem; margin:0 0 2.2rem; padding-bottom:1.6rem; border-bottom:2px solid var(--ink)}
+  h2{font-size:1.28rem; margin:3rem 0 1rem; padding-left:.7rem; border-left:4px solid var(--accent); line-height:1.6}
+  h3{font-size:1.05rem; margin:2.2rem 0 .7rem; color:var(--ink)}
+  h3::before{content:"◆ "; color:var(--accent); font-size:.8em}
+  p{margin:0 0 1.1rem}
+  ul,ol{margin:0 0 1.2rem; padding-left:1.6rem}
+  li{margin:.35rem 0}
+  code{font-family:"Cascadia Mono","Consolas","SFMono-Regular",monospace; font-size:.9em;
+       background:var(--code-bg); border:1px solid var(--code-line); border-radius:4px; padding:.08em .35em}
+  pre{background:var(--code-bg); border:1px solid var(--code-line); border-radius:8px;
+      padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.7}
+  pre code{background:none; border:none; padding:0; font-size:.86rem}
+  pre.term{background:#1f2933; border-color:#1f2933; color:#e6edf3}
+  pre.term code{color:#e6edf3}
+  pre.term .p{color:#7fb2d6}
+  pre.term .o{color:#9fb3c0}
+  .cap{font-size:.82rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+  figure{margin:2rem 0 2.2rem}
+  figure svg{display:block; width:100%; height:auto; border:1px solid var(--line); border-radius:8px; background:#fff}
+  figcaption{font-size:.85rem; color:var(--sub); margin-top:.6rem}
+  figcaption b{color:var(--ink)}
+  .box{border-radius:8px; padding:1rem 1.2rem; margin:1.6rem 0; font-size:.94rem}
+  .box p:last-child{margin-bottom:0}
+  .box .t{font-weight:700; display:block; margin-bottom:.35rem; font-size:.88rem; letter-spacing:.04em}
+  .note{background:var(--accent-bg); border-left:4px solid var(--accent)}
+  .note .t{color:var(--accent)}
+  .warn{background:var(--warn-bg); border-left:4px solid var(--warn)}
+  .warn .t{color:var(--warn)}
+  .tip{background:var(--ok-bg); border-left:4px solid var(--ok)}
+  .tip .t{color:var(--ok)}
+  .hands{border:1px solid var(--line); border-radius:10px; margin:2rem 0; overflow:hidden}
+  .hands>.hd{background:var(--ink); color:#fff; padding:.55rem 1.1rem; font-size:.85rem; letter-spacing:.1em; font-weight:700}
+  .hands>.bd{padding:1.3rem 1.3rem .4rem}
+  .hands ol{counter-reset:step; list-style:none; padding-left:0}
+  .hands ol>li{counter-increment:step; position:relative; padding-left:2.4rem; margin:0 0 1.2rem}
+  .hands ol>li::before{content:counter(step); position:absolute; left:0; top:.25rem;
+    width:1.7rem; height:1.7rem; border-radius:50%; background:var(--accent); color:#fff;
+    font-size:.82rem; font-weight:700; display:flex; align-items:center; justify-content:center; line-height:1}
+  table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+  th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+  th{background:var(--code-bg); font-weight:700}
+  .summary{border:2px solid var(--ink); border-radius:10px; padding:1.3rem 1.5rem; margin:3rem 0 1rem}
+  .summary h2{margin:0 0 .8rem; border:none; padding:0; font-size:1.1rem}
+  .summary ul{margin-bottom:0}
+  .next{color:var(--sub); font-size:.94rem; border-top:1px solid var(--line); padding-top:1.2rem; margin-top:2.5rem}
+  @media (max-width:600px){ body{font-size:15px} .page{padding:2.2rem 1.1rem 4rem} h1{font-size:1.5rem} }
+</style>
+</head>
+<body>
+<div class="page">
+
+<p class="chap-no">第 4 章</p>
+<h1>同梱 clang-tidy のバージョンを確認する</h1>
+<p class="lede">本書の中心テーマである Query Based Custom Check は、比較的新しい LLVM にしか入っていない機能です。Visual Studio に同梱されている clang-tidy がそれを満たしているとは限りません。第6部まで進んでから「そもそも動かなかった」と気づくのは最悪なので、いま確かめます。満たしていなかった場合の差し替え方法まで、この章で用意します。</p>
+
+<h2>4.1 なぜ最初にバージョンを確認するのか</h2>
+
+<p>Clang-Tidy の機能は LLVM のリリースごとに増減します。特に本書が主題とする Query Based Custom Check は新しい機能で、次のような状況にあります。</p>
+
+<table>
+<tr><th>LLVM のバージョン</th><th><code>.clang-tidy</code> の <code>CustomChecks</code></th></tr>
+<tr><td>21 系まで</td><td><strong>存在しない。</strong> 設定に書いても無視されるか、未知のキーとして扱われる</td></tr>
+<tr><td>22 系以降</td><td>使える。ただし <strong>実験的機能</strong> であり、有効化に <code>--experimental-custom-checks</code> が必要</td></tr>
+</table>
+
+<div class="warn">
+<span class="t">「実験的」であることの意味</span>
+<p>公式ドキュメントは、この機能について「設定の構造は将来変更される可能性がある」「クエリの記述も AST マッチャーライブラリの更新に伴っていつでも変わりうる」と明記しています。本書の第6部で書いたクエリが、将来のバージョンでそのまま動く保証はありません。<strong>だからこそ、いま自分が使っているバージョンを正確に把握しておくことが重要です。</strong> 「動かない」ときに、書き方が悪いのかバージョンが違うのかを切り分けられるようにしておきます。</p>
+</div>
+
+<p>加えて、バージョンを確認する習慣そのものに価値があります。標準チェックも版によって追加・削除・改名されるため、Web で見つけた記事のとおりに書いても動かないことが日常的に起こります。</p>
+
+<h2>4.2 clang-tidy.exe を探す</h2>
+
+<p>Visual Studio に同梱された Clang ツール群は、Visual Studio のインストールディレクトリ配下に置かれます。</p>
+
+<figure>
+<svg viewBox="0 0 760 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Visual Studio 配下の LLVM ツールの配置">
+  <g font-family="sans-serif">
+  <rect x="24" y="20" width="712" height="278" rx="10" fill="#fafbfc" stroke="#d8dee4"/>
+
+  <text x="46" y="52" font-size="12.5" font-family="monospace" fill="#1f2933">C:\Program Files\Microsoft Visual Studio\2026\&lt;エディション&gt;\</text>
+  <text x="66" y="80" font-size="12.5" font-family="monospace" fill="#5a6b7a">└─ VC\</text>
+  <text x="92" y="106" font-size="12.5" font-family="monospace" fill="#5a6b7a">└─ Tools\</text>
+
+  <text x="118" y="134" font-size="12.5" font-family="monospace" fill="#5a6b7a">├─ MSVC\&lt;version&gt;\</text>
+  <text x="330" y="134" font-size="11.5" fill="#5a6b7a">← MSVC 本体（cl.exe）</text>
+
+  <rect x="112" y="146" width="480" height="72" rx="7" fill="#fbf4ea" stroke="#b4661a" stroke-width="2"/>
+  <text x="126" y="170" font-size="12.5" font-family="monospace" fill="#1f2933">└─ Llvm\</text>
+  <text x="152" y="192" font-size="12.5" font-family="monospace" fill="#1f2933">├─ bin\clang-tidy.exe</text>
+  <text x="410" y="192" font-size="11.5" fill="#b4661a">← 32bit ホスト版</text>
+  <text x="152" y="212" font-size="12.5" font-family="monospace" fill="#1f2933">└─ x64\bin\clang-tidy.exe</text>
+  <text x="410" y="212" font-size="11.5" fill="#b4661a" font-weight="bold">← 通常こちらを使う</text>
+
+  <rect x="46" y="238" width="668" height="44" rx="7" fill="#eef4f9" stroke="#2f6f9f"/>
+  <text x="62" y="258" font-size="11.5" fill="#1f2933" font-weight="bold">見つからない場合：</text>
+  <text x="62" y="276" font-size="11.5" font-family="monospace" fill="#2f6f9f">dir /s /b "C:\Program Files\Microsoft Visual Studio\clang-tidy.exe"</text>
+  </g>
+</svg>
+<figcaption><b>図4-1</b>　同梱 LLVM ツールの配置。ディレクトリ名やバージョン番号はエディションや更新で変わるので、見つからなければ検索する。</figcaption>
+</figure>
+
+<p>最も確実なのは <strong>「開発者コマンドプロンプト（Developer Command Prompt for VS 2026）」</strong> を使う方法です。スタートメニューから起動すると、MSVC や LLVM ツールにパスが通った状態になります。</p>
+
+<pre class="term"><code><span class="p">&gt;</span> where clang-tidy
+<span class="o">C:\Program Files\Microsoft Visual Studio\2026\Community\VC\Tools\Llvm\x64\bin\clang-tidy.exe</span></code></pre>
+
+<p>パスが通っていない場合は、図4-1 の <code>dir /s /b</code> で探すか、フルパスを直接指定します。</p>
+
+<h2>4.3 バージョンと機能を確かめる</h2>
+
+<h3>ステップ1：バージョン</h3>
+
+<pre class="term"><code><span class="p">&gt;</span> clang-tidy --version
+<span class="o">LLVM (http://llvm.org/):
+  LLVM version 22.1.0
+  Optimized build.</span></code></pre>
+
+<p>この <code>LLVM version</code> の数字が判定の第一材料です。21 以下なら、Query Based Custom Check はまず使えません。</p>
+
+<h3>ステップ2：機能そのものの有無</h3>
+
+<p>バージョン番号だけで決めつけず、フラグの実在を確認するのが確実です。実験的機能はバージョン間で扱いが変わりうるためです。</p>
+
+<pre class="term"><code><span class="p">&gt;</span> clang-tidy --help | findstr experimental-custom-checks
+<span class="o">  --experimental-custom-checks   - Enable experimental custom checks.</span></code></pre>
+
+<p>この行が出れば使えます。何も出なければ、そのバイナリでは第6部の内容は動きません。</p>
+
+<h3>ステップ3：チェック一覧を眺める</h3>
+
+<p>ついでに、そのバイナリがどんなチェックを持っているかも見ておきます。</p>
+
+<pre class="term"><code><span class="p">&gt;</span> clang-tidy --list-checks --checks=*
+<span class="o">Enabled checks:
+    abseil-cleanup-ctad
+    ...
+    bugprone-use-after-move
+    ...
+    modernize-use-nullptr
+    ...</span>
+
+<span class="p">&gt;</span> clang-tidy --list-checks --checks=* | find /c /v ""
+<span class="o">(有効なチェックの総数が出る)</span></code></pre>
+
+<p>数百件並ぶはずです。第4部でこの中身をツアーします。</p>
+
+<h2>4.4 判定と対処</h2>
+
+<p>3つのステップの結果から、次のように分岐します。</p>
+
+<figure>
+<svg viewBox="0 0 760 420" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="clang-tidy のバージョン判定と対処のフローチャート">
+  <defs>
+    <marker id="d" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5a6b7a"/>
+    </marker>
+  </defs>
+  <g font-family="sans-serif">
+
+  <rect x="270" y="16" width="220" height="40" rx="20" fill="#1f2933"/>
+  <text x="380" y="41" text-anchor="middle" fill="#fff" font-size="13" font-weight="bold">clang-tidy --version</text>
+
+  <line x1="380" y1="56" x2="380" y2="80" stroke="#5a6b7a" stroke-width="1.6" marker-end="url(#d)"/>
+
+  <!-- decision 1 -->
+  <path d="M380,84 L520,132 L380,180 L240,132 Z" fill="#eef4f9" stroke="#2f6f9f" stroke-width="1.6"/>
+  <text x="380" y="128" text-anchor="middle" font-size="12.5" fill="#1f2933" font-weight="bold">--help に</text>
+  <text x="380" y="146" text-anchor="middle" font-size="12.5" fill="#1f2933" font-weight="bold">experimental-custom-checks ?</text>
+
+  <text x="196" y="126" font-size="12" fill="#b4661a" font-weight="bold">無い</text>
+  <line x1="240" y1="132" x2="176" y2="132" stroke="#5a6b7a" stroke-width="1.6" marker-end="url(#d)"/>
+
+  <text x="556" y="126" font-size="12" fill="#3d7a52" font-weight="bold">有る</text>
+  <line x1="520" y1="132" x2="584" y2="132" stroke="#5a6b7a" stroke-width="1.6" marker-end="url(#d)"/>
+
+  <!-- left: install llvm -->
+  <rect x="24" y="196" width="300" height="98" rx="8" fill="#fbf4ea" stroke="#b4661a" stroke-width="2"/>
+  <text x="174" y="222" text-anchor="middle" font-size="13" font-weight="bold" fill="#b4661a">LLVM を別途インストール</text>
+  <text x="42" y="246" font-size="11.5" fill="#1f2933">・LLVM 公式の Windows インストーラ</text>
+  <text x="42" y="266" font-size="11.5" fill="#1f2933">・または winget install LLVM.LLVM</text>
+  <text x="42" y="286" font-size="11.5" fill="#5a6b7a">→ VS 同梱版はそのまま残してよい</text>
+
+  <line x1="174" y1="294" x2="174" y2="318" stroke="#5a6b7a" stroke-width="1.6" marker-end="url(#d)"/>
+
+  <rect x="24" y="322" width="300" height="82" rx="8" fill="#b4661a"/>
+  <text x="174" y="348" text-anchor="middle" font-size="13" font-weight="bold" fill="#fff">Clang-Tidy Tool Directory</text>
+  <text x="174" y="368" text-anchor="middle" font-size="11.5" fill="#fde9d0">に新しい方の bin を指定</text>
+  <text x="174" y="390" text-anchor="middle" font-size="11.5" fill="#fde9d0">→ VS がそちらを呼ぶようになる</text>
+
+  <!-- right: ok -->
+  <rect x="436" y="196" width="300" height="98" rx="8" fill="#eef5f0" stroke="#3d7a52" stroke-width="1.8"/>
+  <text x="586" y="222" text-anchor="middle" font-size="13" font-weight="bold" fill="#3d7a52">そのまま進める</text>
+  <text x="454" y="246" font-size="11.5" fill="#1f2933">・バージョン番号を控えておく</text>
+  <text x="454" y="266" font-size="11.5" fill="#1f2933">・チーム全員で同じ版を使う</text>
+  <text x="454" y="286" font-size="11.5" fill="#5a6b7a">→ 第5章の初回実行へ</text>
+
+  <line x1="586" y1="294" x2="586" y2="318" stroke="#5a6b7a" stroke-width="1.6" marker-end="url(#d)"/>
+  <rect x="436" y="322" width="300" height="82" rx="8" fill="#3d7a52"/>
+  <text x="586" y="356" text-anchor="middle" font-size="13" font-weight="bold" fill="#fff">第5章へ</text>
+  <text x="586" y="378" text-anchor="middle" font-size="11.5" fill="#dcebe1">はじめての Clang-Tidy 実行</text>
+  </g>
+</svg>
+<figcaption><b>図4-2</b>　バージョン判定のフロー。左に落ちても詰みではない。新しい LLVM を並べて入れ、Visual Studio に「そちらを使え」と教えればよい。</figcaption>
+</figure>
+
+<h3>LLVM を別途インストールする</h3>
+
+<p>LLVM は Visual Studio とは独立してインストールできます。既存の環境を壊しません。</p>
+
+<pre class="term"><code><span class="p">&gt;</span> winget install LLVM.LLVM
+<span class="o">(または llvm.org のリリースページから Windows 用インストーラを取得)</span></code></pre>
+
+<p>インストール後、新しい方のバージョンを確認します。</p>
+
+<pre class="term"><code><span class="p">&gt;</span> "C:\Program Files\LLVM\bin\clang-tidy.exe" --version
+<span class="o">LLVM version 22.1.0</span></code></pre>
+
+<div class="tip">
+<span class="t">PATH を書き換えないほうがよい</span>
+<p>システムの PATH で新しい LLVM を優先させると、Visual Studio の他の機能や別プロジェクトのビルドに影響が出ることがあります。<strong>PATH は触らず、プロジェクトのプロパティで明示的に指定する</strong> のが安全です。プロジェクトごとに使う clang-tidy を変えられるという利点もあります。</p>
+</div>
+
+<h2>4.5 Visual Studio がどの clang-tidy を呼ぶか</h2>
+
+<p>差し替えの仕組みを理解しておきます。Visual Studio は解析を実行するとき、次の順で clang-tidy を決めます。</p>
+
+<figure>
+<svg viewBox="0 0 760 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Visual Studio が clang-tidy 実行ファイルを解決する順序">
+  <defs>
+    <marker id="e" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5a6b7a"/>
+    </marker>
+  </defs>
+  <g font-family="sans-serif">
+
+  <rect x="270" y="16" width="220" height="44" rx="8" fill="#1f2933"/>
+  <text x="380" y="36" text-anchor="middle" fill="#fff" font-size="13" font-weight="bold">ビルド／背景解析の実行</text>
+  <text x="380" y="53" text-anchor="middle" fill="#b8c4cd" font-size="11">clang-tidy を起動したい</text>
+
+  <line x1="380" y1="60" x2="380" y2="84" stroke="#5a6b7a" stroke-width="1.6" marker-end="url(#e)"/>
+
+  <rect x="130" y="88" width="500" height="58" rx="8" fill="#b4661a"/>
+  <text x="152" y="112" font-size="12" fill="#fde9d0" font-weight="bold">① プロパティ</text>
+  <text x="152" y="132" font-size="13" fill="#fff" font-weight="bold">コード分析 &gt; Clang-Tidy &gt; Clang-Tidy ツール ディレクトリ</text>
+  <text x="612" y="122" text-anchor="end" font-size="11.5" fill="#fde9d0">指定があれば最優先</text>
+
+  <line x1="380" y1="146" x2="380" y2="166" stroke="#5a6b7a" stroke-width="1.6" marker-end="url(#e)"/>
+  <text x="396" y="162" font-size="11" fill="#5a6b7a">空なら</text>
+
+  <rect x="130" y="170" width="500" height="52" rx="8" fill="#2f6f9f"/>
+  <text x="152" y="192" font-size="12" fill="#d6e6f2" font-weight="bold">② Visual Studio 同梱の LLVM</text>
+  <text x="152" y="212" font-size="12" fill="#fff" font-family="monospace">VC\Tools\Llvm\x64\bin\clang-tidy.exe</text>
+
+  <line x1="380" y1="222" x2="380" y2="242" stroke="#5a6b7a" stroke-width="1.6" marker-end="url(#e)"/>
+  <text x="396" y="238" font-size="11" fill="#5a6b7a">無ければ</text>
+
+  <rect x="130" y="246" width="500" height="44" rx="8" fill="#f4f6f8" stroke="#b4661a" stroke-dasharray="4 3"/>
+  <text x="380" y="273" text-anchor="middle" font-size="12.5" fill="#b4661a" font-weight="bold">実行されない（警告0件に見える）</text>
+  </g>
+</svg>
+<figcaption><b>図4-3</b>　clang-tidy 実行ファイルの解決順序。「警告が0件」は「問題がない」ではなく「そもそも走っていない」可能性がある。</figcaption>
+</figure>
+
+<p>一番下のケースが厄介です。<strong>解析が走らなかったときと、警告が本当に0件だったときは、見た目が同じ</strong> になります。第5章では、まず意図的に警告が出る状態を作って「走っていること」を確認する手順を踏みます。</p>
+
+<h2>4.6 【ハンズオン】自分の環境を確定させる</h2>
+
+<div class="hands">
+<div class="hd">HANDS-ON 4　バージョンを調べ、必要なら差し替える</div>
+<div class="bd">
+<ol>
+  <li><strong>開発者コマンドプロンプトを開く。</strong> スタートメニューから「Developer Command Prompt for VS 2026」を起動します。</li>
+
+  <li><strong>実行ファイルの場所を確認する。</strong>
+<pre><code>where clang-tidy</code></pre>
+    見つからなければ、図4-1 の <code>dir /s /b</code> で探します。</li>
+
+  <li><strong>バージョンを記録する。</strong>
+<pre><code>clang-tidy --version</code></pre>
+    出た数字をメモしておきます。本書を読み進める間、この数字を参照することになります。</li>
+
+  <li><strong>カスタムチェックの可否を判定する。</strong>
+<pre><code>clang-tidy --help | findstr experimental-custom-checks</code></pre>
+    <ul>
+      <li><strong>出力あり</strong> → 手順7へ進みます。</li>
+      <li><strong>出力なし</strong> → 手順5へ。</li>
+    </ul>
+  </li>
+
+  <li><strong>新しい LLVM を入れる。</strong>
+<pre><code>winget install LLVM.LLVM</code></pre>
+    完了後、<code>"C:\Program Files\LLVM\bin\clang-tidy.exe" --version</code> で 22 以上になっていることと、手順4のコマンドで <code>--experimental-custom-checks</code> が出ることを確認します。</li>
+
+  <li><strong>Visual Studio に差し替えを教える。</strong> <code>TidyLab</code> プロジェクトのプロパティを開き、
+    <code>構成プロパティ &gt; コード分析 &gt; Clang-Tidy &gt; Clang-Tidy ツール ディレクトリ</code>
+    に、新しい方の <strong>bin ディレクトリ</strong>（実行ファイル名は含めない）を入力します。
+<pre><code>C:\Program Files\LLVM\bin</code></pre>
+    ここでもすべての構成に対して設定してください。</li>
+
+  <li><strong>チェックの総数を数える。</strong>
+<pre><code>clang-tidy --list-checks --checks=* | find /c /v ""</code></pre>
+    数百件あるはずです。この数はバージョンによって変わります。</li>
+
+  <li><strong>カスタムチェックのモジュールが存在するか確認する（任意）。</strong> <code>--experimental-custom-checks</code> を付けたうえで、空のカスタムチェック定義を読ませてもエラーにならないことを見ておくと安心です。実際の記述は第30章で行います。</li>
+</ol>
+</div>
+</div>
+
+<h2>4.7 バージョンを固定する意味</h2>
+
+<p>ここで確定させたバージョンは、チーム全体で揃えるべきものです。理由は単純で、<strong>バージョンが違うと警告の件数が変わる</strong> からです。</p>
+
+<ul>
+  <li>新しい版で追加されたチェックは、古い版では単に無視されます（存在しないチェック名を指定しても、既定ではエラーになりません）。</li>
+  <li>逆に、古い版で有効だったチェックが改名・削除されていることもあります。</li>
+  <li>同じチェックでも、版が上がると検出精度が変わって件数が増減します。</li>
+</ul>
+
+<p>「自分の環境では通るのに CI で落ちる」の原因の多くはこれです。第40章で CI を組むときに、使用する LLVM のバージョンを明示的に固定する話をします。いまの段階では、<strong>自分が使っているバージョンをメモしておく</strong> だけで十分です。</p>
+
+<div class="note">
+<span class="t">存在しないチェック名を書いてしまったら</span>
+<p>既定では黙って無視されます。タイプミスに気づけないということです。<code>--warnings-as-errors</code> とは別に、設定した名前が本当に有効になっているかは <code>--list-checks</code> で確認するのが確実です（第7章）。</p>
+</div>
+
+<div class="summary">
+<h2>この章のまとめ</h2>
+<ul>
+  <li>Query Based Custom Check（<code>.clang-tidy</code> の <code>CustomChecks</code>）は LLVM 22 系以降の機能で、<code>--experimental-custom-checks</code> による有効化が必要。21 系までには存在しない。</li>
+  <li>実験的機能であり、設定の構造もクエリの書き方も将来変わりうる。だから使用中のバージョンを把握しておく。</li>
+  <li>同梱 clang-tidy は <code>VC\Tools\Llvm\x64\bin</code> にある。バージョンが足りなければ LLVM を別途入れ、<strong>Clang-Tidy ツール ディレクトリ</strong> で差し替える。PATH は触らない。</li>
+  <li>Visual Studio は「ツール ディレクトリの指定 → 同梱版」の順に実行ファイルを探す。どちらも無ければ何も起こらず、警告0件に見えてしまう。</li>
+  <li>バージョン差は警告件数の差に直結する。チームでは版を揃える。</li>
+</ul>
+</div>
+
+<p class="next"><strong>次章：</strong> 第5章「はじめての Clang-Tidy 実行」では、いよいよ Visual Studio 上で解析を有効にし、第1章の題材コードに警告を出させます。「既定ではチェックが1つも有効になっていない」という、最初の罠もここで踏み抜きます。</p>
+
+</div>
+</body>
+</html>

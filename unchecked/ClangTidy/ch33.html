@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第33章 実践2：型と所有権のルールを縛る ─ Clang-Tidy入門</title>
+<style>
+  :root{
+    --ink:#1f2933; --sub:#5a6b7a; --line:#d8dee4; --bg:#ffffff;
+    --code-bg:#f6f8fa; --code-line:#e2e8ee;
+    --accent:#2f6f9f; --accent-bg:#eef4f9;
+    --warn:#b4661a; --warn-bg:#fbf4ea;
+    --ok:#3d7a52; --ok-bg:#eef5f0;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0; background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Noto Sans JP","Meiryo",sans-serif;
+    font-size:16px; line-height:1.95; font-feature-settings:"palt" 1;}
+  .page{max-width:47rem; margin:0 auto; padding:3.5rem 1.6rem 6rem}
+  .chap-no{font-size:.8rem; letter-spacing:.22em; color:var(--accent); font-weight:700; margin:0 0 .5rem}
+  h1{font-size:1.85rem; line-height:1.5; margin:0 0 .6rem; letter-spacing:.01em}
+  .lede{color:var(--sub); font-size:1rem; margin:0 0 2.2rem; padding-bottom:1.6rem; border-bottom:2px solid var(--ink)}
+  h2{font-size:1.28rem; margin:3rem 0 1rem; padding-left:.7rem; border-left:4px solid var(--accent); line-height:1.6}
+  h3{font-size:1.05rem; margin:2.2rem 0 .7rem}
+  h3::before{content:"◆ "; color:var(--accent); font-size:.8em}
+  p{margin:0 0 1.1rem}
+  ul,ol{margin:0 0 1.2rem; padding-left:1.6rem}
+  li{margin:.35rem 0}
+  code{font-family:"Cascadia Mono","Consolas","SFMono-Regular",monospace; font-size:.9em;
+       background:var(--code-bg); border:1px solid var(--code-line); border-radius:4px; padding:.08em .35em}
+  pre{background:var(--code-bg); border:1px solid var(--code-line); border-radius:8px;
+      padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.7}
+  pre code{background:none; border:none; padding:0; font-size:.86rem}
+  pre.term{background:#1f2933; border-color:#1f2933; color:#e6edf3}
+  pre.term code{color:#e6edf3}
+  pre.term .p{color:#7fb2d6}
+  pre.term .o{color:#9fb3c0}
+  .cap{font-size:.82rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+  figure{margin:2rem 0 2.2rem}
+  figure svg{display:block; width:100%; height:auto; border:1px solid var(--line); border-radius:8px; background:#fff}
+  figcaption{font-size:.85rem; color:var(--sub); margin-top:.6rem}
+  figcaption b{color:var(--ink)}
+  .box{border-radius:8px; padding:1rem 1.2rem; margin:1.6rem 0; font-size:.94rem}
+  .box p:last-child{margin-bottom:0}
+  .box .t{font-weight:700; display:block; margin-bottom:.35rem; font-size:.88rem; letter-spacing:.04em}
+  .note{background:var(--accent-bg); border-left:4px solid var(--accent)} .note .t{color:var(--accent)}
+  .warn{background:var(--warn-bg); border-left:4px solid var(--warn)} .warn .t{color:var(--warn)}
+  .tip{background:var(--ok-bg); border-left:4px solid var(--ok)} .tip .t{color:var(--ok)}
+  .hands{border:1px solid var(--line); border-radius:10px; margin:2rem 0; overflow:hidden}
+  .hands>.hd{background:var(--ink); color:#fff; padding:.55rem 1.1rem; font-size:.85rem; letter-spacing:.1em; font-weight:700}
+  .hands>.bd{padding:1.3rem 1.3rem .4rem}
+  .hands ol{counter-reset:step; list-style:none; padding-left:0}
+  .hands ol>li{counter-increment:step; position:relative; padding-left:2.4rem; margin:0 0 1.2rem}
+  .hands ol>li::before{content:counter(step); position:absolute; left:0; top:.25rem;
+    width:1.7rem; height:1.7rem; border-radius:50%; background:var(--accent); color:#fff;
+    font-size:.82rem; font-weight:700; display:flex; align-items:center; justify-content:center; line-height:1}
+  table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+  th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+  th{background:var(--code-bg); font-weight:700}
+  .summary{border:2px solid var(--ink); border-radius:10px; padding:1.3rem 1.5rem; margin:3rem 0 1rem}
+  .summary h2{margin:0 0 .8rem; border:none; padding:0; font-size:1.1rem}
+  .summary ul{margin-bottom:0}
+  .next{color:var(--sub); font-size:.94rem; border-top:1px solid var(--line); padding-top:1.2rem; margin-top:2.5rem}
+  @media (max-width:600px){ body{font-size:15px} .page{padding:2.2rem 1.1rem 4rem} h1{font-size:1.5rem} }
+</style>
+</head>
+<body>
+<div class="page">
+
+<p class="chap-no">第 33 章</p>
+<h1>実践2：型と所有権のルールを縛る</h1>
+<p class="lede">前章は「呼び出し」が対象でした。今回は「宣言」を対象にします。「生ポインタへの <code>new</code> を禁止」「この型はもう使わない」といった、設計に関わるルールです。宣言を対象にすると、<strong>型がどう書かれているかで見え方が変わる</strong>という新しい難しさが出てきます。</p>
+
+<h2>33.1 対象が変わると何が変わるか</h2>
+
+<figure>
+<svg viewBox="0 0 760 280" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="呼び出し系ルールと宣言系ルールの違い">
+  <g font-family="sans-serif">
+
+  <rect x="24" y="20" width="350" height="240" rx="10" fill="#eef4f9" stroke="#2f6f9f" stroke-width="1.8"/>
+  <text x="199" y="46" text-anchor="middle" font-size="13" font-weight="bold" fill="#2f6f9f">呼び出し系（第32章）</text>
+  <rect x="42" y="58" width="314" height="30" rx="5" fill="#1f2933"/>
+  <text x="199" y="78" text-anchor="middle" font-size="10.5" font-family="monospace" fill="#a3d9a5">callExpr(callee(functionDecl(...)))</text>
+  <g font-size="11.5" fill="#1f2933">
+  <text x="44" y="112">・対象は<tspan font-weight="bold">式</tspan>（使っている場所）</text>
+  <text x="44" y="136">・名前で一意に決まる</text>
+  <text x="44" y="160">・書き方のゆれが少ない</text>
+  <text x="44" y="184">・警告の位置が明確</text>
+  </g>
+  <rect x="42" y="200" width="314" height="46" rx="5" fill="#fff" stroke="#c5d6e4"/>
+  <text x="199" y="220" text-anchor="middle" font-size="11" fill="#2f6f9f" font-weight="bold">「この関数を呼ぶな」</text>
+  <text x="199" y="238" text-anchor="middle" font-size="10.5" fill="#5a6b7a">比較的やさしい</text>
+
+  <rect x="386" y="20" width="350" height="240" rx="10" fill="#fbf4ea" stroke="#b4661a" stroke-width="2"/>
+  <text x="561" y="46" text-anchor="middle" font-size="13" font-weight="bold" fill="#b4661a">宣言系（本章）</text>
+  <rect x="404" y="58" width="314" height="30" rx="5" fill="#1f2933"/>
+  <text x="561" y="78" text-anchor="middle" font-size="10.5" font-family="monospace" fill="#a3d9a5">varDecl(hasType(...), hasInitializer(...))</text>
+  <g font-size="11.5" fill="#1f2933">
+  <text x="406" y="112">・対象は<tspan font-weight="bold">宣言</tspan>（定義している場所）</text>
+  <text x="406" y="136">・型は <tspan font-family="monospace">auto</tspan> / <tspan font-family="monospace">typedef</tspan> で姿を変える</text>
+  <text x="406" y="160">・テンプレートで実体が増える</text>
+  <text x="406" y="184">・「どの宣言に警告すべきか」を考える</text>
+  </g>
+  <rect x="404" y="200" width="314" height="46" rx="5" fill="#fff" stroke="#e6d5bd"/>
+  <text x="561" y="220" text-anchor="middle" font-size="11" fill="#b4661a" font-weight="bold">「この形で持つな」</text>
+  <text x="561" y="238" text-anchor="middle" font-size="10.5" fill="#5a6b7a">設計に踏み込む分、難しい</text>
+  </g>
+</svg>
+<figcaption><b>図33-1</b>　対象の違い。宣言系は「型の書かれ方」というゆれを扱わなければならない。</figcaption>
+</figure>
+
+<h2>33.2 ルール1：生ポインタへの <code>new</code></h2>
+
+<p>第28章のレシピ D-3 を、実運用に耐える形にします。</p>
+
+<pre><code>  - Name: no-raw-owning-pointer
+    Query: |
+      match varDecl(
+        hasType(pointerType()),
+        hasInitializer(ignoringImplicit(cxxNewExpr().bind("alloc"))),
+        isExpansionInMainFile()
+      ).bind("var")
+    Diagnostic:
+      - BindName: var
+        Message: "生ポインタで所有権を持たないでください。std::unique_ptr / std::make_unique を使ってください"
+        Level: Warning
+      - BindName: alloc
+        Message: "ここで確保されています"
+        Level: Note</code></pre>
+
+<h3>取りこぼしを確認する</h3>
+
+<p>このクエリは「変数宣言の初期化式が <code>new</code>」を捕まえます。<strong>次のケースは捕まりません。</strong></p>
+
+<pre><code>int* p;
+p = new int(1);          // 宣言と代入が分かれている
+
+class Widget {
+    int* data_;
+public:
+    Widget() : data_(new int[16]) {}   // メンバ初期化子リスト
+};
+
+void f() {
+    consume(new int(1));  // 一時オブジェクトとして渡している
+}</code></pre>
+
+<div class="tip">
+<span class="t">取りこぼしをどう扱うか</span>
+<p>全部を1つのクエリで捕まえようとすると、式が複雑になり保守できなくなります。実践的な選択肢は3つです。</p>
+<ul style="margin-top:.5rem">
+  <li><strong>チェックを分ける</strong>：<code>no-raw-owning-pointer</code>（宣言）と <code>no-raw-new-in-member-init</code>（メンバ初期化子）を別に作る</li>
+  <li><strong>対象を広げる</strong>：<code>cxxNewExpr</code> そのものを対象にして「<code>new</code> の使用」を全部拾い、例外を除外する</li>
+  <li><strong>割り切る</strong>：最も頻度の高い形だけを捕まえ、残りはレビューに任せる</li>
+</ul>
+<p style="margin-top:.5rem"><strong>3番目は敗北ではありません。</strong> 「8割を機械が拾い、2割を人間が見る」は、「0割を機械が拾う」より圧倒的に良い状態です。</p>
+</div>
+
+<h3>広く捕まえる版</h3>
+
+<pre><code>  - Name: no-raw-new
+    Query: |
+      match cxxNewExpr(
+        isExpansionInMainFile(),
+        unless(hasAncestor(cxxMethodDecl(ofClass(cxxRecordDecl(matchesName("Allocator$"))))))
+      ).bind("alloc")
+    Diagnostic:
+      - BindName: alloc
+        Message: "new の直接使用は禁止です。std::make_unique / std::make_shared を使ってください"
+        Level: Warning</code></pre>
+
+<p><code>Allocator</code> で終わるクラスの中だけは許す、という例外を入れてあります。<strong>「所有権を管理する層」を1か所に集めて、そこだけを例外にする</strong>のは、実務でよく使う設計です。</p>
+
+<h2>33.3 ルール2：C 形式のメモリ確保</h2>
+
+<pre><code>  - Name: no-c-memory-api
+    Query: |
+      match callExpr(
+        callee(functionDecl(hasAnyName("::malloc", "::calloc", "::realloc", "::free"))),
+        isExpansionInMainFile()
+      ).bind("call")
+    Diagnostic:
+      - BindName: call
+        Message: "C 形式のメモリ管理は禁止です。コンテナまたはスマートポインタを使ってください"
+        Level: Warning</code></pre>
+
+<p>第32章と同じ形なので、すぐ書けるはずです。<strong>禁止 API のパターンは、対象が変わっても構造が同じ</strong>だと分かります。</p>
+
+<h2>33.4 ルール3：型の移行を進める</h2>
+
+<p>実務で最も価値が出るのがこれです。「<code>LegacyString</code> から <code>std::string</code> へ移行中」という状況を、機械に管理させます。</p>
+
+<pre><code>  - Name: no-legacy-string
+    Query: |
+      match varDecl(
+        hasType(cxxRecordDecl(hasName("::LegacyString"))),
+        isExpansionInMainFile()
+      ).bind("var")
+    Diagnostic:
+      - BindName: var
+        Message: "LegacyString は廃止予定です。std::string を使ってください（移行期限: 2027-03）"
+        Level: Warning</code></pre>
+
+<figure>
+<svg viewBox="0 0 760 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="型移行のタイムラインと Tier の変遷">
+  <defs>
+    <marker id="a33" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1f2933"/>
+    </marker>
+  </defs>
+  <g font-family="sans-serif">
+
+  <text x="30" y="28" font-size="12.5" font-weight="bold" fill="#5a6b7a" letter-spacing="1.5">型移行を、チェックの Tier で管理する</text>
+
+  <line x1="60" y1="70" x2="710" y2="70" stroke="#1f2933" stroke-width="1.6" marker-end="url(#a33)"/>
+  <g fill="#1f2933"><circle cx="110" cy="70" r="5"/><circle cx="300" cy="70" r="5"/><circle cx="490" cy="70" r="5"/><circle cx="660" cy="70" r="5"/></g>
+
+  <g font-size="11.5" font-weight="bold" fill="#1f2933">
+  <text x="110" y="58" text-anchor="middle">移行開始</text>
+  <text x="300" y="58" text-anchor="middle">大半が移行</text>
+  <text x="490" y="58" text-anchor="middle">残り僅か</text>
+  <text x="660" y="58" text-anchor="middle">完了</text>
+  </g>
+
+  <rect x="60" y="92" width="190" height="66" rx="8" fill="#2f6f9f"/>
+  <text x="155" y="114" text-anchor="middle" fill="#fff" font-size="12" font-weight="bold">Tier 2</text>
+  <text x="155" y="132" text-anchor="middle" fill="#d6e6f2" font-size="10.5">差分解析でのみ適用</text>
+  <text x="155" y="148" text-anchor="middle" fill="#d6e6f2" font-size="10.5">新規コードで使わせない</text>
+
+  <rect x="262" y="92" width="190" height="66" rx="8" fill="#b4661a"/>
+  <text x="357" y="114" text-anchor="middle" fill="#fff" font-size="12" font-weight="bold">Tier 1</text>
+  <text x="357" y="132" text-anchor="middle" fill="#fde9d0" font-size="10.5">常時警告</text>
+  <text x="357" y="148" text-anchor="middle" fill="#fde9d0" font-size="10.5">残件が見える状態に</text>
+
+  <rect x="464" y="92" width="190" height="66" rx="8" fill="#a04a34"/>
+  <text x="559" y="114" text-anchor="middle" fill="#fff" font-size="12" font-weight="bold">Tier 0</text>
+  <text x="559" y="132" text-anchor="middle" fill="#f0d5cf" font-size="10.5">WarningsAsErrors</text>
+  <text x="559" y="148" text-anchor="middle" fill="#f0d5cf" font-size="10.5">増やせなくする</text>
+
+  <rect x="600" y="172" width="130" height="50" rx="8" fill="#3d7a52"/>
+  <text x="665" y="192" text-anchor="middle" fill="#fff" font-size="12" font-weight="bold">チェックを削除</text>
+  <text x="665" y="210" text-anchor="middle" fill="#d5e6da" font-size="10.5">型ごと消える</text>
+
+  <rect x="30" y="240" width="700" height="52" rx="8" fill="#1f2933"/>
+  <text x="380" y="264" text-anchor="middle" fill="#fff" font-size="12" font-weight="bold">「移行しよう」という掛け声を、実行可能な形にしたもの</text>
+  <text x="380" y="282" text-anchor="middle" fill="#b8c4cd" font-size="11">残件数が可視化され、増えないことが保証される。カスタムチェックの最も有効な使い道の一つ</text>
+  </g>
+</svg>
+<figcaption><b>図33-2</b>　型移行と Tier の変遷。<strong>チェックは永続する必要がない。</strong> 役目を終えたら削除する。</figcaption>
+</figure>
+
+<h2>33.5 型の書かれ方のゆれ</h2>
+
+<p>宣言系ルールで最も注意すべき点です。同じ型でも、書き方によって AST での見え方が変わります。</p>
+
+<figure>
+<svg viewBox="0 0 760 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="型の書かれ方による見え方の違い">
+  <g font-family="sans-serif">
+
+  <rect x="24" y="20" width="712" height="32" rx="6" fill="#1f2933"/>
+  <text x="380" y="41" text-anchor="middle" fill="#fff" font-size="12.5" font-weight="bold">同じ型を指していても、書き方でクエリが通ったり通らなかったりする</text>
+
+  <g font-size="11">
+  <rect x="24" y="64" width="380" height="30" rx="5" fill="#1f2933"/>
+  <text x="40" y="84" font-family="monospace" fill="#a3d9a5">LegacyString s;</text>
+  <rect x="416" y="64" width="320" height="30" rx="5" fill="#eef5f0" stroke="#3d7a52"/>
+  <text x="432" y="84" fill="#3d7a52" font-weight="bold">○ hasType(cxxRecordDecl(hasName(…)))</text>
+
+  <rect x="24" y="102" width="380" height="30" rx="5" fill="#1f2933"/>
+  <text x="40" y="122" font-family="monospace" fill="#e8b075">using LStr = LegacyString;  LStr s;</text>
+  <rect x="416" y="102" width="320" height="30" rx="5" fill="#fbf4ea" stroke="#b4661a"/>
+  <text x="432" y="122" fill="#b4661a">△ 型エイリアス経由。解決されて通ることが多い</text>
+
+  <rect x="24" y="140" width="380" height="30" rx="5" fill="#1f2933"/>
+  <text x="40" y="160" font-family="monospace" fill="#e08a74">auto s = makeLegacy();</text>
+  <rect x="416" y="140" width="320" height="30" rx="5" fill="#f7e9e5" stroke="#a04a34"/>
+  <text x="432" y="160" fill="#a04a34">△ 推論結果は同じ型。書かれ方は違う</text>
+
+  <rect x="24" y="178" width="380" height="30" rx="5" fill="#1f2933"/>
+  <text x="40" y="198" font-family="monospace" fill="#e08a74">std::vector&lt;LegacyString&gt; v;</text>
+  <rect x="416" y="178" width="320" height="30" rx="5" fill="#f7e9e5" stroke="#a04a34"/>
+  <text x="432" y="198" fill="#a04a34">✕ 変数の型は vector。中身は見ていない</text>
+
+  <rect x="24" y="216" width="380" height="30" rx="5" fill="#1f2933"/>
+  <text x="40" y="236" font-family="monospace" fill="#e08a74">void f(LegacyString s);</text>
+  <rect x="416" y="216" width="320" height="30" rx="5" fill="#f7e9e5" stroke="#a04a34"/>
+  <text x="432" y="236" fill="#a04a34">✕ varDecl ではなく parmVarDecl</text>
+  </g>
+
+  <rect x="24" y="258" width="712" height="52" rx="8" fill="#fbf4ea" stroke="#b4661a" stroke-width="1.8"/>
+  <text x="46" y="280" font-size="12" font-weight="bold" fill="#b4661a">対処：検証ファイルに全パターンを書く</text>
+  <text x="46" y="300" font-size="11.5" fill="#1f2933">推測しない。<tspan font-weight="bold">書き方のバリエーションを全部並べたファイルを作り、clang-query で1つずつ確認する</tspan></text>
+  </g>
+</svg>
+<figcaption><b>図33-3</b>　型の書かれ方によるゆれ。<strong>宣言系ルールでは、検証ファイルの網羅性が品質を決める。</strong></figcaption>
+</figure>
+
+<h3>広く捕まえる書き方</h3>
+
+<p>変数だけでなく、引数・メンバ・戻り値まで含めたい場合は、対象ノードを増やします。</p>
+
+<pre><code>  # 変数・引数・メンバのいずれかで使われている
+  - Name: no-legacy-string-decl
+    Query: |
+      match namedDecl(
+        anyOf(varDecl(), parmVarDecl(), fieldDecl()),
+        hasType(cxxRecordDecl(hasName("::LegacyString"))),
+        isExpansionInMainFile()
+      ).bind("decl")
+    Diagnostic:
+      - BindName: decl
+        Message: "LegacyString は廃止予定です。std::string を使ってください"
+        Level: Warning</code></pre>
+
+<div class="warn">
+<span class="t">必ず clang-query で確認する</span>
+<p>上のような組み合わせは、<strong>書けるかどうかがバージョンに依存します。</strong> Matcher の組み合わせに制約がある場合、clang-query がその場でエラーを出します（第24章）。動かなければ、チェックを分けて素直に書いてください。<strong>1つの凝ったクエリより、3つの素直なクエリのほうが保守できます。</strong></p>
+</div>
+
+<h2>33.6 【ハンズオン】所有権のルールを作る</h2>
+
+<div class="hands">
+<div class="hd">HANDS-ON 33　宣言系ルールを組み立てる</div>
+<div class="bd">
+<ol>
+  <li><strong>網羅的な検証ファイルを作る。</strong> <code>tests\custom-checks\ownership.cpp</code> に、図33-3 の全パターンを書きます。
+<pre><code>#include &lt;memory&gt;
+#include &lt;vector&gt;
+#include &lt;cstdlib&gt;
+
+struct LegacyString { char buf[64]; };
+using LStr = LegacyString;
+LegacyString makeLegacy();
+
+struct Allocator {                       // 例外にする層
+    int* create() { return new int(1); } // 検出しない
+};
+
+void cases() {
+    int*  a = new int(1);                // 検出：宣言＋new
+    auto* b = new int(2);                // 検出：auto* でも同じ
+    int*  c;
+    c = new int(3);                      // 検出しない（取りこぼし）
+    auto  d = std::make_unique&lt;int&gt;(4);  // 検出しない
+    void* m = malloc(16);                // 検出：C 形式
+    free(m);                             // 検出：C 形式
+
+    LegacyString s1;                     // 検出：型
+    LStr         s2;                     // 要確認：エイリアス
+    auto         s3 = makeLegacy();      // 要確認：auto
+    std::vector&lt;LegacyString&gt; v;         // 要確認：コンテナの中身
+}
+
+void param(LegacyString s) {}            // 要確認：引数
+
+struct Holder {
+    LegacyString member;                 // 要確認：メンバ
+    int*         owned = new int(5);     // 要確認：メンバ初期化子
+};</code></pre>
+  </li>
+
+  <li><strong>1パターンずつ確認する。</strong> <code>clang-query</code> で、33.2 節のクエリを実行します。
+<pre><code>clang-query ownership.cpp -- -std=c++23</code></pre>
+<pre><code>set output diag
+m varDecl(hasType(pointerType()), hasInitializer(ignoringImplicit(cxxNewExpr())), isExpansionInMainFile())</code></pre>
+    <strong><code>a</code> と <code>b</code> が検出され、<code>c</code> と <code>d</code> が検出されないことを確認します。</strong></li>
+
+  <li><strong>型のゆれを確認する。</strong>
+<pre><code>m varDecl(hasType(cxxRecordDecl(hasName("::LegacyString"))), isExpansionInMainFile())</code></pre>
+    <code>s1</code> / <code>s2</code> / <code>s3</code> のうち、<strong>どれが検出されるか</strong>を実際に確認してください。図33-3 の予想と一致するかを見ます。</li>
+
+  <li><strong>例外を作る。</strong> <code>Allocator</code> クラスの中の <code>new</code> を除外する条件を書き、<code>create()</code> が検出されないことを確認します。
+<pre><code>m cxxNewExpr(isExpansionInMainFile(), unless(hasAncestor(cxxMethodDecl(ofClass(cxxRecordDecl(matchesName("Allocator$")))))))</code></pre>
+    <strong><code>ofClass</code> が使えない場合は、<code>hasAncestor(cxxRecordDecl(matchesName("Allocator$")))</code> でも試してください。</strong> エラーメッセージを読んで調整するのが第24章の流儀です。</li>
+
+  <li><strong>3つのチェックを設定ファイルに書く。</strong> 33.2 / 33.3 / 33.4 節の内容を <code>.clang-tidy</code> の <code>CustomChecks</code> に並べます。第32章のチェックも残したままにしてください。<strong>5つ以上のカスタムチェックが並んだ状態</strong>になります。</li>
+
+  <li><strong>件数を突き合わせる。</strong>
+<pre><code>clang-tidy --experimental-custom-checks ownership.cpp -- -std=c++23</code></pre>
+    <code>clang-query</code> での確認結果と一致することを確認します。</li>
+
+  <li><strong>Note の位置を確認する。</strong> <code>no-raw-owning-pointer</code> の警告について、<code>warning:</code> が変数宣言を、<code>note:</code> が <code>new</code> 式を指していることを確認します。<strong>列番号まで見てください。</strong></li>
+
+  <li><strong>移行計画を書く。</strong> <code>docs\clang-tidy-decisions.md</code> に、<code>no-legacy-string</code> の Tier 遷移計画を書きます（図33-2）。
+<pre><code>## custom-no-legacy-string
+- 現在: Tier 2（差分解析のみ）　残件 87
+- Tier 1 に上げる条件: 残件 20 以下
+- Tier 0 に上げる条件: 残件 0
+- チェック削除の条件: LegacyString 型そのものを削除したとき</code></pre>
+  </li>
+
+  <li><strong>期待動作を記録する。</strong> <code>tests\custom-checks\README.md</code> の表を更新します。<strong>「要確認」だったパターンについて、実際にどうだったかを必ず書いてください。</strong> これが次にクエリを書くときの資産になります。</li>
+</ol>
+</div>
+</div>
+
+<div class="summary">
+<h2>この章のまとめ</h2>
+<ul>
+  <li>宣言系ルールは、呼び出し系と違って<strong>型の書かれ方のゆれ</strong>を扱う必要がある。</li>
+  <li><code>auto</code>、型エイリアス、コンテナの要素型、引数・メンバ ── <strong>全パターンを検証ファイルに書いて、1つずつ確認する。</strong> 推測しない。</li>
+  <li>取りこぼしは必ず出る。<strong>「8割を機械が拾う」は「0割」より圧倒的に良い。</strong> 割り切りは敗北ではない。</li>
+  <li>「所有権を管理する層」を1か所に集め、そこだけを例外にするのは実務的な設計。</li>
+  <li><strong>型の移行は、チェックの Tier 遷移として管理できる。</strong> Tier 2 → Tier 1 → Tier 0 → 削除。</li>
+  <li>チェックは永続する必要がない。<strong>役目を終えたら削除する。</strong></li>
+  <li>凝った1つのクエリより、素直な3つのクエリのほうが保守できる。</li>
+</ul>
+</div>
+
+<p class="next"><strong>次章：</strong> 第34章「実践3：命名・構造の規約をチェックする」では、<code>readability-identifier-naming</code> では表現できない、<strong>文脈に依存した命名規約</strong>を作ります。「この基底クラスを継承したら接尾辞を付ける」といったルールです。</p>
+
+</div>
+</body>
+</html>

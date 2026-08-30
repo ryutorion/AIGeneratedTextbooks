@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第38章 カスタムチェックを配布する ─ Clang-Tidy入門</title>
+<style>
+  :root{
+    --ink:#1f2933; --sub:#5a6b7a; --line:#d8dee4; --bg:#ffffff;
+    --code-bg:#f6f8fa; --code-line:#e2e8ee;
+    --accent:#2f6f9f; --accent-bg:#eef4f9;
+    --warn:#b4661a; --warn-bg:#fbf4ea;
+    --ok:#3d7a52; --ok-bg:#eef5f0;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0; background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Noto Sans JP","Meiryo",sans-serif;
+    font-size:16px; line-height:1.95; font-feature-settings:"palt" 1;}
+  .page{max-width:47rem; margin:0 auto; padding:3.5rem 1.6rem 6rem}
+  .chap-no{font-size:.8rem; letter-spacing:.22em; color:var(--accent); font-weight:700; margin:0 0 .5rem}
+  h1{font-size:1.85rem; line-height:1.5; margin:0 0 .6rem; letter-spacing:.01em}
+  .lede{color:var(--sub); font-size:1rem; margin:0 0 2.2rem; padding-bottom:1.6rem; border-bottom:2px solid var(--ink)}
+  h2{font-size:1.28rem; margin:3rem 0 1rem; padding-left:.7rem; border-left:4px solid var(--accent); line-height:1.6}
+  h3{font-size:1.05rem; margin:2.2rem 0 .7rem}
+  h3::before{content:"◆ "; color:var(--accent); font-size:.8em}
+  p{margin:0 0 1.1rem}
+  ul,ol{margin:0 0 1.2rem; padding-left:1.6rem}
+  li{margin:.35rem 0}
+  code{font-family:"Cascadia Mono","Consolas","SFMono-Regular",monospace; font-size:.9em;
+       background:var(--code-bg); border:1px solid var(--code-line); border-radius:4px; padding:.08em .35em}
+  pre{background:var(--code-bg); border:1px solid var(--code-line); border-radius:8px;
+      padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.7}
+  pre code{background:none; border:none; padding:0; font-size:.86rem}
+  pre.term{background:#1f2933; border-color:#1f2933; color:#e6edf3}
+  pre.term code{color:#e6edf3}
+  pre.term .p{color:#7fb2d6}
+  pre.term .o{color:#9fb3c0}
+  .path{font-family:"Cascadia Mono","Consolas",monospace; font-size:.86rem; background:#1f2933; color:#e6edf3;
+        padding:.9rem 1.1rem; border-radius:8px; overflow-x:auto; margin:0 0 1.4rem; line-height:1.8}
+  .cap{font-size:.82rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+  figure{margin:2rem 0 2.2rem}
+  figure svg{display:block; width:100%; height:auto; border:1px solid var(--line); border-radius:8px; background:#fff}
+  figcaption{font-size:.85rem; color:var(--sub); margin-top:.6rem}
+  figcaption b{color:var(--ink)}
+  .box{border-radius:8px; padding:1rem 1.2rem; margin:1.6rem 0; font-size:.94rem}
+  .box p:last-child{margin-bottom:0}
+  .box .t{font-weight:700; display:block; margin-bottom:.35rem; font-size:.88rem; letter-spacing:.04em}
+  .note{background:var(--accent-bg); border-left:4px solid var(--accent)} .note .t{color:var(--accent)}
+  .warn{background:var(--warn-bg); border-left:4px solid var(--warn)} .warn .t{color:var(--warn)}
+  .tip{background:var(--ok-bg); border-left:4px solid var(--ok)} .tip .t{color:var(--ok)}
+  .hands{border:1px solid var(--line); border-radius:10px; margin:2rem 0; overflow:hidden}
+  .hands>.hd{background:var(--ink); color:#fff; padding:.55rem 1.1rem; font-size:.85rem; letter-spacing:.1em; font-weight:700}
+  .hands>.bd{padding:1.3rem 1.3rem .4rem}
+  .hands ol{counter-reset:step; list-style:none; padding-left:0}
+  .hands ol>li{counter-increment:step; position:relative; padding-left:2.4rem; margin:0 0 1.2rem}
+  .hands ol>li::before{content:counter(step); position:absolute; left:0; top:.25rem;
+    width:1.7rem; height:1.7rem; border-radius:50%; background:var(--accent); color:#fff;
+    font-size:.82rem; font-weight:700; display:flex; align-items:center; justify-content:center; line-height:1}
+  table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+  th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+  th{background:var(--code-bg); font-weight:700}
+  .summary{border:2px solid var(--ink); border-radius:10px; padding:1.3rem 1.5rem; margin:3rem 0 1rem}
+  .summary h2{margin:0 0 .8rem; border:none; padding:0; font-size:1.1rem}
+  .summary ul{margin-bottom:0}
+  .partend{background:#1f2933; color:#fff; border-radius:10px; padding:1.4rem 1.6rem; margin:2.5rem 0 1rem}
+  .partend h2{color:#fff; border-left-color:#e8b075; margin:0 0 .8rem; font-size:1.1rem}
+  .partend p{color:#cfd8de; margin-bottom:.6rem}
+  .partend ul{color:#cfd8de; margin-bottom:0}
+  .next{color:var(--sub); font-size:.94rem; border-top:1px solid var(--line); padding-top:1.2rem; margin-top:2.5rem}
+  @media (max-width:600px){ body{font-size:15px} .page{padding:2.2rem 1.1rem 4rem} h1{font-size:1.5rem} }
+</style>
+</head>
+<body>
+<div class="page">
+
+<p class="chap-no">第 38 章</p>
+<h1>カスタムチェックを配布する</h1>
+<p class="lede">第6部の最終章です。自分の手元で動くチェックを、チーム全体・複数のプロジェクトに行き渡らせます。<strong>C++ 実装と違ってビルド成果物の配布は要りませんが、配るべきものはゼロではありません。</strong> 何を、どう配るかを整理します。</p>
+
+<h2>38.1 配るべき三つのもの</h2>
+
+<figure>
+<svg viewBox="0 0 760 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="配布すべき三つの要素">
+  <g font-family="sans-serif">
+
+  <rect x="24" y="20" width="712" height="32" rx="6" fill="#1f2933"/>
+  <text x="380" y="41" text-anchor="middle" fill="#fff" font-size="12.5" font-weight="bold">「設定ファイルを共有すれば終わり」ではない</text>
+
+  <rect x="24" y="64" width="228" height="216" rx="10" fill="#eef4f9" stroke="#2f6f9f" stroke-width="1.8"/>
+  <text x="138" y="90" text-anchor="middle" font-size="13" font-weight="bold" fill="#2f6f9f">① 設定ファイル</text>
+  <rect x="42" y="102" width="192" height="30" rx="5" fill="#2f6f9f"/>
+  <text x="138" y="122" text-anchor="middle" font-size="11" font-family="monospace" fill="#fff">.clang-tidy</text>
+  <g font-size="11" fill="#1f2933">
+  <text x="42" y="152">・リポジトリに入れるだけ</text>
+  <text x="42" y="174">・プルリクエストでレビュー</text>
+  <text x="42" y="196">・変更履歴が残る</text>
+  </g>
+  <rect x="42" y="212" width="192" height="52" rx="5" fill="#fff" stroke="#c5d6e4"/>
+  <text x="138" y="234" text-anchor="middle" font-size="11" fill="#2f6f9f" font-weight="bold">これは簡単</text>
+  <text x="138" y="252" text-anchor="middle" font-size="10.5" fill="#5a6b7a">C++ 実装との最大の差</text>
+
+  <rect x="266" y="64" width="228" height="216" rx="10" fill="#fbf4ea" stroke="#b4661a" stroke-width="2.2"/>
+  <text x="380" y="90" text-anchor="middle" font-size="13" font-weight="bold" fill="#b4661a">② LLVM のバージョン</text>
+  <rect x="284" y="102" width="192" height="30" rx="5" fill="#b4661a"/>
+  <text x="380" y="122" text-anchor="middle" font-size="11" font-family="monospace" fill="#fff">LLVM 22 以降</text>
+  <g font-size="11" fill="#1f2933">
+  <text x="284" y="152">・全員が同じ版である必要</text>
+  <text x="284" y="174">・VS 同梱版では不足しうる</text>
+  <text x="284" y="196">・CI でも同じ版を使う</text>
+  </g>
+  <rect x="284" y="212" width="192" height="52" rx="5" fill="#fff" stroke="#e6d5bd"/>
+  <text x="380" y="234" text-anchor="middle" font-size="11" fill="#b4661a" font-weight="bold">ここが最大の障壁</text>
+  <text x="380" y="252" text-anchor="middle" font-size="10.5" fill="#5a6b7a">第4章の作業を全員に</text>
+
+  <rect x="508" y="64" width="228" height="216" rx="10" fill="#eef5f0" stroke="#3d7a52" stroke-width="1.8"/>
+  <text x="622" y="90" text-anchor="middle" font-size="13" font-weight="bold" fill="#3d7a52">③ 実行手順</text>
+  <rect x="526" y="102" width="192" height="30" rx="5" fill="#3d7a52"/>
+  <text x="622" y="122" text-anchor="middle" font-size="10" font-family="monospace" fill="#fff">--experimental-custom-checks</text>
+  <g font-size="11" fill="#1f2933">
+  <text x="526" y="152">・VS からは渡せない</text>
+  <text x="526" y="174">・スクリプトで包む</text>
+  <text x="526" y="196">・CI 設定に埋め込む</text>
+  </g>
+  <rect x="526" y="212" width="192" height="52" rx="5" fill="#fff" stroke="#c9dfd1"/>
+  <text x="622" y="234" text-anchor="middle" font-size="11" fill="#3d7a52" font-weight="bold">第29章の経路選択が</text>
+  <text x="622" y="252" text-anchor="middle" font-size="10.5" fill="#5a6b7a">ここで効いてくる</text>
+  </g>
+</svg>
+<figcaption><b>図38-1</b>　配布すべき三つ。<strong>①は簡単、②が最大の障壁、③は経路の選択次第。</strong></figcaption>
+</figure>
+
+<h2>38.2 リポジトリ内の配置</h2>
+
+<p>設定を1つの巨大な <code>.clang-tidy</code> に押し込むと、レビューも保守も難しくなります。役割で分けます。</p>
+
+<div class="path">MyProject\
+├─ .clang-tidy                      ← 標準チェック＋カスタムチェック（Tier 0/1）
+├─ tools\
+│   ├─ clang-tidy-diff.yml          ← Tier 2 用（第22章）
+│   ├─ analyze-all.cmd              ← 全体解析（--experimental-custom-checks 込み）
+│   └─ analyze-diff.cmd             ← 差分解析
+├─ tests\
+│   ├─ .clang-tidy                  ← カスタムチェックを無効化
+│   └─ custom-checks\
+│       ├─ expect.cpp               ← 回帰テスト用ソース（第37章）
+│       ├─ run_tests.py             ← 回帰テストスクリプト
+│       └─ README.md                ← 期待動作の表
+├─ third_party\
+│   └─ .clang-tidy                  ← Checks: '-*'
+└─ docs\
+    ├─ clang-tidy-decisions.md      ← 採用・不採用の判断記録（第22章）
+    └─ clang-tidy-troubleshooting.md ← 切り分け手順（第36章）</div>
+
+<h2>38.3 階層で共有する</h2>
+
+<p>複数のモジュールがある大きなリポジトリでは、第7章の <code>InheritParentConfig</code> が効きます。</p>
+
+<figure>
+<svg viewBox="0 0 760 340" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="設定の階層構造">
+  <g font-family="sans-serif">
+
+  <rect x="230" y="24" width="300" height="62" rx="8" fill="#1f2933"/>
+  <text x="380" y="48" text-anchor="middle" fill="#fff" font-size="12.5" font-weight="bold">リポジトリルート .clang-tidy</text>
+  <text x="380" y="68" text-anchor="middle" fill="#b8c4cd" font-size="10.5">全モジュール共通のカスタムチェック</text>
+  <text x="380" y="82" text-anchor="middle" fill="#e8b075" font-size="10">禁止 API・命名規約</text>
+
+  <path d="M290,86 L160,120" fill="none" stroke="#d8dee4" stroke-width="1.5"/>
+  <path d="M380,86 L380,120" fill="none" stroke="#d8dee4" stroke-width="1.5"/>
+  <path d="M470,86 L600,120" fill="none" stroke="#d8dee4" stroke-width="1.5"/>
+
+  <rect x="40" y="124" width="240" height="86" rx="8" fill="#eef4f9" stroke="#2f6f9f" stroke-width="1.6"/>
+  <text x="160" y="146" text-anchor="middle" font-size="11.5" font-weight="bold" fill="#2f6f9f">render\.clang-tidy</text>
+  <text x="160" y="166" text-anchor="middle" font-size="10" font-family="monospace" fill="#1f2933">InheritParentConfig: true</text>
+  <text x="160" y="184" text-anchor="middle" font-size="10.5" fill="#1f2933">＋ 描画パス専用ルール</text>
+  <text x="160" y="200" text-anchor="middle" font-size="10" fill="#5a6b7a">「動的確保を禁止」</text>
+
+  <rect x="296" y="124" width="168" height="86" rx="8" fill="#f4f6f8" stroke="#5a6b7a" stroke-dasharray="4 3"/>
+  <text x="380" y="152" text-anchor="middle" font-size="11.5" font-weight="bold" fill="#5a6b7a">core\</text>
+  <text x="380" y="174" text-anchor="middle" font-size="10.5" fill="#1f2933">設定ファイルなし</text>
+  <text x="380" y="192" text-anchor="middle" font-size="10" fill="#5a6b7a">ルートの設定がそのまま効く</text>
+
+  <rect x="480" y="124" width="240" height="86" rx="8" fill="#fbf4ea" stroke="#b4661a" stroke-width="1.6"/>
+  <text x="600" y="146" text-anchor="middle" font-size="11.5" font-weight="bold" fill="#b4661a">legacy\.clang-tidy</text>
+  <text x="600" y="166" text-anchor="middle" font-size="10" font-family="monospace" fill="#1f2933">InheritParentConfig: true</text>
+  <text x="600" y="184" text-anchor="middle" font-size="10.5" fill="#1f2933">－ 一部のカスタムチェック</text>
+  <text x="600" y="200" text-anchor="middle" font-size="10" fill="#5a6b7a">移行猶予中</text>
+
+  <rect x="40" y="234" width="680" height="90" rx="10" fill="#eef5f0" stroke="#3d7a52" stroke-width="1.8"/>
+  <text x="380" y="258" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#3d7a52">この構造の利点</text>
+  <g font-size="11.5" fill="#1f2933">
+  <text x="60" y="282">・共通ルールは1か所。全モジュールに自動で行き渡る</text>
+  <text x="60" y="302">・モジュール固有の事情は、そのモジュールのファイルに閉じる</text>
+  <text x="60" y="318">・「なぜここだけ緩いのか」がディレクトリ構造から読み取れる</text>
+  </g>
+  </g>
+</svg>
+<figcaption><b>図38-2</b>　階層による共有。<strong>例外がディレクトリ構造に現れる</strong>のが、この方式の最大の利点。</figcaption>
+</figure>
+
+<h2>38.4 複数リポジトリで共有する</h2>
+
+<p>組織全体でルールを共有したい場合、方法は3つです。</p>
+
+<table>
+<tr><th>方法</th><th>やり方</th><th>長所</th><th>短所</th></tr>
+<tr><td><strong>コピー</strong></td><td>各リポジトリに <code>.clang-tidy</code> を複製</td><td>単純。依存関係がない</td><td>更新が行き渡らない。差異が生まれる</td></tr>
+<tr><td><strong>サブモジュール</strong></td><td>設定用リポジトリを git submodule で取り込む</td><td>更新を取り込める。版を固定できる</td><td>submodule の運用が要る</td></tr>
+<tr><td><strong>生成</strong></td><td>共通部分＋固有部分から <code>.clang-tidy</code> を生成するスクリプト</td><td>柔軟。差分が明示できる</td><td>生成物と原本の二重管理</td></tr>
+</table>
+
+<div class="tip">
+<span class="t">まずはコピーでよい</span>
+<p>リポジトリが3つまでなら、コピーで十分です。<strong>仕組みを作るコストが、それによって節約されるコストを上回らないようにしてください。</strong> 「更新が行き渡らない」問題が実際に起きてから、次の方法を検討すれば間に合います。</p>
+<p style="margin-top:.5rem">ただし、どの方法でも <strong>「どこが原本か」を <code>.clang-tidy</code> の冒頭コメントに書いてください。</strong> これだけで事故が大きく減ります。</p>
+</div>
+
+<pre><code>---
+# ============================================================
+# MyProject 静的解析設定
+#   原本: https://internal.example.com/cpp-standards/clang-tidy
+#   このファイルを直接編集せず、原本に PR を出してください
+#   同期日: 2026-08-29 / 対応 LLVM: 22.1
+# ============================================================</code></pre>
+
+<h2>38.5 バージョンを固定する</h2>
+
+<p>第29章で述べたとおり、Query Based Custom Check は実験的機能です。<strong>LLVM のバージョンが揃っていないと、人によって警告の出方が変わります。</strong></p>
+
+<table>
+<tr><th>場所</th><th>固定の方法</th></tr>
+<tr><td>開発者の環境</td><td>導入手順書に版を明記。<code>clang-tidy --version</code> の確認をセットアップ手順に入れる</td></tr>
+<tr><td>CI</td><td>コンテナイメージまたはインストールコマンドで版を固定（第40章）</td></tr>
+<tr><td>プロジェクト</td><td><code>.clang-tidy</code> のコメントに対応バージョンを書く</td></tr>
+</table>
+
+<div class="warn">
+<span class="t">版が揃わないとどうなるか</span>
+<p>古い版の開発者は、<strong>カスタムチェックが1つも動きません。</strong> しかもエラーは出ません（第36章の症状①）。「自分の環境では警告が出なかったのに CI で落ちた」という、最も士気を下げる状況が生まれます。<strong>導入手順書に版の確認手順を書くことは、必須の作業です。</strong></p>
+</div>
+
+<h2>38.6 導入手順書を書く</h2>
+
+<p>新しいメンバーが最短で同じ環境に到達できるようにします。</p>
+
+<pre><code># docs/setup-static-analysis.md
+
+## 1. LLVM を導入する（必須）
+winget install LLVM.LLVM
+"C:\Program Files\LLVM\bin\clang-tidy.exe" --version
+→ 22.1 以上であること
+
+## 2. カスタムチェックが使えることを確認する
+clang-tidy --help | findstr experimental-custom-checks
+→ 行が出ること。出なければ手順1をやり直す
+
+## 3. Visual Studio の設定
+- 個別コンポーネント「Windows 用 C++ Clang ツール」を導入
+- プロパティシート TidyLab.Analysis.props が全構成に追加されていることを確認
+- ※ IDE では標準チェックのみ動作します（カスタムチェックは CI で実行）
+
+## 4. 手元で全体解析を実行してみる
+tools\analyze-all.cmd
+
+## 5. 回帰テストを実行してみる
+python tests\custom-checks\run_tests.py
+→ PASS になること
+
+## 困ったとき
+docs\clang-tidy-troubleshooting.md を参照</code></pre>
+
+<h2>38.7 【ハンズオン】配布可能な状態にする</h2>
+
+<div class="hands">
+<div class="hd">HANDS-ON 38　チームに渡せる形に整える</div>
+<div class="bd">
+<ol>
+  <li><strong>ファイルを整理する。</strong> 38.2 節の構造に従って、これまで作ったファイルを配置し直します。散らばっている <code>.clang-tidy</code> を整理してください。</li>
+
+  <li><strong>実行スクリプトを作る。</strong> <code>tools\analyze-all.cmd</code> を作ります。<strong><code>--experimental-custom-checks</code> をここに埋め込むのが要点です。</strong>
+<pre><code>@echo off
+setlocal
+if "%LLVM_BIN%"=="" set LLVM_BIN=C:\Program Files\LLVM\bin
+
+"%LLVM_BIN%\clang-tidy.exe" --version | findstr /c:"LLVM version"
+if errorlevel 1 (
+    echo LLVM が見つかりません。docs\setup-static-analysis.md を参照してください
+    exit /b 1
+)
+
+python "%LLVM_BIN%\run-clang-tidy" -p out\build\ninja -j 8 %*
+endlocal</code></pre>
+    <strong><code>run-clang-tidy</code> 経由で <code>--experimental-custom-checks</code> を渡す方法を確認してください。</strong> 渡せない場合は、対象ファイルを列挙して <code>clang-tidy</code> を直接呼ぶ形に書き換えます。</li>
+
+  <li><strong>階層設定を作る。</strong> <code>TidyLab</code> にサブディレクトリを作り、図38-2 の構造を再現します。
+    <ul>
+      <li><code>TidyLab\legacy\.clang-tidy</code> に <code>InheritParentConfig: true</code> と、カスタムチェックの一部を無効化する設定</li>
+      <li><code>--explain-config</code> で、意図どおりに継承されていることを確認</li>
+    </ul>
+  </li>
+
+  <li><strong>原本の所在を書く。</strong> <code>.clang-tidy</code> の冒頭に、38.4 節の形式でコメントを書きます。<strong>実在しない URL でも構いません。書く習慣をつけることが目的です。</strong></li>
+
+  <li><strong>導入手順書を書く。</strong> 38.6 節を参考に <code>docs\setup-static-analysis.md</code> を作ります。<strong>実際に手順どおりに実行して、抜けがないかを確認してください。</strong></li>
+
+  <li><strong>他人になって試す。</strong> 別のディレクトリにリポジトリをクローン（またはコピー）し、<strong>導入手順書だけを見て</strong>環境を再現できるか試します。詰まった箇所が、手順書の不足箇所です。</li>
+
+  <li><strong>版の不一致を再現する。</strong> 可能なら、Visual Studio 同梱の古い <code>clang-tidy</code> を <code>LLVM_BIN</code> に指定して実行し、<strong>カスタムチェックが静かに動かなくなる</strong>ことを確認します。この体験が、手順書に版の確認を書く動機になります。</li>
+
+  <li><strong>チェックリストを作る。</strong> 新しいカスタムチェックを追加するときの手順を <code>docs\</code> に書きます。
+<pre><code># カスタムチェックを追加する手順
+1. clang-query でクエリを確定させる（期待件数を記録）
+2. tests/custom-checks/expect.cpp に検証ケースを追加（EXPECT / NO-WARN）
+3. .clang-tidy の CustomChecks に追加
+4. python tests/custom-checks/run_tests.py が PASS することを確認
+5. tools\analyze-all.cmd で実プロジェクトの件数を確認
+6. docs/clang-tidy-decisions.md に Tier と引退条件を記載
+7. プルリクエストを出す（レビュー観点: メッセージの分かりやすさ、除外の妥当性）</code></pre>
+  </li>
+
+  <li><strong>レビュー観点を決める。</strong> カスタムチェックのプルリクエストで、レビュアーが何を見るべきかを書きます。<strong>「メッセージを読んで直せるか」が最重要の観点です。</strong></li>
+</ol>
+</div>
+</div>
+
+<div class="partend">
+<h2>第6部の終わりに</h2>
+<p>本書の主題を、最後まで通しました。</p>
+<ul>
+  <li>Query Based Custom Check の仕組みと、実験的機能であることの意味を理解した（第29章）</li>
+  <li><code>.clang-tidy</code> にクエリを書き、自作の警告を出せるようになった（第30・31章）</li>
+  <li>禁止 API・所有権・命名規約・多点診断という4つの型を実装した（第32〜35章）</li>
+  <li>動かないときの切り分け手順を持っている（第36章）</li>
+  <li>回帰テストと件数監視で、実験的機能を実務で使う保険をかけた（第37章）</li>
+  <li>チームに配布できる形に整えた（第38章）</li>
+</ul>
+<p style="margin-top:.8rem">第1章で「コンパイラが黙る問題がある」と書きました。第4部で標準チェックがその多くを埋めることを見ました。そして第6部で、<strong>標準チェックにも埋められない最後の隙間 ── あなたのチームにしか存在しないルール ── を、自分の手で埋められるようになりました。</strong></p>
+<p style="margin-top:.6rem">残るは運用です。第7部で CI に載せ、既存コードベースへ段階導入し、clang-format との役割を整理します。そして第8部で、クエリでは書けないルールに出会ったときの道を示して、本書を終えます。</p>
+</div>
+
+<div class="summary">
+<h2>この章のまとめ</h2>
+<ul>
+  <li>配るべきものは3つ。<strong>①設定ファイル（簡単）②LLVM のバージョン（最大の障壁）③実行手順（経路の選択次第）。</strong></li>
+  <li>設定は役割で分ける。<code>.clang-tidy</code> / Tier 2 用設定 / 実行スクリプト / 回帰テスト / 判断記録 / 切り分け手順。</li>
+  <li>大きなリポジトリでは <code>InheritParentConfig</code> の階層で共有する。<strong>例外がディレクトリ構造に現れる</strong>のが利点。</li>
+  <li>複数リポジトリでは、まずコピーで十分。<strong>「どこが原本か」を冒頭コメントに書く</strong>だけで事故が減る。</li>
+  <li><strong>版が揃わないと、古い環境ではカスタムチェックが静かに動かない。</strong> 導入手順書に版の確認を必ず入れる。</li>
+  <li>実行手順は<strong>スクリプトに埋め込む</strong>。<code>--experimental-custom-checks</code> を人が覚えている状態にしない。</li>
+  <li>新しいチェックを追加する手順とレビュー観点を文書化する。<strong>最重要の観点は「メッセージを読んで直せるか」。</strong></li>
+</ul>
+</div>
+
+<p class="next"><strong>次章：</strong> 第7部に入ります。第39章「既存コードベースへ段階導入する」では、本書で作った仕組みを、警告が数千件出るような実プロジェクトに実際に入れていく道筋を扱います。</p>
+
+</div>
+</body>
+</html>
