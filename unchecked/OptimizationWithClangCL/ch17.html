@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第17章 Full LTO を有効にする — Clang最適化入門</title>
+<style>
+:root{
+  --ink:#1b1d21; --sub:#5c626b; --line:#dfe3e8; --bg:#fff;
+  --code-bg:#f5f7f9; --code-ink:#22262b; --accent:#2f5d8a;
+  --note-bg:#eef4fa; --note-line:#4a80b5;
+  --warn-bg:#fdf4ec; --warn-line:#c07830;
+  --tip-bg:#eef7f1; --tip-line:#4a8c5f;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Meiryo",system-ui,sans-serif;
+  font-size:16px; line-height:1.9; text-align:justify;
+}
+.book{max-width:46rem; margin:0 auto; padding:3rem 1.25rem 6rem}
+.chapno{font-size:.82rem; letter-spacing:.18em; color:var(--accent); font-weight:700; margin:0 0 .4rem}
+h1{font-size:1.85rem; line-height:1.45; margin:0 0 .6rem; letter-spacing:.01em}
+.lead{color:var(--sub); font-size:1.02rem; margin:0 0 2.5rem; padding-bottom:2rem; border-bottom:2px solid var(--line)}
+h2{font-size:1.32rem; margin:3.2rem 0 1rem; padding-bottom:.45rem; border-bottom:1px solid var(--line); letter-spacing:.01em}
+h3{font-size:1.08rem; margin:2.2rem 0 .7rem; color:#2c3239}
+h4{font-size:.98rem; margin:1.6rem 0 .5rem; color:#3a4048}
+p{margin:0 0 1.1rem}
+ul,ol{margin:0 0 1.2rem; padding-left:1.5rem}
+li{margin:.4rem 0}
+code{
+  font-family:"Cascadia Mono","Consolas","SF Mono",monospace;
+  font-size:.88em; background:var(--code-bg); padding:.12em .38em;
+  border-radius:3px; border:1px solid var(--line); word-break:break-all;
+}
+pre{
+  background:var(--code-bg); color:var(--code-ink); border:1px solid var(--line);
+  border-left:3px solid var(--accent); border-radius:4px;
+  padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.6;
+}
+pre code{background:none; border:none; padding:0; font-size:.85rem; word-break:normal}
+.cap{font-size:.83rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+.box{border-radius:4px; padding:.95rem 1.15rem; margin:1.6rem 0; font-size:.95rem}
+.box p:last-child{margin-bottom:0}
+.box .t{font-weight:700; font-size:.86rem; letter-spacing:.06em; display:block; margin-bottom:.4rem}
+.note{background:var(--note-bg); border-left:4px solid var(--note-line)}
+.note .t{color:var(--note-line)}
+.warn{background:var(--warn-bg); border-left:4px solid var(--warn-line)}
+.warn .t{color:var(--warn-line)}
+.tip{background:var(--tip-bg); border-left:4px solid var(--tip-line)}
+.tip .t{color:var(--tip-line)}
+table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+th{background:var(--code-bg); font-weight:700}
+figure{margin:2rem 0}
+figure svg{display:block; width:100%; height:auto}
+figcaption{font-size:.83rem; color:var(--sub); text-align:center; margin-top:.7rem}
+.goal{border:1px solid var(--line); border-top:3px solid var(--accent); border-radius:4px; padding:1.1rem 1.3rem; margin:0 0 2.4rem; background:#fbfcfd}
+.goal h2{margin:0 0 .6rem; font-size:1rem; border:none; padding:0; letter-spacing:.06em}
+.goal ul{margin-bottom:0}
+.next{margin-top:3.5rem; padding-top:1.4rem; border-top:2px solid var(--line); color:var(--sub); font-size:.95rem}
+.next strong{color:var(--ink)}
+.chk{list-style:none; padding-left:0}
+.chk li{padding-left:1.7rem; position:relative}
+.chk li::before{content:"\2610"; position:absolute; left:.2rem; color:var(--accent); font-size:1.05rem}
+.path{font-size:.93rem; color:var(--sub); background:var(--code-bg); border:1px solid var(--line); border-radius:3px; padding:.5rem .8rem; margin:0 0 1.2rem}
+.partend{margin-top:3rem; padding:1.2rem 1.4rem; border:2px solid var(--accent); border-radius:5px; background:#fbfcfd}
+.partend h3{margin-top:0; color:var(--accent)}
+.real{border-left-color:var(--tip-line)}
+@media (prefers-color-scheme:dark){
+  :root{
+    --ink:#e6e8ea; --sub:#a2a9b2; --line:#333940; --bg:#16181b;
+    --code-bg:#1e2126; --code-ink:#dfe3e8; --accent:#7fb0dd;
+    --note-bg:#1b2530; --note-line:#5f96c9;
+    --warn-bg:#2b2118; --warn-line:#d09154;
+    --tip-bg:#182619; --tip-line:#6aad7d;
+  }
+  h3{color:#d5d9dd} h4{color:#c3c9cf}
+  .goal,.partend{background:#1a1d21}
+}
+</style>
+</head>
+<body>
+<div class="book">
+
+<p class="chapno">第 17 章</p>
+<h1>Full LTO を有効にする<br>— <code>-flto</code> と lld-link への切り替え</h1>
+<p class="lead">設定そのものはオプション一つです。しかし「設定したつもりで効いていない」という状態が起きやすいところでもあります。確認の手順をセットで身につけます。</p>
+
+<div class="goal">
+<h2>この章のゴール</h2>
+<ul>
+<li>LogLab で Full LTO を有効にする</li>
+<li><code>.obj</code> がビットコードになったことを確認する</li>
+<li>最小構成で <code>call</code> が消えるところを見る</li>
+<li>リンク時の最適化レベルを制御する方法を知る</li>
+</ul>
+</div>
+
+<h2>17.1 オプション</h2>
+
+<p class="path"><strong>構成プロパティ &gt; C/C++ &gt; コマンド ライン &gt; 追加のオプション</strong></p>
+
+<pre><code>/clang:-flto</code></pre>
+
+<p>第 6 章で決めた方針どおり、Clang 形式のオプションには <code>/clang:</code> を付けます。<code>-flto</code> は <code>/clang:</code> 無しでも通りますが、統一しておくほうが安全です。</p>
+
+<div class="box warn">
+<span class="t">すべての構成に設定してください</span>
+<p>第 3 章で確認したとおり、プロパティページの左上を「すべての構成／すべてのプラットフォーム」にしてから編集します。ただし LTO は Debug 構成では意味がありません（<code>/Od</code> なので最適化しない）。実務では Release 構成だけに設定するのが普通です。本書でも Release だけで構いません。</p>
+</div>
+
+<h2>17.2 リンカ側の確認</h2>
+
+<p>コンパイラ側の設定は不要ですが、リンカが <code>lld-link</code> であることを確認してください。第 3 章 3.6 節の内容です。</p>
+
+<pre><code>&lt;!-- Directory.Build.props または .vcxproj --&gt;
+&lt;PropertyGroup&gt;
+  &lt;UseLldLink&gt;true&lt;/UseLldLink&gt;   &lt;!-- ClangCL の既定値。念のため確認 --&gt;
+&lt;/PropertyGroup&gt;</code></pre>
+
+<p>ビルドログ（第 3 章 3.5.2 節）で <code>lld-link.exe</code> が起動されていることを目で見て確認するのが確実です。</p>
+
+<h2>17.3 <code>.obj</code> を確認する</h2>
+
+<p>ビルドしたら、<code>x64\Release\</code> の <code>.obj</code> を調べます。</p>
+
+<pre><code>llvm-readobj --file-headers x64\Release\tokenizer.obj</code></pre>
+
+<p>次のように出れば、LTO が効いています。</p>
+
+<pre><code>llvm-readobj: warning: 'tokenizer.obj': bitcode files are not supported</code></pre>
+
+<p>逆に COFF のヘッダが表示されたら、<code>-flto</code> が渡っていません。<strong>追加のオプション欄のタイプミス</strong>か、<strong>設定した構成が違う</strong>かのどちらかです。第 6 章で扱ったとおり、clang-cl は理解できないオプションを警告だけ出して無視するので、静かに失敗します。</p>
+
+<div class="box tip">
+<span class="t">サイズでも見分けられます</span>
+<p>ビットコードの <code>.obj</code> は、同じソースの COFF 版とサイズが大きく異なります。「リビルドしたら <code>.obj</code> のサイズが一斉に変わった」のも、LTO が効いた合図です。</p>
+</div>
+
+<h2>17.4 最小構成で効果を見る</h2>
+
+<p>LogLab はファイルが多いので、まずは 2 ファイルの最小例で確かめましょう。第 16 章の <code>scale</code> の例をそのまま使います。</p>
+
+<pre><code>:: lib.cpp / app.cpp を用意して
+
+:: (A) LTO なし
+clang-cl /c /O2 app.cpp lib.cpp
+lld-link app.obj lib.obj /out:nolto.exe ...
+
+:: (B) Full LTO
+clang-cl /c /O2 /clang:-flto app.cpp lib.cpp
+lld-link app.obj lib.obj /out:lto.exe ...</code></pre>
+
+<p>それぞれの <code>call</code> 命令を数えます。</p>
+
+<pre><code>llvm-objdump -d --no-show-raw-insn nolto.exe | findstr /C:"call" | find /c /v ""
+llvm-objdump -d --no-show-raw-insn lto.exe   | findstr /C:"call" | find /c /v ""</code></pre>
+
+<table>
+<thead><tr><th>ビルド</th><th><code>call</code> 命令の数</th></tr></thead>
+<tbody>
+<tr><td>LTO なし</td><td><strong>1</strong>（<code>scale</code> への呼び出し）</td></tr>
+<tr><td>Full LTO</td><td><strong>0</strong></td></tr>
+</tbody>
+</table>
+
+<p>呼び出しが消えました。<code>scale</code> は <code>mainCRTStartup</code> にインライン展開され、<code>clamp = false</code> が定数として伝播し、<code>if</code> の中身が削除されています。第 11 章で「インライン化は最適化の入り口」と書いた、その連鎖が翻訳単位をまたいで起きたということです。</p>
+
+<h2>17.5 LogLab をビルドする</h2>
+
+<p>本番の題材でもやってみます。手順は同じです。</p>
+
+<ol>
+<li>追加のオプションに <code>/clang:-flto</code> を書く</li>
+<li>Release / x64 でリビルドする</li>
+<li>実行して <strong>checksum が <code>0x0e8685105a08f105</code> のまま</strong>であることを確認する</li>
+<li><code>accepted</code> が <code>4941900</code> のままであることを確認する</li>
+</ol>
+
+<div class="box warn">
+<span class="t">チェックサムが変わったら止まってください</span>
+<p>LTO はプログラムの意味を変えない最適化です。結果が変わったということは、どこかに未定義動作があり、それが LTO によって顕在化した可能性が高い。第 23 章でこの問題を扱いますが、その状態で性能を測っても意味がありません。<strong>まず正しさ、次に速度です。</strong></p>
+</div>
+
+<h2>17.6 リンク時の最適化レベル</h2>
+
+<p>LTO では最適化がリンク時に行われるため、リンカ側にも最適化レベルの指定があります。</p>
+
+<table>
+<thead><tr><th>オプション</th><th>意味</th></tr></thead>
+<tbody>
+<tr><td><code>/opt:lldlto=0</code>〜<code>3</code></td><td>リンク時の最適化レベル。既定は <code>2</code></td></tr>
+<tr><td><code>/opt:lldltopartitions=&lt;N&gt;</code></td><td>Full LTO のコード生成を N 分割して並列化する</td></tr>
+<tr><td><code>/mllvm:&lt;opt&gt;</code></td><td>リンク時の LLVM に内部オプションを渡す（第 6 章の <code>-mllvm</code> のリンカ版）</td></tr>
+</tbody>
+</table>
+
+<p class="path"><strong>構成プロパティ &gt; リンカー &gt; コマンド ライン &gt; 追加のオプション</strong></p>
+
+<pre><code>/opt:lldlto=3</code></pre>
+
+<p><code>/opt:lldltopartitions</code> は、Full LTO の弱点であるコード生成の直列性を緩和するためのものです。統合されたモジュールを N 個に分けて並列に機械語へ落とします。分割すると分割境界をまたぐ最適化ができなくなるので、速度と最適化の深さのトレードオフになります。</p>
+
+<div class="box note">
+<span class="t">コンパイル時の <code>-O</code> はどうなるのか</span>
+<p><code>/O2</code> は依然として必要です。コンパイル時の <code>-O</code> レベルは、IR を生成する前段の処理と、LTO のパイプライン構成に影響します。<code>/Od</code> のまま <code>-flto</code> を付けても、期待した結果にはなりません。<strong><code>/O2</code> と <code>/clang:-flto</code> は併用します。</strong></p>
+</div>
+
+<h2>17.7 よくある失敗</h2>
+
+<h4>リンクエラーになる</h4>
+<p>まずリンカを確認してください。ビルドログに <code>link.exe</code> が出ていれば、それが原因です。<code>UseLldLink</code> が <code>false</code> になっていないか、<code>LinkToolExe</code> が上書きされていないかを見ます。</p>
+
+<h4>一部の <code>.obj</code> だけビットコードになっている</h4>
+<p>これは問題ありません。<strong>ビットコードとネイティブの <code>.obj</code> は混在できます。</strong> ビットコードのものだけが LTO の対象になり、ネイティブのものはそのままリンクされます。ただし、混ざっている部分では翻訳単位の壁が残ります。詳しくは第 22 章で扱います。</p>
+
+<h4>ビルドが極端に遅くなった</h4>
+<p>Full LTO では正常な挙動です。リンク時にプログラム全体の最適化を行うため、リンクだけで数十秒から数分かかることがあります。第 19 章の ThinLTO で改善します。</p>
+
+<h4>リンク時にメモリを使い果たす</h4>
+<p>Full LTO は全ビットコードを一つのモジュールに統合するため、大規模プロジェクトではメモリが足りなくなります。これも ThinLTO で解決すべき問題です。</p>
+
+<h4><code>__declspec(dllexport)</code> した関数が最適化されない</h4>
+<p>エクスポートされた関数は、外部から呼ばれる可能性があるため削除もインライン化専用の内部化もできません。第 22 章で扱います。</p>
+
+<h2>17.8 ハンズオン</h2>
+
+<ol>
+<li>LogLab の追加のオプションに <code>/clang:-flto</code> を設定してリビルドする</li>
+<li><code>llvm-readobj --file-headers</code> で <code>.obj</code> がビットコードになったことを確認する</li>
+<li>ビルドログで <code>lld-link.exe</code> が使われていることを確認する</li>
+<li>実行して checksum と accepted が変わっていないことを確認する</li>
+<li>ビルド（特にリンク）にかかった時間を記録する</li>
+<li><strong>この <code>.exe</code> を <code>lto_full\</code> のようなフォルダに退避しておく</strong>（第 20 章で比較します）</li>
+</ol>
+
+<div class="box tip">
+<span class="t">ビルドを使い分ける準備</span>
+<p>これから <code>/O2</code> のみ、Full LTO、ThinLTO、そして第 5 部では PGO 版と、複数のビルドを比較していきます。毎回設定を変えてリビルドするより、できた <code>.exe</code> と <code>.pdb</code> を名前を付けたフォルダにコピーしていくほうが実用的です。第 15 章の <code>bench.py</code> は 2 つの実行ファイルを引数に取るので、その形に合わせておきます。</p>
+<pre><code>builds\
+  baseline\  ClangOptLab.exe  ClangOptLab.pdb
+  lto_full\  ClangOptLab.exe  ClangOptLab.pdb
+  lto_thin\  ...</code></pre>
+</div>
+
+<h2>17.9 まとめ</h2>
+
+<ul>
+<li>Full LTO は <code>/clang:-flto</code> を追加のオプションに書くだけ。<code>/O2</code> は併用する</li>
+<li>効いたかどうかは <code>llvm-readobj</code> が <code>bitcode files are not supported</code> と言うかで確認する</li>
+<li>リンカが <code>lld-link</code> であることをビルドログで確認する</li>
+<li>最小構成では、翻訳単位をまたぐ <code>call</code> が <strong>1 → 0</strong> になった</li>
+<li><strong>checksum が変わっていないこと</strong>を必ず確認する。変わったら性能を測る前に原因を追う</li>
+<li>リンク時の最適化レベルは <code>/opt:lldlto=&lt;N&gt;</code>、並列化は <code>/opt:lldltopartitions=&lt;N&gt;</code></li>
+<li>ビルドが遅い・メモリを食うのは Full LTO の宿命。ThinLTO で解決する</li>
+</ul>
+
+<p class="next"><strong>次章では</strong>、その ThinLTO の仕組みを見ます。「全部を統合する」のをやめて、代わりに何をしているのか。サマリインデックスという考え方を理解すると、ThinLTO が Full LTO より効果が小さくなる理由も、リンクが速い理由も、同じ一つの設計から説明できるようになります。</p>
+
+</div>
+</body>
+</html>

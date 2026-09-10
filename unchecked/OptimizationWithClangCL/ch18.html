@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第18章 ThinLTO の仕組み — Clang最適化入門</title>
+<style>
+:root{
+  --ink:#1b1d21; --sub:#5c626b; --line:#dfe3e8; --bg:#fff;
+  --code-bg:#f5f7f9; --code-ink:#22262b; --accent:#2f5d8a;
+  --note-bg:#eef4fa; --note-line:#4a80b5;
+  --warn-bg:#fdf4ec; --warn-line:#c07830;
+  --tip-bg:#eef7f1; --tip-line:#4a8c5f;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Meiryo",system-ui,sans-serif;
+  font-size:16px; line-height:1.9; text-align:justify;
+}
+.book{max-width:46rem; margin:0 auto; padding:3rem 1.25rem 6rem}
+.chapno{font-size:.82rem; letter-spacing:.18em; color:var(--accent); font-weight:700; margin:0 0 .4rem}
+h1{font-size:1.85rem; line-height:1.45; margin:0 0 .6rem; letter-spacing:.01em}
+.lead{color:var(--sub); font-size:1.02rem; margin:0 0 2.5rem; padding-bottom:2rem; border-bottom:2px solid var(--line)}
+h2{font-size:1.32rem; margin:3.2rem 0 1rem; padding-bottom:.45rem; border-bottom:1px solid var(--line); letter-spacing:.01em}
+h3{font-size:1.08rem; margin:2.2rem 0 .7rem; color:#2c3239}
+h4{font-size:.98rem; margin:1.6rem 0 .5rem; color:#3a4048}
+p{margin:0 0 1.1rem}
+ul,ol{margin:0 0 1.2rem; padding-left:1.5rem}
+li{margin:.4rem 0}
+code{
+  font-family:"Cascadia Mono","Consolas","SF Mono",monospace;
+  font-size:.88em; background:var(--code-bg); padding:.12em .38em;
+  border-radius:3px; border:1px solid var(--line); word-break:break-all;
+}
+pre{
+  background:var(--code-bg); color:var(--code-ink); border:1px solid var(--line);
+  border-left:3px solid var(--accent); border-radius:4px;
+  padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.6;
+}
+pre code{background:none; border:none; padding:0; font-size:.85rem; word-break:normal}
+.cap{font-size:.83rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+.box{border-radius:4px; padding:.95rem 1.15rem; margin:1.6rem 0; font-size:.95rem}
+.box p:last-child{margin-bottom:0}
+.box .t{font-weight:700; font-size:.86rem; letter-spacing:.06em; display:block; margin-bottom:.4rem}
+.note{background:var(--note-bg); border-left:4px solid var(--note-line)}
+.note .t{color:var(--note-line)}
+.warn{background:var(--warn-bg); border-left:4px solid var(--warn-line)}
+.warn .t{color:var(--warn-line)}
+.tip{background:var(--tip-bg); border-left:4px solid var(--tip-line)}
+.tip .t{color:var(--tip-line)}
+table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+th{background:var(--code-bg); font-weight:700}
+figure{margin:2rem 0}
+figure svg{display:block; width:100%; height:auto}
+figcaption{font-size:.83rem; color:var(--sub); text-align:center; margin-top:.7rem}
+.goal{border:1px solid var(--line); border-top:3px solid var(--accent); border-radius:4px; padding:1.1rem 1.3rem; margin:0 0 2.4rem; background:#fbfcfd}
+.goal h2{margin:0 0 .6rem; font-size:1rem; border:none; padding:0; letter-spacing:.06em}
+.goal ul{margin-bottom:0}
+.next{margin-top:3.5rem; padding-top:1.4rem; border-top:2px solid var(--line); color:var(--sub); font-size:.95rem}
+.next strong{color:var(--ink)}
+.chk{list-style:none; padding-left:0}
+.chk li{padding-left:1.7rem; position:relative}
+.chk li::before{content:"\2610"; position:absolute; left:.2rem; color:var(--accent); font-size:1.05rem}
+.path{font-size:.93rem; color:var(--sub); background:var(--code-bg); border:1px solid var(--line); border-radius:3px; padding:.5rem .8rem; margin:0 0 1.2rem}
+.partend{margin-top:3rem; padding:1.2rem 1.4rem; border:2px solid var(--accent); border-radius:5px; background:#fbfcfd}
+.partend h3{margin-top:0; color:var(--accent)}
+.real{border-left-color:var(--tip-line)}
+@media (prefers-color-scheme:dark){
+  :root{
+    --ink:#e6e8ea; --sub:#a2a9b2; --line:#333940; --bg:#16181b;
+    --code-bg:#1e2126; --code-ink:#dfe3e8; --accent:#7fb0dd;
+    --note-bg:#1b2530; --note-line:#5f96c9;
+    --warn-bg:#2b2118; --warn-line:#d09154;
+    --tip-bg:#182619; --tip-line:#6aad7d;
+  }
+  h3{color:#d5d9dd} h4{color:#c3c9cf}
+  .goal,.partend{background:#1a1d21}
+}
+</style>
+</head>
+<body>
+<div class="book">
+
+<p class="chapno">第 18 章</p>
+<h1>ThinLTO の仕組み<br>— サマリインデックスと分散処理</h1>
+<p class="lead">Full LTO の弱点は明快です。全部を一つにまとめるので、遅くて重い。ThinLTO はその一点を設計で解きます。仕組みを理解すると、効果が Full LTO より小さくなる理由も同じ設計から説明できます。</p>
+
+<div class="goal">
+<h2>この章のゴール</h2>
+<ul>
+<li>Full LTO がなぜ重いのかを理解する</li>
+<li>サマリインデックスという考え方を知る</li>
+<li>ThinLTO が何を諦めているのかを理解する</li>
+<li>実測で Full LTO との差を確認する</li>
+</ul>
+</div>
+
+<h2>18.1 Full LTO の限界</h2>
+
+<p>Full LTO のリンク工程は、おおまかに次のようになっています。</p>
+
+<ol>
+<li>すべての <code>.obj</code> からビットコードを読む</li>
+<li>それらを<strong>一つの巨大な LLVM モジュールに統合する</strong></li>
+<li>そのモジュール全体に最適化パイプラインを走らせる</li>
+<li>機械語を生成する</li>
+</ol>
+
+<p>手順 2 が問題です。100 万行のプロジェクトなら、100 万行ぶんの IR が一つのモジュールになり、それが丸ごとメモリに載ります。手順 3 も、一つのモジュールに対する処理なので<strong>並列化しにくい</strong>。コアが 32 個あっても、ほとんどが遊びます。</p>
+
+<p>大規模プロジェクトでは、リンクに数十分かかる、メモリを数十 GB 使う、最悪リンカが落ちる——といった事態になります。</p>
+
+<h2>18.2 ThinLTO の設計</h2>
+
+<p>ThinLTO の発想は、「統合するのをやめて、<strong>必要なものだけを取り寄せる</strong>」です。</p>
+
+<p>そのために、コンパイル時に各モジュールの<strong>サマリ（要約）</strong>を作ります。サマリには、そのモジュールが何を持っていて、どれくらいの大きさで、誰を呼んでいるか——といった、インポートの判断に必要な情報だけが入っています。関数の本体は入っていません。</p>
+
+<figure>
+<svg viewBox="0 0 720 340" role="img" aria-label="ThinLTO の三段階。コンパイル時のサマリ生成、リンク時のグローバル解析、並列なバックエンド処理">
+  <defs>
+    <marker id="a18" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
+      <path d="M0,0 L9,4.5 L0,9 z" fill="#5c626b"/>
+    </marker>
+  </defs>
+
+  <text x="20" y="24" font-size="12.5" font-weight="700" fill="#2f5d8a" font-family="sans-serif">ThinLTO の三段階</text>
+
+  <!-- stage 1 -->
+  <rect x="20" y="40" width="200" height="120" rx="4" fill="#f5f7f9" stroke="#dfe3e8"/>
+  <text x="120" y="62" font-size="11.5" text-anchor="middle" font-weight="700" font-family="sans-serif" fill="#1b1d21">① コンパイル（並列）</text>
+  <rect x="36" y="76" width="80" height="30" rx="3" fill="#fdf4ec" stroke="#c07830"/>
+  <text x="76" y="95" font-size="9.5" text-anchor="middle" font-family="monospace" fill="#1b1d21">IR + サマリ</text>
+  <rect x="124" y="76" width="80" height="30" rx="3" fill="#fdf4ec" stroke="#c07830"/>
+  <text x="164" y="95" font-size="9.5" text-anchor="middle" font-family="monospace" fill="#1b1d21">IR + サマリ</text>
+  <rect x="36" y="114" width="80" height="30" rx="3" fill="#fdf4ec" stroke="#c07830"/>
+  <text x="76" y="133" font-size="9.5" text-anchor="middle" font-family="monospace" fill="#1b1d21">IR + サマリ</text>
+  <rect x="124" y="114" width="80" height="30" rx="3" fill="#fdf4ec" stroke="#c07830"/>
+  <text x="164" y="133" font-size="9.5" text-anchor="middle" font-family="monospace" fill="#1b1d21">IR + サマリ</text>
+
+  <!-- stage 2 -->
+  <rect x="256" y="60" width="188" height="80" rx="4" fill="#eef4fa" stroke="#4a80b5"/>
+  <text x="350" y="84" font-size="11.5" text-anchor="middle" font-weight="700" font-family="sans-serif" fill="#1b1d21">② グローバル解析</text>
+  <text x="350" y="104" font-size="10" text-anchor="middle" font-family="sans-serif" fill="#5c626b">サマリだけを集めて</text>
+  <text x="350" y="122" font-size="10" text-anchor="middle" font-family="sans-serif" fill="#5c626b">「誰が誰を取り込むか」を決める</text>
+
+  <!-- stage 3 -->
+  <rect x="480" y="40" width="220" height="120" rx="4" fill="#eef7f1" stroke="#4a8c5f"/>
+  <text x="590" y="62" font-size="11.5" text-anchor="middle" font-weight="700" font-family="sans-serif" fill="#1b1d21">③ バックエンド（並列）</text>
+  <rect x="496" y="76" width="88" height="30" rx="3" fill="#fff" stroke="#4a8c5f"/>
+  <text x="540" y="95" font-size="9.5" text-anchor="middle" font-family="sans-serif" fill="#1b1d21">最適化→機械語</text>
+  <rect x="592" y="76" width="88" height="30" rx="3" fill="#fff" stroke="#4a8c5f"/>
+  <text x="636" y="95" font-size="9.5" text-anchor="middle" font-family="sans-serif" fill="#1b1d21">最適化→機械語</text>
+  <rect x="496" y="114" width="88" height="30" rx="3" fill="#fff" stroke="#4a8c5f"/>
+  <text x="540" y="133" font-size="9.5" text-anchor="middle" font-family="sans-serif" fill="#1b1d21">最適化→機械語</text>
+  <rect x="592" y="114" width="88" height="30" rx="3" fill="#fff" stroke="#4a8c5f"/>
+  <text x="636" y="133" font-size="9.5" text-anchor="middle" font-family="sans-serif" fill="#1b1d21">最適化→機械語</text>
+
+  <line x1="224" y1="100" x2="252" y2="100" stroke="#5c626b" stroke-width="1.4" marker-end="url(#a18)"/>
+  <line x1="448" y1="100" x2="476" y2="100" stroke="#5c626b" stroke-width="1.4" marker-end="url(#a18)"/>
+
+  <rect x="20" y="184" width="680" height="60" rx="4" fill="#eef4fa" stroke="#4a80b5"/>
+  <text x="38" y="207" font-size="11.5" font-weight="700" fill="#4a80b5" font-family="sans-serif">要点</text>
+  <text x="38" y="228" font-size="11" fill="#5c626b" font-family="sans-serif">巨大な統合モジュールを作らない。①と③はモジュール単位なので並列に処理でき、キャッシュも効く。</text>
+
+  <rect x="20" y="258" width="680" height="66" rx="4" fill="#fdf4ec" stroke="#c07830"/>
+  <text x="38" y="281" font-size="11.5" font-weight="700" fill="#c07830" font-family="sans-serif">代償</text>
+  <text x="38" y="302" font-size="11" fill="#5c626b" font-family="sans-serif">③ の各モジュールが見えるのは「自分＋取り込んだもの」だけ。Full LTO のようにプログラム全体を</text>
+  <text x="38" y="318" font-size="11" fill="#5c626b" font-family="sans-serif">一望した最適化はできない。取り込む量を増やせば効果は上がるが、その分だけ重くなる。</text>
+</svg>
+<figcaption>図 18-1　ThinLTO の三段階</figcaption>
+</figure>
+
+<h3>18.2.1 サマリに入っているもの</h3>
+
+<table>
+<thead><tr><th>情報</th><th>何に使うか</th></tr></thead>
+<tbody>
+<tr><td>定義しているシンボルの一覧</td><td>どのモジュールが何を持っているかの索引</td></tr>
+<tr><td>各関数の命令数などの規模</td><td>取り込む価値があるかの判断</td></tr>
+<tr><td>呼び出し関係（コールグラフ）</td><td>どこから呼ばれているか</td></tr>
+<tr><td>参照している他のシンボル</td><td>取り込むときに芋づる式に必要になるもの</td></tr>
+<tr><td>型情報（仮想関数テーブル関連）</td><td>デバーチャライズの判断（第 21 章）</td></tr>
+</tbody>
+</table>
+
+<p>サマリは本体に比べて格段に小さいので、全モジュールぶん集めてもメモリを圧迫しません。<strong>「全体を見る」のはサマリだけ、「本体を扱う」のはモジュール単位。</strong> これが ThinLTO の核心です。</p>
+
+<h2>18.3 何を諦めているのか</h2>
+
+<p>③ のバックエンド処理において、各モジュールが見ているのは「自分自身＋グローバル解析が取り込むと決めたもの」だけです。プログラム全体ではありません。</p>
+
+<p>その結果、次のような違いが出ます。</p>
+
+<ul>
+<li>取り込まれなかった関数はインライン化できない</li>
+<li>プログラム全体を見渡す必要がある解析は、サマリで表現できる範囲に限られる</li>
+<li>取り込みの判断は「サマリから見た見積もり」であり、本体を見た上での判断ではない</li>
+</ul>
+
+<h2>18.4 実測 — Full と Thin で何が違ったか</h2>
+
+<p>LogLab をそれぞれの方式でビルドし、<strong>リンク時にインライン化された関数</strong>を比較しました。取り方は次章と第 20 章で扱いますが、結果を先に見ておきます。</p>
+
+<table>
+<thead><tr><th>方式</th><th>リンク時にインライン化された関数</th></tr></thead>
+<tbody>
+<tr><td rowspan="5">Full LTO</td><td><code>loglab::generate_lines</code> → <code>main</code></td></tr>
+<tr><td><strong><code>loglab::parse_line</code> → <code>main</code></strong></td></tr>
+<tr><td><code>loglab::make_filters</code> → <code>main</code></td></tr>
+<tr><td><code>loglab::Stats::add</code> → <code>main</code></td></tr>
+<tr><td><code>loglab::Stats::report</code> → <code>main</code></td></tr>
+<tr><td rowspan="2">ThinLTO</td><td><code>loglab::Stats::add</code> → <code>main</code></td></tr>
+<tr><td><code>loglab::Stats::report</code> → <code>main</code></td></tr>
+</tbody>
+</table>
+
+<p>Full LTO が 5 つ、ThinLTO が 2 つ。<strong>ThinLTO では <code>parse_line</code> がインライン化されていません。</strong> グローバル解析の段階で「<code>main</code> のモジュールに <code>parse_line</code> を取り込む」という判断がされなかったためです。</p>
+
+<p>機械語の側でも一致します。<code>loglab</code> 名前空間の関数への <code>call</code> 命令を数えると、次のようになりました。</p>
+
+<table>
+<thead><tr><th>ビルド</th><th><code>loglab::</code> への <code>call</code></th><th>全 <code>call</code> 命令</th><th><code>.text</code> サイズ</th></tr></thead>
+<tbody>
+<tr><td>LTO なし</td><td>12</td><td>100</td><td>8,103 B</td></tr>
+<tr><td>ThinLTO</td><td>10</td><td>99</td><td>8,087 B</td></tr>
+<tr><td>Full LTO</td><td><strong>6</strong></td><td>84</td><td>7,911 B</td></tr>
+</tbody>
+</table>
+<p class="cap">実測の一例。LogLab は 5 翻訳単位の小さなプログラムです</p>
+
+<div class="box note">
+<span class="t">小さいプロジェクトでは Full LTO が有利です</span>
+<p>LogLab は 5 ファイルしかないので、Full LTO の「全部統合する」やり方でも一瞬で終わります。重さという弱点が現れない規模では、深さという長所だけが残ります。</p>
+<p><strong>ThinLTO の価値は、プロジェクトが大きくなったときに初めて出ます。</strong> 数百・数千の翻訳単位になると Full LTO は現実的でなくなり、そこで「多少浅くても回る」ThinLTO が唯一の選択肢になります。本書の題材で ThinLTO の効果が小さく見えても、それは題材の性質だと理解してください。</p>
+</div>
+
+<h2>18.5 インポートの量を増やす</h2>
+
+<p>ThinLTO の効果が足りないとき、取り込む量を増やす調整ができます。これらは <code>-mllvm</code> 系の内部オプションなので、第 6 章で述べたとおり互換性の保証はありません。</p>
+
+<table>
+<thead><tr><th>オプション（リンカ側）</th><th>意味</th></tr></thead>
+<tbody>
+<tr><td><code>/mllvm:-import-instr-limit=&lt;N&gt;</code></td><td>取り込む関数の命令数の上限。上げると取り込みが増える</td></tr>
+<tr><td><code>/mllvm:-import-hot-multiplier=&lt;N&gt;</code></td><td>ホットな呼び出し先の上限を何倍にするか。<strong>PGO と併用したとき</strong>に効く</td></tr>
+</tbody>
+</table>
+
+<div class="box tip">
+<span class="t">二つ目に注目してください</span>
+<p>「ホットな呼び出し先は多めに取り込む」という判断は、プロファイルがあって初めて可能になります。<strong>ThinLTO は PGO と組み合わせたときに、取り込みの精度が上がる</strong>のです。第 38 章で LTO と PGO を組み合わせるとき、この点に戻ってきます。</p>
+</div>
+
+<h2>18.6 分散ビルドへの発展</h2>
+
+<p>ThinLTO の設計には、もう一つ大きな利点があります。③ のバックエンド処理がモジュール単位で独立しているため、<strong>複数のマシンに分散できる</strong>のです。</p>
+
+<p>lld-link には、そのための仕組みが用意されています。</p>
+
+<table>
+<thead><tr><th>オプション</th><th>用途</th></tr></thead>
+<tbody>
+<tr><td><code>/thinlto-index-only</code></td><td>リンクせず、グローバル解析の結果（インデックス）だけを出力する</td></tr>
+<tr><td><code>/thinlto-emit-imports-files</code></td><td>各モジュールが何を取り込むかを <code>.imports</code> ファイルに出す</td></tr>
+<tr><td><code>/thinlto-prefix-replace:'old;new'</code></td><td>出力先のパスを置き換える（ビルドファーム向け）</td></tr>
+<tr><td><code>/thinlto-object-suffix-replace:'old;new'</code></td><td>同上、拡張子の置き換え</td></tr>
+</tbody>
+</table>
+
+<p>これらを使うと、「解析だけを 1 台で行い、その結果を配って各マシンで並列にコード生成し、最後に集めてリンクする」という流れが組めます。大規模なビルドファームを持つ組織向けの機能で、本書では扱いませんが、ThinLTO がそこまで見据えた設計であることは知っておく価値があります。</p>
+
+<h2>18.7 まとめ</h2>
+
+<ul>
+<li>Full LTO は全ビットコードを<strong>一つのモジュールに統合</strong>する。深いが、重く、並列化しにくい</li>
+<li>ThinLTO は<strong>サマリ</strong>だけを集めてグローバル解析を行い、必要なものだけを取り込んで並列に処理する</li>
+<li>サマリにはシンボル・規模・コールグラフ・型情報が入る。本体は入らない</li>
+<li>代償は最適化の深さ。実測では Full LTO が 5 関数、ThinLTO が 2 関数をリンク時にインライン化した</li>
+<li>LogLab のような小規模プロジェクトでは Full LTO が有利。<strong>ThinLTO の価値は規模が大きくなってから出る</strong></li>
+<li>取り込み量は <code>-import-instr-limit</code> で調整できる。<strong>PGO があると取り込みの精度が上がる</strong></li>
+<li>ThinLTO のバックエンドは独立しているため、分散ビルドに拡張できる</li>
+</ul>
+
+<p class="next"><strong>次章では</strong>、ThinLTO を実際に有効にします。並列度の指定、そして ThinLTO 最大の実用的利点であるキャッシュの設定を扱います。キャッシュが効くと、再リンクの時間が実測で 4 分の 1 になりました。</p>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第29章 llvm-profdata merge — Clang最適化入門</title>
+<style>
+:root{
+  --ink:#1b1d21; --sub:#5c626b; --line:#dfe3e8; --bg:#fff;
+  --code-bg:#f5f7f9; --code-ink:#22262b; --accent:#2f5d8a;
+  --note-bg:#eef4fa; --note-line:#4a80b5;
+  --warn-bg:#fdf4ec; --warn-line:#c07830;
+  --tip-bg:#eef7f1; --tip-line:#4a8c5f;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Meiryo",system-ui,sans-serif;
+  font-size:16px; line-height:1.9; text-align:justify;
+}
+.book{max-width:46rem; margin:0 auto; padding:3rem 1.25rem 6rem}
+.chapno{font-size:.82rem; letter-spacing:.18em; color:var(--accent); font-weight:700; margin:0 0 .4rem}
+h1{font-size:1.85rem; line-height:1.45; margin:0 0 .6rem; letter-spacing:.01em}
+.lead{color:var(--sub); font-size:1.02rem; margin:0 0 2.5rem; padding-bottom:2rem; border-bottom:2px solid var(--line)}
+h2{font-size:1.32rem; margin:3.2rem 0 1rem; padding-bottom:.45rem; border-bottom:1px solid var(--line); letter-spacing:.01em}
+h3{font-size:1.08rem; margin:2.2rem 0 .7rem; color:#2c3239}
+h4{font-size:.98rem; margin:1.6rem 0 .5rem; color:#3a4048}
+p{margin:0 0 1.1rem}
+ul,ol{margin:0 0 1.2rem; padding-left:1.5rem}
+li{margin:.4rem 0}
+code{
+  font-family:"Cascadia Mono","Consolas","SF Mono",monospace;
+  font-size:.88em; background:var(--code-bg); padding:.12em .38em;
+  border-radius:3px; border:1px solid var(--line); word-break:break-all;
+}
+pre{
+  background:var(--code-bg); color:var(--code-ink); border:1px solid var(--line);
+  border-left:3px solid var(--accent); border-radius:4px;
+  padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.6;
+}
+pre code{background:none; border:none; padding:0; font-size:.85rem; word-break:normal}
+.cap{font-size:.83rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+.box{border-radius:4px; padding:.95rem 1.15rem; margin:1.6rem 0; font-size:.95rem}
+.box p:last-child{margin-bottom:0}
+.box .t{font-weight:700; font-size:.86rem; letter-spacing:.06em; display:block; margin-bottom:.4rem}
+.note{background:var(--note-bg); border-left:4px solid var(--note-line)}
+.note .t{color:var(--note-line)}
+.warn{background:var(--warn-bg); border-left:4px solid var(--warn-line)}
+.warn .t{color:var(--warn-line)}
+.tip{background:var(--tip-bg); border-left:4px solid var(--tip-line)}
+.tip .t{color:var(--tip-line)}
+table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+th{background:var(--code-bg); font-weight:700}
+figure{margin:2rem 0}
+figure svg{display:block; width:100%; height:auto}
+figcaption{font-size:.83rem; color:var(--sub); text-align:center; margin-top:.7rem}
+.goal{border:1px solid var(--line); border-top:3px solid var(--accent); border-radius:4px; padding:1.1rem 1.3rem; margin:0 0 2.4rem; background:#fbfcfd}
+.goal h2{margin:0 0 .6rem; font-size:1rem; border:none; padding:0; letter-spacing:.06em}
+.goal ul{margin-bottom:0}
+.next{margin-top:3.5rem; padding-top:1.4rem; border-top:2px solid var(--line); color:var(--sub); font-size:.95rem}
+.next strong{color:var(--ink)}
+.chk{list-style:none; padding-left:0}
+.chk li{padding-left:1.7rem; position:relative}
+.chk li::before{content:"\2610"; position:absolute; left:.2rem; color:var(--accent); font-size:1.05rem}
+.path{font-size:.93rem; color:var(--sub); background:var(--code-bg); border:1px solid var(--line); border-radius:3px; padding:.5rem .8rem; margin:0 0 1.2rem}
+.partend{margin-top:3rem; padding:1.2rem 1.4rem; border:2px solid var(--accent); border-radius:5px; background:#fbfcfd}
+.partend h3{margin-top:0; color:var(--accent)}
+.real{border-left-color:var(--tip-line)}
+@media (prefers-color-scheme:dark){
+  :root{
+    --ink:#e6e8ea; --sub:#a2a9b2; --line:#333940; --bg:#16181b;
+    --code-bg:#1e2126; --code-ink:#dfe3e8; --accent:#7fb0dd;
+    --note-bg:#1b2530; --note-line:#5f96c9;
+    --warn-bg:#2b2118; --warn-line:#d09154;
+    --tip-bg:#182619; --tip-line:#6aad7d;
+  }
+  h3{color:#d5d9dd} h4{color:#c3c9cf}
+  .goal,.partend{background:#1a1d21}
+}
+</style>
+</head>
+<body>
+<div class="book">
+
+<p class="chapno">第 29 章</p>
+<h1><code>llvm-profdata merge</code><br>— 複数回の実行結果をまとめる</h1>
+<p class="lead"><code>.profraw</code> は、そのままではコンパイラに渡せません。<code>llvm-profdata merge</code> による変換が必ず一度は必要です。単なる形式変換に見えますが、複数のトレーニングを配合する機能もここにあります。</p>
+
+<div class="goal">
+<h2>この章のゴール</h2>
+<ul>
+<li><code>.profraw</code> と <code>.profdata</code> の違いを理解する</li>
+<li>複数のプロファイルをまとめる</li>
+<li>重み付けで配合を調整する</li>
+<li>テキスト形式で中身を覗く</li>
+</ul>
+</div>
+
+<h2>29.1 二つの形式</h2>
+
+<table>
+<thead><tr><th></th><th><code>.profraw</code></th><th><code>.profdata</code></th></tr></thead>
+<tbody>
+<tr><td>作るもの</td><td>計装されたプログラム（実行時）</td><td><code>llvm-profdata merge</code></td></tr>
+<tr><td>性質</td><td>実行時に効率よく書き出せる形式。生データ</td><td>コンパイラが読むためにインデックス化された形式</td></tr>
+<tr><td>個数</td><td>実行ごと・プロセスごとに複数</td><td>通常ひとつ</td></tr>
+<tr><td><code>-fprofile-use</code> に渡せるか</td><td>いいえ</td><td><strong>はい</strong></td></tr>
+</tbody>
+</table>
+
+<p>実行が一回だけでも、<code>merge</code> は必要です。「まとめる」だけでなく「変換する」コマンドでもあるからです。</p>
+
+<h2>29.2 基本形</h2>
+
+<pre><code>llvm-profdata merge -output=app.profdata prof\*.profraw</code></pre>
+
+<p>ワイルドカードで複数のファイルをまとめて渡せます。第 27 章で <code>%p</code> を使ってプロセスごとに分けたファイルが、ここで一つになります。</p>
+
+<p>サイズは次のようになりました。</p>
+
+<pre><code>prof\default_..._0.profraw    6,528 B
+app.profdata                  8,888 B</code></pre>
+
+<p>インデックスが付くぶん、少し大きくなります。</p>
+
+<h3>29.2.1 合計されることの確認</h3>
+
+<p>第 27 章でも見ましたが、改めて確認します。二回の実行を merge すると、カウンタは合計されます。</p>
+
+<pre><code>run-2191.profraw （50000 行 × 2 反復）    Maximum function count: 1300000
+run-2192.profraw （50000 行 × 4 反復）    Maximum function count: 2600000
+
+llvm-profdata merge -output=both.profdata run-*.profraw
+both.profdata                             Maximum function count: 3900000</code></pre>
+
+<h2>29.3 重み付け</h2>
+
+<p>単純な合計では困る場面があります。第 28 章で触れた「起動処理と定常処理のバランス」がそれです。</p>
+
+<p>起動中心のトレーニングを 1 回、定常中心のトレーニングを 1 回採って単純に合計すると、両者が同じ重みで扱われます。しかし実際の比重は違うはずです。</p>
+
+<pre><code>llvm-profdata merge -output=app.profdata ^
+    -weighted-input=10,steady.profraw ^
+    -weighted-input=1,startup.profraw</code></pre>
+
+<p><code>&lt;重み&gt;,&lt;ファイル名&gt;</code> という書式です。上の例では、定常処理のプロファイルを 10 倍に重み付けしています。</p>
+
+<p>実測で確認すると、重みがそのままカウンタに掛かることが分かります。</p>
+
+<pre><code>通常の merge                     Maximum function count: 52,000,000
+-weighted-input=10,... の場合    Maximum function count: 1,300,052,000</code></pre>
+
+<div class="box tip">
+<span class="t">重みの決め方</span>
+<p>厳密な理論はありません。「本番でこの局面が占める割合」を目安に決めます。起動が全体の 1% なら、定常を 100 倍にする——といった見当です。</p>
+<p>ただし、重みを付ける前に「そもそも分けて採る必要があるのか」を考えてください。第 28 章で書いたとおり、定常処理を十分に長く回せば起動は自然に薄まります。重み付けが必要になるのは、それができない事情があるときです。</p>
+</div>
+
+<h2>29.4 中身をテキストで見る</h2>
+
+<p><code>-text</code> を付けると、人間が読める形式で出力されます。</p>
+
+<pre><code>llvm-profdata merge -text -output=app.proftext app.profdata</code></pre>
+
+<p>中身はこうなっています。</p>
+
+<pre><code># IR level Instrumentation Flag
+:ir
+_ZN6loglab10parse_lineESt17basic_string_viewIcSt11char_traitsIcEERNS_6RecordE
+# Func Hash:
+547674798947670709
+# Num Counters:
+25
+# Counter Values:
+52000000
+52000000
+52000000
+4000000
+4000000
+4035880
+...</code></pre>
+
+<p>読み取れることを整理します。</p>
+
+<table>
+<thead><tr><th>行</th><th>意味</th></tr></thead>
+<tbody>
+<tr><td><code>:ir</code></td><td>IR レベル計装であることの印（第 25 章）</td></tr>
+<tr><td>関数名</td><td>マングル名。<code>llvm-undname</code> で戻せる</td></tr>
+<tr><td><strong><code># Func Hash</code></strong></td><td><strong>関数の制御フローから計算されたハッシュ。第 34 章の主役</strong></td></tr>
+<tr><td><code># Num Counters</code></td><td>この関数に埋め込まれたカウンタの数</td></tr>
+<tr><td><code># Counter Values</code></td><td>各カウンタが数えた回数</td></tr>
+</tbody>
+</table>
+
+<p><code>parse_line</code> の先頭三つのカウンタが <code>52000000</code> で揃っているのは、関数の入口と、必ず通る基本ブロックです。20 万行 × 10 反復 × ... と積み上がった数字が、そのまま記録されています。</p>
+
+<div class="box note">
+<span class="t">テキストからバイナリに戻せます</span>
+<p><code>-text</code> で出したファイルを、そのまま <code>merge</code> の入力にできます。</p>
+<pre><code>llvm-profdata merge -output=back.profdata app.proftext</code></pre>
+<p>プロファイルを手で編集して実験する、といったことも技術的には可能です。実務で使う場面は多くありませんが、「プロファイルとは結局こういうテキストだ」と理解しておくと、第 34 章の陳腐化の話が腑に落ちます。</p>
+</div>
+
+<h2>29.5 主なオプション</h2>
+
+<table>
+<thead><tr><th>オプション</th><th>意味</th></tr></thead>
+<tbody>
+<tr><td><code>-output=&lt;file&gt;</code></td><td>出力先（必須）</td></tr>
+<tr><td><code>-weighted-input=&lt;w&gt;,&lt;file&gt;</code></td><td>重み付きの入力</td></tr>
+<tr><td><code>-text</code> / <code>-binary</code></td><td>出力形式（既定は <code>-binary</code>）</td></tr>
+<tr><td><code>-sparse</code></td><td>カウントが 0 のエントリを省き、サイズを削る</td></tr>
+<tr><td><code>-num-threads=&lt;N&gt;</code></td><td>マージの並列度（既定は自動）</td></tr>
+<tr><td><code>-failure-mode=&lt;mode&gt;</code></td><td>壊れた入力があったときの挙動</td></tr>
+</tbody>
+</table>
+
+<div class="box tip">
+<span class="t"><code>-sparse</code> はいつ使うか</span>
+<p>大規模なプロジェクトでは <code>.profdata</code> が数十 MB になることがあります。<code>-sparse</code> を付けると、一度も実行されなかった関数のエントリが省かれてサイズが縮みます。プロファイルをバージョン管理に入れる場合（第 34 章）に効いてきます。</p>
+</div>
+
+<h2>29.6 バージョンの不一致</h2>
+
+<p>第 5 章で予告した話が、ここで実際に問題になります。</p>
+
+<p><code>.profraw</code> を<strong>書く</strong>のは計装ビルドに埋め込まれたプロファイルランタイム、<strong>読む</strong>のは <code>llvm-profdata</code>。この二つのバージョンが食い違うと失敗します。</p>
+
+<pre><code>error: xxx.profraw: unsupported instrumentation profile format version</code></pre>
+
+<p>典型的なのは、Visual Studio 同梱の <code>clang-cl</code> でビルドし、あとから入れた公式 LLVM の <code>llvm-profdata</code> でマージしようとするケースです。</p>
+
+<pre><code>:: 作業前に必ず確認する
+clang-cl --version
+llvm-profdata --version</code></pre>
+
+<p>メジャーバージョンが揃っていることを確認してください。第 5 章のチェックリストに入れておいた項目です。</p>
+
+<h2>29.7 スクリプトにまとめる</h2>
+
+<p>第 27 章の <code>train.cmd</code> に、マージまでを含めます。</p>
+
+<pre><code>@echo off
+:: train.cmd — トレーニング実行からプロファイル生成まで
+setlocal
+
+set ROOT=%~dp0
+set PROFDIR=%ROOT%prof
+set EXE=%ROOT%builds\instr\ClangOptLab.exe
+set OUT=%ROOT%app.profdata
+
+if exist "%PROFDIR%" rmdir /s /q "%PROFDIR%"
+mkdir "%PROFDIR%"
+set LLVM_PROFILE_FILE=%PROFDIR%\run-%%p.profraw
+
+echo [1/3] 通常のワークロード
+"%EXE%" 200000 10 &gt;nul
+echo [2/3] 小さめの入力
+"%EXE%"  20000 20 &gt;nul
+echo [3/3] 大きめの入力
+"%EXE%" 500000  4 &gt;nul
+
+echo.
+echo マージ中...
+llvm-profdata merge -output="%OUT%" "%PROFDIR%\*.profraw" || exit /b 1
+
+llvm-profdata show "%OUT%" | findstr /C:"Total functions" /C:"Maximum function count"
+echo 生成: %OUT%
+endlocal</code></pre>
+<p class="cap">リスト 29-1　train.cmd（マージまで）</p>
+
+<h2>29.8 ハンズオン</h2>
+
+<ol>
+<li>リスト 29-1 の <code>train.cmd</code> を作って実行する</li>
+<li><code>app.profdata</code> ができることを確認する</li>
+<li><code>.profraw</code> と <code>.profdata</code> のサイズを比べる</li>
+<li><code>-text</code> でテキスト形式に変換し、<code>parse_line</code> のエントリを探す</li>
+<li>カウンタの値を見て、実行回数から見当が付くか確かめる</li>
+<li>試しに <code>-weighted-input</code> で重みを変えてみて、<code>show</code> の値が変わることを確認する</li>
+</ol>
+
+<h2>29.9 まとめ</h2>
+
+<ul>
+<li><code>.profraw</code> は生データ、<code>.profdata</code> はコンパイラが読む形式。<strong>実行が一回でも <code>merge</code> は必要</strong></li>
+<li>複数の <code>.profraw</code> をまとめると、カウンタは<strong>合計される</strong></li>
+<li><code>-weighted-input=&lt;w&gt;,&lt;file&gt;</code> で配合を調整できる。重みはカウンタに掛かる</li>
+<li><code>-text</code> で中身を読める。関数名・<strong>Func Hash</strong>・カウンタ値が入っている</li>
+<li>大きなプロファイルには <code>-sparse</code></li>
+<li><code>clang-cl</code> と <code>llvm-profdata</code> の<strong>メジャーバージョンを揃える</strong></li>
+</ul>
+
+<p class="next"><strong>次章では</strong>、できあがったプロファイルを読みます。どの関数がホットだったのか、第 12・13 章のプロファイラの結果と一致するのか。そして <code>llvm-cov</code> でソースコード上にカウンタを重ねて表示します——ただし、そこには一つ落とし穴があります。</p>
+
+</div>
+</body>
+</html>

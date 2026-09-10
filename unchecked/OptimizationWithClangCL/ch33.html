@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第33章 マルチスレッド計装 — Clang最適化入門</title>
+<style>
+:root{
+  --ink:#1b1d21; --sub:#5c626b; --line:#dfe3e8; --bg:#fff;
+  --code-bg:#f5f7f9; --code-ink:#22262b; --accent:#2f5d8a;
+  --note-bg:#eef4fa; --note-line:#4a80b5;
+  --warn-bg:#fdf4ec; --warn-line:#c07830;
+  --tip-bg:#eef7f1; --tip-line:#4a8c5f;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Meiryo",system-ui,sans-serif;
+  font-size:16px; line-height:1.9; text-align:justify;
+}
+.book{max-width:46rem; margin:0 auto; padding:3rem 1.25rem 6rem}
+.chapno{font-size:.82rem; letter-spacing:.18em; color:var(--accent); font-weight:700; margin:0 0 .4rem}
+h1{font-size:1.85rem; line-height:1.45; margin:0 0 .6rem; letter-spacing:.01em}
+.lead{color:var(--sub); font-size:1.02rem; margin:0 0 2.5rem; padding-bottom:2rem; border-bottom:2px solid var(--line)}
+h2{font-size:1.32rem; margin:3.2rem 0 1rem; padding-bottom:.45rem; border-bottom:1px solid var(--line); letter-spacing:.01em}
+h3{font-size:1.08rem; margin:2.2rem 0 .7rem; color:#2c3239}
+h4{font-size:.98rem; margin:1.6rem 0 .5rem; color:#3a4048}
+p{margin:0 0 1.1rem}
+ul,ol{margin:0 0 1.2rem; padding-left:1.5rem}
+li{margin:.4rem 0}
+code{
+  font-family:"Cascadia Mono","Consolas","SF Mono",monospace;
+  font-size:.88em; background:var(--code-bg); padding:.12em .38em;
+  border-radius:3px; border:1px solid var(--line); word-break:break-all;
+}
+pre{
+  background:var(--code-bg); color:var(--code-ink); border:1px solid var(--line);
+  border-left:3px solid var(--accent); border-radius:4px;
+  padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.6;
+}
+pre code{background:none; border:none; padding:0; font-size:.85rem; word-break:normal}
+.cap{font-size:.83rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+.box{border-radius:4px; padding:.95rem 1.15rem; margin:1.6rem 0; font-size:.95rem}
+.box p:last-child{margin-bottom:0}
+.box .t{font-weight:700; font-size:.86rem; letter-spacing:.06em; display:block; margin-bottom:.4rem}
+.note{background:var(--note-bg); border-left:4px solid var(--note-line)}
+.note .t{color:var(--note-line)}
+.warn{background:var(--warn-bg); border-left:4px solid var(--warn-line)}
+.warn .t{color:var(--warn-line)}
+.tip{background:var(--tip-bg); border-left:4px solid var(--tip-line)}
+.tip .t{color:var(--tip-line)}
+table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+th{background:var(--code-bg); font-weight:700}
+figure{margin:2rem 0}
+figure svg{display:block; width:100%; height:auto}
+figcaption{font-size:.83rem; color:var(--sub); text-align:center; margin-top:.7rem}
+.goal{border:1px solid var(--line); border-top:3px solid var(--accent); border-radius:4px; padding:1.1rem 1.3rem; margin:0 0 2.4rem; background:#fbfcfd}
+.goal h2{margin:0 0 .6rem; font-size:1rem; border:none; padding:0; letter-spacing:.06em}
+.goal ul{margin-bottom:0}
+.next{margin-top:3.5rem; padding-top:1.4rem; border-top:2px solid var(--line); color:var(--sub); font-size:.95rem}
+.next strong{color:var(--ink)}
+.chk{list-style:none; padding-left:0}
+.chk li{padding-left:1.7rem; position:relative}
+.chk li::before{content:"\2610"; position:absolute; left:.2rem; color:var(--accent); font-size:1.05rem}
+.path{font-size:.93rem; color:var(--sub); background:var(--code-bg); border:1px solid var(--line); border-radius:3px; padding:.5rem .8rem; margin:0 0 1.2rem}
+.partend{margin-top:3rem; padding:1.2rem 1.4rem; border:2px solid var(--accent); border-radius:5px; background:#fbfcfd}
+.partend h3{margin-top:0; color:var(--accent)}
+.real{border-left-color:var(--tip-line)}
+@media (prefers-color-scheme:dark){
+  :root{
+    --ink:#e6e8ea; --sub:#a2a9b2; --line:#333940; --bg:#16181b;
+    --code-bg:#1e2126; --code-ink:#dfe3e8; --accent:#7fb0dd;
+    --note-bg:#1b2530; --note-line:#5f96c9;
+    --warn-bg:#2b2118; --warn-line:#d09154;
+    --tip-bg:#182619; --tip-line:#6aad7d;
+  }
+  h3{color:#d5d9dd} h4{color:#c3c9cf}
+  .goal,.partend{background:#1a1d21}
+}
+</style>
+</head>
+<body>
+<div class="book">
+
+<p class="chapno">第 33 章</p>
+<h1>マルチスレッド計装<br>— <code>-fprofile-update=atomic</code> とオーバーヘッド</h1>
+<p class="lead">計装ビルドはカウンタを加算します。複数スレッドが同じカウンタを同時に更新したら、どうなるのか。正確にするオプションはありますが、実測すると計装ビルドが 7 倍以上遅くなりました。</p>
+
+<div class="goal">
+<h2>この章のゴール</h2>
+<ul>
+<li>カウンタの競合で何が起きるかを理解する</li>
+<li><code>-fprofile-update</code> の三つの値を知る</li>
+<li>atomic のコストを実測で把握する</li>
+<li>どちらを選ぶべきかの判断基準を持つ</li>
+</ul>
+</div>
+
+<h2>33.1 カウンタの競合</h2>
+
+<p>計装ビルドが挿入するのは、要するにこれです。</p>
+
+<pre><code>counter[k]++;</code></pre>
+
+<p>この加算は、機械語では「読む・足す・書く」の三段階になります。二つのスレッドが同時に実行すると、片方の更新が失われます。いわゆるロストアップデートです。</p>
+
+<pre><code>スレッド A          スレッド B
+read  counter = 100
+                    read  counter = 100
+add   → 101
+                    add   → 101
+write counter = 101
+                    write counter = 101    ← 2 回数えたのに 101</code></pre>
+
+<p>結果として、記録される回数は<strong>実際より少なくなります</strong>。</p>
+
+<h3>33.1.1 どれくらい問題になるか</h3>
+
+<p>これは意外に微妙な問題です。実測してみました。8 スレッドで同じ関数を 20 万回ずつ回すプログラムを、既定（非アトミック）とアトミックの両方で計装し、記録されたカウントを比べます。</p>
+
+<pre><code>-fprofile-update=single   Maximum internal block count: 800000
+-fprofile-update=atomic   Maximum internal block count: 800000</code></pre>
+
+<p><strong>同じでした。</strong> 取りこぼしは観測されませんでした。</p>
+
+<p>これは「競合が起きない」という意味ではありません。ロストアップデートが起きるのは、二つのスレッドの読み書きが正確に重なった瞬間だけです。加算は数ナノ秒で終わるので、確率的には稀な事象です。</p>
+
+<div class="box note">
+<span class="t">PGO が求める精度</span>
+<p>ここで思い出したいのは、PGO が使うのは<strong>比率</strong>だということです。「この分岐は 99% 成立する」という情報が欲しいのであって、絶対値が 0.1% ずれても判断は変わりません。</p>
+<p>多少の取りこぼしがあっても、それが均等に起きるならば比率は保たれます。<strong>PGO の目的に対しては、非アトミックのカウンタで十分なことがほとんどです。</strong></p>
+</div>
+
+<h2>33.2 <code>-fprofile-update</code></h2>
+
+<table>
+<thead><tr><th>値</th><th>挙動</th></tr></thead>
+<tbody>
+<tr><td><code>single</code></td><td>単純な加算。競合を考慮しない。<strong>既定</strong></td></tr>
+<tr><td><code>atomic</code></td><td>アトミックな加算。取りこぼしが起きない</td></tr>
+<tr><td><code>prefer-atomic</code></td><td>ターゲットが対応していればアトミック、そうでなければ単純加算</td></tr>
+</tbody>
+</table>
+
+<pre><code>/clang:-fprofile-update=atomic</code></pre>
+
+<p>指定できない値を渡すと、きちんとエラーになります。</p>
+
+<pre><code>error: unsupported argument 'zzz' to option '-fprofile-update'</code></pre>
+
+<h2>33.3 コストを実測する</h2>
+
+<p>ここが本章の要点です。二つのプログラムで測りました。</p>
+
+<h3>33.3.1 マルチスレッドのプログラム（8 スレッド）</h3>
+
+<table>
+<thead><tr><th>ビルド</th><th>実行時間</th></tr></thead>
+<tbody>
+<tr><td>通常ビルド</td><td>4 ms</td></tr>
+<tr><td>計装（<code>single</code>）</td><td>4 ms</td></tr>
+<tr><td>計装（<code>atomic</code>）</td><td><strong>32 ms（8 倍）</strong></td></tr>
+<tr><td>計装（<code>prefer-atomic</code>）</td><td>32 ms</td></tr>
+</tbody>
+</table>
+
+<h3>33.3.2 LogLab（シングルスレッド）</h3>
+
+<table>
+<thead><tr><th>ビルド</th><th>実行時間</th></tr></thead>
+<tbody>
+<tr><td>通常ビルド</td><td>144 ms</td></tr>
+<tr><td>計装（既定 = <code>single</code>）</td><td>243 ms（1.7 倍）</td></tr>
+<tr><td>計装（<code>atomic</code>）</td><td><strong>1,793 ms（通常の 12.5 倍、<code>single</code> の 7.4 倍）</strong></td></tr>
+</tbody>
+</table>
+<p class="cap">実測の一例。いずれも 3 回実行して最小値</p>
+
+<div class="box warn">
+<span class="t">シングルスレッドのプログラムでも 7 倍以上遅くなります</span>
+<p>LogLab はスレッドを一つしか使いません。競合など起こりようがないのに、<code>atomic</code> を指定すると <code>single</code> の 7.4 倍遅くなりました。</p>
+<p>アトミック命令は、競合の有無にかかわらずキャッシュラインの排他所有を要求します。ホットループの中で 1 命令ごとに実行されれば、この差になります。<strong>「念のため atomic にしておこう」は、非常に高くつきます。</strong></p>
+</div>
+
+<h2>33.4 どちらを選ぶか</h2>
+
+<table>
+<thead><tr><th>状況</th><th>選択</th></tr></thead>
+<tbody>
+<tr><td>シングルスレッド</td><td><strong><code>single</code>（既定）。</strong> atomic にする理由が無い</td></tr>
+<tr><td>マルチスレッドだが、スレッドごとに違うコードを実行する</td><td><code>single</code>。同じカウンタを叩かないので競合しない</td></tr>
+<tr><td>マルチスレッドで、同じホットループを全スレッドが回る</td><td>まず <code>single</code> で試す。プロファイルが不自然なら <code>atomic</code> を検討</td></tr>
+<tr><td>計装ビルドが遅すぎて実行できない</td><td><code>single</code> 一択。それでも遅ければトレーニングを短くする</td></tr>
+<tr><td>カウントの絶対値が正確である必要がある</td><td><code>atomic</code>。ただし PGO でこれが必要になる場面は稀</td></tr>
+</tbody>
+</table>
+
+<div class="box tip">
+<span class="t">本書の推奨</span>
+<p><strong>既定（<code>single</code>）のまま使ってください。</strong> <code>atomic</code> は「プロファイルの結果が明らかにおかしく、その原因がカウンタの競合だと切り分けられたとき」の対処であって、最初から付けるものではありません。</p>
+<p>そして、切り分けの方法はあります。同じトレーニングを <code>single</code> と <code>atomic</code> でそれぞれ実行し、<code>llvm-profdata overlap</code>（第 30 章）で比較するのです。分布がほぼ一致するなら、競合は問題になっていません。</p>
+</div>
+
+<h2>33.5 マルチスレッドでのその他の注意</h2>
+
+<h4>スレッドごとの偏り</h4>
+<p>ワーカースレッドが 8 本あって、そのうち 1 本だけが特殊な処理をしている、という構造では、その 1 本ぶんの記録が全体に埋もれます。プロファイルはプロセス全体で 1 セットだからです。特殊なスレッドの挙動を最適化したいなら、そのコードを別の関数に分けておくと区別しやすくなります。</p>
+
+<h4>プロファイル出力の競合</h4>
+<p>第 27 章で扱ったとおり、複数プロセスで <code>%m</code> を使うとファイルロックの競合が起きます。<code>%Nm</code> で分散させるか、<code>%p</code> を使ってください。スレッドは同一プロセス内なので、この問題は起きません。</p>
+
+<h4>実行順序による揺らぎ</h4>
+<p>マルチスレッドのプログラムは、実行のたびにスレッドのスケジューリングが変わります。プロファイルも実行ごとに揺らぎます。<strong>複数回のトレーニングをマージする</strong>（第 29 章）ことで、この揺らぎは平均化されます。シングルスレッドのプログラム以上に、複数回のトレーニングが効いてきます。</p>
+
+<h2>33.6 ハンズオン</h2>
+
+<ol>
+<li>LogLab の計装ビルドに <code>/clang:-fprofile-update=atomic</code> を付けてビルドする</li>
+<li>実行時間を既定のものと比べる（大幅に遅くなるはずです）</li>
+<li>両方でトレーニングを行い、それぞれプロファイルを作る</li>
+<li><code>llvm-profdata overlap</code> で二つを比較する</li>
+<li>ほぼ一致することを確認し、<code>atomic</code> が不要だったと判断する</li>
+<li>オプションを外す</li>
+</ol>
+
+<h2>33.7 まとめ</h2>
+
+<ul>
+<li>計装のカウンタ更新は、複数スレッドから同時に行われると取りこぼしが起きうる</li>
+<li>ただし PGO が使うのは<strong>比率</strong>なので、多少の取りこぼしは判断を変えない</li>
+<li><code>-fprofile-update</code> は <code>single</code>（既定）/ <code>atomic</code> / <code>prefer-atomic</code></li>
+<li>実測では、8 スレッドのプログラムで <code>atomic</code> は <strong>8 倍</strong>、<strong>シングルスレッドの LogLab でも 7.4 倍</strong>遅くなった</li>
+<li>アトミック命令は競合が無くてもコストを払う。「念のため」で付けてはいけない</li>
+<li><strong>既定のまま使う。</strong> 疑いが生じたら <code>overlap</code> で分布を比較して切り分ける</li>
+<li>マルチスレッドではプロファイルが実行ごとに揺らぐ。複数回トレーニングしてマージする</li>
+</ul>
+
+<p class="next"><strong>次章で第 5 部を締めくくります。</strong> プロファイルは、そのコードのある時点の姿を記録したものです。ソースを直したら、その記録はどうなるのか。Clang は関数ごとにハッシュを持っていて、食い違いを検出できます。ただし、警告の出し方が計装方式によって違うという罠があります。</p>
+
+</div>
+</body>
+</html>

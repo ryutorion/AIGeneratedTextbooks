@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第22章 静的ライブラリ・DLL と LTO — Clang最適化入門</title>
+<style>
+:root{
+  --ink:#1b1d21; --sub:#5c626b; --line:#dfe3e8; --bg:#fff;
+  --code-bg:#f5f7f9; --code-ink:#22262b; --accent:#2f5d8a;
+  --note-bg:#eef4fa; --note-line:#4a80b5;
+  --warn-bg:#fdf4ec; --warn-line:#c07830;
+  --tip-bg:#eef7f1; --tip-line:#4a8c5f;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Meiryo",system-ui,sans-serif;
+  font-size:16px; line-height:1.9; text-align:justify;
+}
+.book{max-width:46rem; margin:0 auto; padding:3rem 1.25rem 6rem}
+.chapno{font-size:.82rem; letter-spacing:.18em; color:var(--accent); font-weight:700; margin:0 0 .4rem}
+h1{font-size:1.85rem; line-height:1.45; margin:0 0 .6rem; letter-spacing:.01em}
+.lead{color:var(--sub); font-size:1.02rem; margin:0 0 2.5rem; padding-bottom:2rem; border-bottom:2px solid var(--line)}
+h2{font-size:1.32rem; margin:3.2rem 0 1rem; padding-bottom:.45rem; border-bottom:1px solid var(--line); letter-spacing:.01em}
+h3{font-size:1.08rem; margin:2.2rem 0 .7rem; color:#2c3239}
+h4{font-size:.98rem; margin:1.6rem 0 .5rem; color:#3a4048}
+p{margin:0 0 1.1rem}
+ul,ol{margin:0 0 1.2rem; padding-left:1.5rem}
+li{margin:.4rem 0}
+code{
+  font-family:"Cascadia Mono","Consolas","SF Mono",monospace;
+  font-size:.88em; background:var(--code-bg); padding:.12em .38em;
+  border-radius:3px; border:1px solid var(--line); word-break:break-all;
+}
+pre{
+  background:var(--code-bg); color:var(--code-ink); border:1px solid var(--line);
+  border-left:3px solid var(--accent); border-radius:4px;
+  padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.6;
+}
+pre code{background:none; border:none; padding:0; font-size:.85rem; word-break:normal}
+.cap{font-size:.83rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+.box{border-radius:4px; padding:.95rem 1.15rem; margin:1.6rem 0; font-size:.95rem}
+.box p:last-child{margin-bottom:0}
+.box .t{font-weight:700; font-size:.86rem; letter-spacing:.06em; display:block; margin-bottom:.4rem}
+.note{background:var(--note-bg); border-left:4px solid var(--note-line)}
+.note .t{color:var(--note-line)}
+.warn{background:var(--warn-bg); border-left:4px solid var(--warn-line)}
+.warn .t{color:var(--warn-line)}
+.tip{background:var(--tip-bg); border-left:4px solid var(--tip-line)}
+.tip .t{color:var(--tip-line)}
+table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+th{background:var(--code-bg); font-weight:700}
+figure{margin:2rem 0}
+figure svg{display:block; width:100%; height:auto}
+figcaption{font-size:.83rem; color:var(--sub); text-align:center; margin-top:.7rem}
+.goal{border:1px solid var(--line); border-top:3px solid var(--accent); border-radius:4px; padding:1.1rem 1.3rem; margin:0 0 2.4rem; background:#fbfcfd}
+.goal h2{margin:0 0 .6rem; font-size:1rem; border:none; padding:0; letter-spacing:.06em}
+.goal ul{margin-bottom:0}
+.next{margin-top:3.5rem; padding-top:1.4rem; border-top:2px solid var(--line); color:var(--sub); font-size:.95rem}
+.next strong{color:var(--ink)}
+.chk{list-style:none; padding-left:0}
+.chk li{padding-left:1.7rem; position:relative}
+.chk li::before{content:"\2610"; position:absolute; left:.2rem; color:var(--accent); font-size:1.05rem}
+.path{font-size:.93rem; color:var(--sub); background:var(--code-bg); border:1px solid var(--line); border-radius:3px; padding:.5rem .8rem; margin:0 0 1.2rem}
+.partend{margin-top:3rem; padding:1.2rem 1.4rem; border:2px solid var(--accent); border-radius:5px; background:#fbfcfd}
+.partend h3{margin-top:0; color:var(--accent)}
+.real{border-left-color:var(--tip-line)}
+@media (prefers-color-scheme:dark){
+  :root{
+    --ink:#e6e8ea; --sub:#a2a9b2; --line:#333940; --bg:#16181b;
+    --code-bg:#1e2126; --code-ink:#dfe3e8; --accent:#7fb0dd;
+    --note-bg:#1b2530; --note-line:#5f96c9;
+    --warn-bg:#2b2118; --warn-line:#d09154;
+    --tip-bg:#182619; --tip-line:#6aad7d;
+  }
+  h3{color:#d5d9dd} h4{color:#c3c9cf}
+  .goal,.partend{background:#1a1d21}
+}
+</style>
+</head>
+<body>
+<div class="book">
+
+<p class="chapno">第 22 章</p>
+<h1>静的ライブラリ・DLL と LTO<br>— ビットコードアーカイブとエクスポート</h1>
+<p class="lead">実際のプロジェクトは、単一の <code>.exe</code> ではありません。自前の静的ライブラリがあり、サードパーティの <code>.lib</code> があり、DLL に分かれています。LTO はその境界をどこまで越えられるのか。ここが導入時の最大の関門です。</p>
+
+<div class="goal">
+<h2>この章のゴール</h2>
+<ul>
+<li>ビットコードを含む <code>.lib</code> を作る</li>
+<li>LTO が静的ライブラリの境界を越えることを確認する</li>
+<li>ビットコードとネイティブの混在がどうなるかを知る</li>
+<li>DLL があると何ができなくなるかを理解する</li>
+</ul>
+</div>
+
+<h2>22.1 静的ライブラリ — 境界は越えられる</h2>
+
+<p>結論から言うと、静的ライブラリの境界は問題になりません。<code>.lib</code> の中身がビットコードであれば、LTO は普通に働きます。</p>
+
+<h3>22.1.1 ビットコードの <code>.lib</code> を作る</h3>
+
+<p><code>llvm-lib</code> を使います。第 3 章で確認したとおり、ClangCL ツールセットは既定でライブラリアンにも LLVM のもの（<code>UseLlvmLib</code>）を使うので、Visual Studio でスタティックライブラリのプロジェクトを作れば自動的にこうなります。</p>
+
+<pre><code>:: コンパイル（ビットコードの .obj ができる）
+clang-cl /c /O2 /clang:-flto=thin lib.cpp
+
+:: アーカイブ
+llvm-lib /out:mylib.lib lib.obj</code></pre>
+
+<p>中身を確認できます。</p>
+
+<pre><code>llvm-lib /list mylib.lib
+  lib.obj</code></pre>
+
+<h3>22.1.2 越えられることを確認する</h3>
+
+<p>第 17 章の <code>scale</code> の例を、ライブラリ経由にして測りました。</p>
+
+<table>
+<thead><tr><th>構成</th><th><code>call</code> 命令の数</th><th>リンク時リマーク</th></tr></thead>
+<tbody>
+<tr><td>ネイティブの <code>.lib</code>（LTO なし）</td><td>1</td><td>—</td></tr>
+<tr><td><strong>ビットコードの <code>.lib</code>（LTO あり）</strong></td><td><strong>0</strong></td><td><code>'?scale@@YAHHH_N@Z' inlined into 'mainCRTStartup'</code></td></tr>
+</tbody>
+</table>
+<p class="cap">実測の一例</p>
+
+<p><code>.lib</code> に格納されていても、ビットコードならリンク時に取り出されて最適化の対象になります。<strong>翻訳単位の壁と同じく、ライブラリの壁も消えます。</strong></p>
+
+<div class="box tip">
+<span class="t">自社ライブラリには LTO を入れる価値があります</span>
+<p>「アプリ本体は最適化しているが、共通ライブラリは別チームが作った <code>.lib</code> なので手が出ない」という状況はよくあります。そのライブラリを LTO 対応でビルドしてもらえれば、アプリ側から見た壁が消えます。効果が大きいのは、<strong>小さな関数を大量に提供するライブラリ</strong>（数学ライブラリ、コンテナ、文字列処理など）です。</p>
+</div>
+
+<h2>22.2 ビットコードとネイティブの混在</h2>
+
+<p>実際のプロジェクトでは、すべてを LTO 対応にできるとは限りません。サードパーティの <code>.lib</code> はネイティブのままでしょうし、古いプロジェクトを段階的に移行することもあります。</p>
+
+<p><strong>混在は問題なく動きます。</strong> lld-link は、入力ファイルごとに中身を判別します。</p>
+
+<table>
+<thead><tr><th>入力</th><th>扱い</th></tr></thead>
+<tbody>
+<tr><td>ビットコードの <code>.obj</code> / <code>.lib</code></td><td>LTO の対象になる。互いにインライン化できる</td></tr>
+<tr><td>ネイティブの <code>.obj</code> / <code>.lib</code></td><td>そのままリンクされる。<strong>壁は残る</strong></td></tr>
+</tbody>
+</table>
+
+<p>つまり LTO は「LTO 対応にした部分どうし」の間でだけ働きます。段階的な導入が可能ということでもあり、逆に「一部だけ LTO にしても効果が限定される」ということでもあります。</p>
+
+<div class="box warn">
+<span class="t">効果が出ないときは、まず範囲を確認</span>
+<p>「LTO を有効にしたのに効果がない」というとき、ホットな処理がネイティブのライブラリ側にある、という可能性があります。<code>.obj</code> や <code>.lib</code> のどれがビットコードになっているかを、第 17 章の方法（<code>llvm-readobj</code>）で確認してください。</p>
+</div>
+
+<h3>22.2.1 <code>/wholearchive</code></h3>
+
+<p>リンカは通常、<code>.lib</code> から「必要なオブジェクトだけ」を取り出します。次のオプションで、すべてを取り込ませることができます。</p>
+
+<pre><code>/wholearchive:mylib.lib     &lt;- この .lib のすべてを取り込む
+/wholearchive               &lt;- すべての .lib のすべてを取り込む</code></pre>
+
+<p>LTO の文脈では、取り込まれなかったオブジェクトは最適化の視野に入らないので、これを使うと視野が広がることがあります。ただし<strong>使われないコードまで実行ファイルに入る</strong>ため、サイズは増えます。静的初期化に副作用があるライブラリで必要になる場合が主な用途で、LTO の効果を上げる目的で常用するものではありません。</p>
+
+<h2>22.3 DLL — ここからが本題</h2>
+
+<p>DLL は、LTO にとって根本的な制約になります。理由は単純で、<strong>DLL の境界の向こう側は、リンク時にも見えないから</strong>です。</p>
+
+<figure>
+<svg viewBox="0 0 720 250" role="img" aria-label="LTO の視野。実行ファイル内は見えるが DLL の向こう側は見えないことを示す図">
+  <rect x="20" y="46" width="300" height="150" rx="5" fill="#eef7f1" stroke="#4a8c5f" stroke-width="1.5"/>
+  <text x="170" y="70" font-size="12" text-anchor="middle" font-weight="700" fill="#4a8c5f" font-family="sans-serif">app.exe（LTO の視野）</text>
+  <rect x="44" y="86" width="118" height="40" rx="3" fill="#fff" stroke="#4a8c5f"/>
+  <text x="103" y="111" font-size="10.5" text-anchor="middle" font-family="monospace" fill="#1b1d21">main.obj</text>
+  <rect x="178" y="86" width="118" height="40" rx="3" fill="#fff" stroke="#4a8c5f"/>
+  <text x="237" y="111" font-size="10.5" text-anchor="middle" font-family="monospace" fill="#1b1d21">tokenizer.obj</text>
+  <rect x="44" y="138" width="252" height="40" rx="3" fill="#fff" stroke="#4a8c5f"/>
+  <text x="170" y="163" font-size="10.5" text-anchor="middle" font-family="monospace" fill="#1b1d21">mylib.lib（ビットコード）</text>
+
+  <rect x="400" y="46" width="300" height="150" rx="5" fill="#fdf4ec" stroke="#c07830" stroke-width="1.5" stroke-dasharray="6,4"/>
+  <text x="550" y="70" font-size="12" text-anchor="middle" font-weight="700" fill="#c07830" font-family="sans-serif">other.dll（見えない）</text>
+  <text x="550" y="104" font-size="11" text-anchor="middle" font-family="sans-serif" fill="#5c626b">中身は最適化の対象外</text>
+  <text x="550" y="126" font-size="11" text-anchor="middle" font-family="sans-serif" fill="#5c626b">誰が呼ぶかも分からない</text>
+  <text x="550" y="148" font-size="11" text-anchor="middle" font-family="sans-serif" fill="#5c626b">派生クラスを持つかもしれない</text>
+
+  <line x1="324" y1="121" x2="396" y2="121" stroke="#c07830" stroke-width="2" stroke-dasharray="5,4"/>
+  <text x="360" y="112" font-size="10" text-anchor="middle" fill="#c07830" font-family="sans-serif">壁</text>
+
+  <text x="20" y="228" font-size="11" fill="#5c626b" font-family="sans-serif">LTO が最適化できるのは左側だけ。DLL の境界は、LTO をもってしても越えられない。</text>
+</svg>
+<figcaption>図 22-1　LTO の視野と DLL の壁</figcaption>
+</figure>
+
+<h3>22.3.1 エクスポートされた関数に起きること</h3>
+
+<p><code>__declspec(dllexport)</code> を付けた関数は、外部から呼ばれる可能性があります。すると LTO は次のことができなくなります。</p>
+
+<table>
+<thead><tr><th>できないこと</th><th>理由</th></tr></thead>
+<tbody>
+<tr><td>削除する</td><td>誰も呼んでいないように見えても、外から呼ばれるかもしれない</td></tr>
+<tr><td>内部化する</td><td>シンボルとして公開し続ける必要がある</td></tr>
+<tr><td>引数の受け渡し方を変える</td><td>呼び出し規約を守らなければならない</td></tr>
+<tr><td>この関数を通じたデバーチャライズ</td><td>外部から派生クラスが来る可能性がある（第 21 章）</td></tr>
+</tbody>
+</table>
+
+<p>関数の<strong>中身</strong>は最適化されますし、その関数が内部で呼んでいる関数のインライン化も行われます。制約がかかるのは「その関数自身をどう扱うか」の部分です。</p>
+
+<h3>22.3.2 実務上の指針</h3>
+
+<div class="box note">
+<span class="t">エクスポートは必要最小限に</span>
+<p>これは LTO に限らない一般的な設計指針ですが、LTO を使うと効果がはっきりします。<code>__declspec(dllexport)</code> を付ける対象を絞れば絞るほど、LTO が自由に動ける範囲が広がります。</p>
+<p>逆に、ヘッダ全体に <code>dllexport</code> マクロを撒いているようなコードでは、LTO の効果は大きく削がれます。</p>
+</div>
+
+<p>DLL 構成での現実的な選択肢は次のようになります。</p>
+
+<table>
+<thead><tr><th>方針</th><th>内容</th></tr></thead>
+<tbody>
+<tr><td>DLL ごとに LTO をかける</td><td>各 DLL の<strong>内部</strong>は最適化される。境界は残る。<strong>最も現実的</strong></td></tr>
+<tr><td>ホットな部分を DLL から出す</td><td>性能が重要なコードを実行ファイル側か静的ライブラリに移す</td></tr>
+<tr><td>DLL をやめて静的リンクにする</td><td>効果は最大だが、配布やビルド時間に影響する。判断は LTO 以外の要因が大きい</td></tr>
+</tbody>
+</table>
+
+<h2>22.4 LogLab で確認する</h2>
+
+<p>LogLab は単一の実行ファイルなので DLL の問題は起きませんが、静的ライブラリの構成は試せます。</p>
+
+<ol>
+<li>ソリューションに「スタティック ライブラリ」プロジェクト <code>LogLabCore</code> を追加する</li>
+<li>プラットフォームツールセットを <code>LLVM (clang-cl)</code>、C++ 標準を C++23 にする</li>
+<li><code>tokenizer.cpp</code>、<code>filter.cpp</code>、<code>stats.cpp</code>、<code>generator.cpp</code> をそちらに移す</li>
+<li>両方のプロジェクトに <code>/clang:-flto</code> を設定する</li>
+<li><code>ClangOptLab</code> から <code>LogLabCore</code> を参照する</li>
+<li>ビルドして checksum が変わらないことを確認する</li>
+<li>リンク時リマーク（第 20 章）を取り、<code>parse_line</code> が <code>main</code> にインライン化されているかを確認する</li>
+</ol>
+
+<p>ライブラリに分けても結果が変わらなければ、「LTO はライブラリの壁を越える」ことを自分の手で確認したことになります。</p>
+
+<div class="box warn">
+<span class="t">片方だけ LTO にしてみる</span>
+<p>余裕があれば、<code>LogLabCore</code> の <code>/clang:-flto</code> だけを外してビルドしてみてください。<code>.lib</code> がネイティブになり、<code>parse_line</code> のインライン化が消えるはずです。「壁がどこにあるか」が体感できます。</p>
+</div>
+
+<h2>22.5 まとめ</h2>
+
+<ul>
+<li>静的ライブラリの境界は<strong>越えられる</strong>。<code>llvm-lib</code> でビットコードの <code>.lib</code> を作れば、LTO はその中身も最適化する</li>
+<li>実測では、ライブラリ経由の呼び出しが <strong>1 → 0</strong> になった</li>
+<li>ビットコードとネイティブの <code>.obj</code> / <code>.lib</code> は混在できる。<strong>LTO 対応にした部分どうしの間だけ</strong>壁が消える</li>
+<li>効果が出ないときは、ホットな処理がネイティブ側にないかを確認する</li>
+<li><strong>DLL の境界は越えられない。</strong> エクスポートされた関数は削除・内部化・デバーチャライズの対象外になる</li>
+<li>エクスポートを最小限に絞ることが、そのまま LTO の効果につながる</li>
+<li>DLL 構成では「各 DLL の内部を LTO で最適化する」が現実的な落とし所</li>
+</ul>
+
+<p class="next"><strong>次章では</strong>、LTO の代償を正面から扱います。ビルド時間、メモリ、増分ビルド、デバッグのしにくさ。そして「LTO を有効にしたらビルドが通らなくなった」「動作がおかしくなった」というときの切り分け方。導入を判断するために必要な材料を揃えます。</p>
+
+</div>
+</body>
+</html>

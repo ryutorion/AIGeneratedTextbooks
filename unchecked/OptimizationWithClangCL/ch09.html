@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第9章 最適化リマークを読む — Clang最適化入門</title>
+<style>
+:root{
+  --ink:#1b1d21; --sub:#5c626b; --line:#dfe3e8; --bg:#fff;
+  --code-bg:#f5f7f9; --code-ink:#22262b; --accent:#2f5d8a;
+  --note-bg:#eef4fa; --note-line:#4a80b5;
+  --warn-bg:#fdf4ec; --warn-line:#c07830;
+  --tip-bg:#eef7f1; --tip-line:#4a8c5f;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Meiryo",system-ui,sans-serif;
+  font-size:16px; line-height:1.9; text-align:justify;
+}
+.book{max-width:46rem; margin:0 auto; padding:3rem 1.25rem 6rem}
+.chapno{font-size:.82rem; letter-spacing:.18em; color:var(--accent); font-weight:700; margin:0 0 .4rem}
+h1{font-size:1.85rem; line-height:1.45; margin:0 0 .6rem; letter-spacing:.01em}
+.lead{color:var(--sub); font-size:1.02rem; margin:0 0 2.5rem; padding-bottom:2rem; border-bottom:2px solid var(--line)}
+h2{font-size:1.32rem; margin:3.2rem 0 1rem; padding-bottom:.45rem; border-bottom:1px solid var(--line); letter-spacing:.01em}
+h3{font-size:1.08rem; margin:2.2rem 0 .7rem; color:#2c3239}
+h4{font-size:.98rem; margin:1.6rem 0 .5rem; color:#3a4048}
+p{margin:0 0 1.1rem}
+ul,ol{margin:0 0 1.2rem; padding-left:1.5rem}
+li{margin:.4rem 0}
+code{
+  font-family:"Cascadia Mono","Consolas","SF Mono",monospace;
+  font-size:.88em; background:var(--code-bg); padding:.12em .38em;
+  border-radius:3px; border:1px solid var(--line); word-break:break-all;
+}
+pre{
+  background:var(--code-bg); color:var(--code-ink); border:1px solid var(--line);
+  border-left:3px solid var(--accent); border-radius:4px;
+  padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.6;
+}
+pre code{background:none; border:none; padding:0; font-size:.85rem; word-break:normal}
+.cap{font-size:.83rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+.box{border-radius:4px; padding:.95rem 1.15rem; margin:1.6rem 0; font-size:.95rem}
+.box p:last-child{margin-bottom:0}
+.box .t{font-weight:700; font-size:.86rem; letter-spacing:.06em; display:block; margin-bottom:.4rem}
+.note{background:var(--note-bg); border-left:4px solid var(--note-line)}
+.note .t{color:var(--note-line)}
+.warn{background:var(--warn-bg); border-left:4px solid var(--warn-line)}
+.warn .t{color:var(--warn-line)}
+.tip{background:var(--tip-bg); border-left:4px solid var(--tip-line)}
+.tip .t{color:var(--tip-line)}
+table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+th{background:var(--code-bg); font-weight:700}
+figure{margin:2rem 0}
+figure svg{display:block; width:100%; height:auto}
+figcaption{font-size:.83rem; color:var(--sub); text-align:center; margin-top:.7rem}
+.goal{border:1px solid var(--line); border-top:3px solid var(--accent); border-radius:4px; padding:1.1rem 1.3rem; margin:0 0 2.4rem; background:#fbfcfd}
+.goal h2{margin:0 0 .6rem; font-size:1rem; border:none; padding:0; letter-spacing:.06em}
+.goal ul{margin-bottom:0}
+.next{margin-top:3.5rem; padding-top:1.4rem; border-top:2px solid var(--line); color:var(--sub); font-size:.95rem}
+.next strong{color:var(--ink)}
+.chk{list-style:none; padding-left:0}
+.chk li{padding-left:1.7rem; position:relative}
+.chk li::before{content:"\2610"; position:absolute; left:.2rem; color:var(--accent); font-size:1.05rem}
+.path{font-size:.93rem; color:var(--sub); background:var(--code-bg); border:1px solid var(--line); border-radius:3px; padding:.5rem .8rem; margin:0 0 1.2rem}
+.partend{margin-top:3rem; padding:1.2rem 1.4rem; border:2px solid var(--accent); border-radius:5px; background:#fbfcfd}
+.partend h3{margin-top:0; color:var(--accent)}
+.real{border-left-color:var(--tip-line)}
+@media (prefers-color-scheme:dark){
+  :root{
+    --ink:#e6e8ea; --sub:#a2a9b2; --line:#333940; --bg:#16181b;
+    --code-bg:#1e2126; --code-ink:#dfe3e8; --accent:#7fb0dd;
+    --note-bg:#1b2530; --note-line:#5f96c9;
+    --warn-bg:#2b2118; --warn-line:#d09154;
+    --tip-bg:#182619; --tip-line:#6aad7d;
+  }
+  h3{color:#d5d9dd} h4{color:#c3c9cf}
+  .goal,.partend{background:#1a1d21}
+}
+</style>
+</head>
+<body>
+<div class="book">
+
+<p class="chapno">第 9 章</p>
+<h1>最適化リマークを読む<br>— <code>-Rpass</code> / <code>-Rpass-missed</code> / <code>-Rpass-analysis</code></h1>
+<p class="lead">逆アセンブルは最適化の「結果」を見せてくれますが、「なぜそうなったか」は教えてくれません。Clang には、最適化パス自身に判断の理由を語らせる仕組みがあります。本書で最も出番の多い道具です。</p>
+
+<div class="goal">
+<h2>この章のゴール</h2>
+<ul>
+<li>三種類のリマークの違いを理解する</li>
+<li>clang-cl での正しい書き方を身につける</li>
+<li>インライン化のリマークから <code>cost</code> と <code>threshold</code> を読む</li>
+<li>大量に出るリマークを実用的な量に絞る</li>
+</ul>
+</div>
+
+<h2>9.1 三種類のリマーク</h2>
+
+<table>
+<thead><tr><th>オプション</th><th>報告される内容</th></tr></thead>
+<tbody>
+<tr><td><code>-Rpass=&lt;正規表現&gt;</code></td><td><strong>最適化を行った</strong>とき</td></tr>
+<tr><td><code>-Rpass-missed=&lt;正規表現&gt;</code></td><td><strong>最適化を行わなかった</strong>とき</td></tr>
+<tr><td><code>-Rpass-analysis=&lt;正規表現&gt;</code></td><td>判断の材料となった<strong>解析結果</strong></td></tr>
+</tbody>
+</table>
+
+<p>引数はパス名に対する<strong>正規表現</strong>です。<code>inline</code> と書けばインライナだけ、<code>inline|loop-vectorize</code> で二つ、<code>.*</code> ですべてになります。パス名は第 7 章で見たパイプラインに出てくるものです。</p>
+
+<p>実務でよく使うのは次の三つです。</p>
+
+<pre><code>/clang:-Rpass=inline                 &lt;- インライン化されたもの
+/clang:-Rpass-missed=inline          &lt;- されなかったもの
+/clang:-Rpass-analysis=loop-vectorize  &lt;- ベクトル化できない理由</code></pre>
+
+<h2>9.2 clang-cl での書き方</h2>
+
+<div class="box warn">
+<span class="t"><code>/clang:</code> が必須です</span>
+<p>第 6 章で確認したとおり、<code>-Rpass=inline</code> をそのまま clang-cl に渡すと <code>unknown argument ignored in clang-cl</code> という警告が出るだけで<strong>何も表示されません</strong>。必ず <code>/clang:</code> を付けてください。</p>
+<pre><code>× clang-cl /c /O2 /Rpass=inline    src\tokenizer.cpp
+× clang-cl /c /O2 -Rpass=inline    src\tokenizer.cpp
+○ clang-cl /c /O2 /clang:-Rpass=inline src\tokenizer.cpp</code></pre>
+</div>
+
+<p>MSBuild で使う場合は、<strong>C/C++ &gt; コマンド ライン &gt; 追加のオプション</strong> に書きます。ビルド出力ウィンドウにリマークが流れてきます。</p>
+
+<h3>9.2.1 デバッグ情報との関係</h3>
+
+<p>リマークを出すのにデバッグ情報は<strong>不要</strong>です。ただし <code>/Zi</code> や <code>/Z7</code> を付けている場合、報告される位置情報の精度が変わります。</p>
+
+<table>
+<thead><tr><th>設定</th><th>報告される位置</th></tr></thead>
+<tbody>
+<tr><td>デバッグ情報なし</td><td><code>r2.cpp(4,38)</code> — 行と桁</td></tr>
+<tr><td><code>/Z7</code> または <code>/Zi</code></td><td><code>r2.cpp(4,1)</code> — <strong>桁が失われる</strong></td></tr>
+<tr><td><code>/Z7</code> + <code>/clang:-gcolumn-info</code></td><td><code>r2.cpp(4,38)</code> — 桁が戻る</td></tr>
+</tbody>
+</table>
+
+<p>これは、Windows のデバッグ情報形式（CodeView）が既定で桁情報を持たないためです。一行に複数の呼び出しがあるコードでは桁が無いと区別できないので、リマークを読むときは <code>/clang:-gcolumn-info</code> を足しておくとよいでしょう。</p>
+
+<h2>9.3 インライン化のリマークを読む</h2>
+
+<p>第 6 章でも使った小さなコードで試します。</p>
+
+<pre><code>int helper(int a, int b) { return a * b + 7; }
+int caller(int n) {
+    int s = 0;
+    for (int i = 0; i &lt; n; ++i) s += helper(i, s);
+    return s;
+}</code></pre>
+
+<pre><code>clang-cl /c /O2 /clang:-Rpass=inline sample.cpp</code></pre>
+
+<pre><code>sample.cpp(4,38): remark: '?helper@@YAHHH@Z' inlined into '?caller@@YAHH@Z'
+  with (cost=-30, threshold=337) at callsite caller:2:38; [-Rpass=inline]
+    4 |     for (int i = 0; i &lt; n; ++i) s += helper(i, s);
+      |                                      ^</code></pre>
+<p class="cap">実際の出力（改行は読みやすさのため）</p>
+
+<p>この一行に、インライナの判断がすべて入っています。</p>
+
+<table>
+<thead><tr><th>部分</th><th>意味</th></tr></thead>
+<tbody>
+<tr><td><code>'?helper@@YAHHH@Z'</code></td><td>展開された関数（呼び先）。MSVC 形式のマングル名</td></tr>
+<tr><td><code>inlined into '?caller@@YAHH@Z'</code></td><td>展開先の関数（呼び元）</td></tr>
+<tr><td><code>cost=-30</code></td><td>展開したときの<strong>見積もりコスト</strong>。負なら「展開したほうが小さくなる」</td></tr>
+<tr><td><code>threshold=337</code></td><td>この呼び出し箇所での<strong>許容上限</strong></td></tr>
+<tr><td><code>at callsite caller:2:38</code></td><td>呼び出し箇所の位置</td></tr>
+</tbody>
+</table>
+
+<p>判定は単純で、<strong><code>cost</code> が <code>threshold</code> 以下なら展開する</strong>です。ここでは <code>-30 ≤ 337</code> なので展開されました。<code>cost</code> が負になるのは、呼び出し命令や引数の受け渡しが消える分の得が、本体を複製するコストを上回っているからです。この数値の詳細は第 11 章で扱います。</p>
+
+<h3>9.3.1 属性によるリマーク</h3>
+
+<p><code>__forceinline</code> や <code>__declspec(noinline)</code> を付けると、コスト計算そのものが行われません。</p>
+
+<pre><code>remark: '?ff@@YAHH@Z' inlined into '?u@@YAHH@Z'
+  with (cost=always): always inline attribute at callsite ?u@@YAHH@Z:0:0; [-Rpass=inline]
+
+remark: '?nf@@YAHH@Z' not inlined into '?u@@YAHH@Z'
+  because it should never be inlined (cost=never): noinline function attribute [-Rpass-missed=inline]</code></pre>
+
+<p><code>cost=always</code> / <code>cost=never</code> という表示が、属性による強制を示しています。</p>
+
+<h2>9.4 「されなかった」理由を読む</h2>
+
+<p><code>-Rpass-missed</code> のほうが、実は役に立つ場面が多いものです。</p>
+
+<pre><code>remark: '?big@@YAHH@Z' not inlined into '?user@@YAHH@Z'
+  because too costly to inline (cost=5, threshold=0) [-Rpass-missed=inline]</code></pre>
+
+<p>よく見る理由と、その意味は次のとおりです。</p>
+
+<table>
+<thead><tr><th>理由</th><th>意味と対処</th></tr></thead>
+<tbody>
+<tr><td><code>too costly to inline</code></td><td>コストがしきい値を超えた。しきい値を上げるか（第 11 章）、PGO でホットだと教える（第 32 章）</td></tr>
+<tr><td><code>noinline function attribute</code></td><td>属性で禁止されている</td></tr>
+<tr><td><code>recursive</code></td><td>再帰関数。展開の深さに制限がある</td></tr>
+<tr><td><code>function definition is not available</code></td><td><strong>定義が見えない</strong>。別の翻訳単位にある。← <strong>LTO の出番</strong></td></tr>
+<tr><td><code>indirect call</code></td><td>呼び先が確定していない。仮想関数など</td></tr>
+</tbody>
+</table>
+
+<div class="box tip">
+<span class="t">下二つが本書の核心です</span>
+<p><code>function definition is not available</code> は「壁があるので展開できない」という報告であり、これこそ LTO が解決する問題です。<code>indirect call</code> は「呼び先が分からないので展開できない」という報告で、デバーチャライズ（第 21 章）と間接呼び出しの投機的展開（第 32 章）が対象とする問題です。第 4 部・第 5 部でこのリマークがどう変化するかを追いかけます。</p>
+</div>
+
+<h2>9.5 ベクトル化のリマーク</h2>
+
+<p>ループのベクトル化は、失敗の理由が具体的に返ってくるので特に有用です。</p>
+
+<pre><code>void acc(float* a, const float* b, int n) {
+    for (int i = 0; i &lt; n; ++i) a[i] = a[i] * b[i] + a[i - 1];
+}</code></pre>
+
+<pre><code>clang-cl /c /O2 /clang:-Rpass-missed=loop-vectorize ^
+                /clang:-Rpass-analysis=loop-vectorize sample2.cpp</code></pre>
+
+<pre><code>remark: loop not vectorized: unsafe dependent memory operations in loop.
+  Use #pragma clang loop distribute(enable) to allow loop distribution to attempt
+  to isolate the offending operations into a separate loop
+  Backward loop carried data dependence. Memory location is the same as accessed
+  at sample2.cpp:2:54 [-Rpass-analysis=loop-vectorize]
+
+remark: loop not vectorized [-Rpass-missed=loop-vectorize]</code></pre>
+
+<p><code>-Rpass-analysis</code> が「後ろ向きのループ伝搬依存がある」という具体的な理由と、依存元の位置まで示しています。<code>a[i]</code> が <code>a[i-1]</code> に依存しているので、並列に計算できないという指摘です。</p>
+
+<p>成功した場合は次のように出ます。</p>
+
+<pre><code>remark: vectorized loop (vectorization width: 4, interleaved count: 2) [-Rpass=loop-vectorize]</code></pre>
+
+<h2>9.6 リマークの量をどうにかする</h2>
+
+<p>ここまでは小さなサンプルでした。実際のコードにそのまま適用すると、大量のリマークに埋もれます。</p>
+
+<p>LogLab の <code>main.cpp</code> を <code>-Rpass=inline</code> でコンパイルすると、リマークは <strong>136 件</strong>。そのうち自分が書いたソース由来のものは <strong>28 件</strong>だけでした。残りの 8 割は標準ライブラリのヘッダ内部で起きたインライン化です。</p>
+
+<pre><code>...\include\vector(735,2): remark: '??$_Destroy@...' inlined into
+  '??1?$vector@V?$unique_ptr@...' with (cost=always): always inline attribute ...</code></pre>
+
+<p>読む気にならない、というのが正直なところでしょう。対処は三つあります。</p>
+
+<h3>9.6.1 自分のソース由来だけに絞る</h3>
+
+<pre><code>:: Developer Command Prompt
+clang-cl /c /O2 /Iinclude /clang:-Rpass=inline src\tokenizer.cpp 2&gt;&amp;1 ^
+  | findstr /B "src\\"</code></pre>
+
+<pre><code># Developer PowerShell
+clang-cl /c /O2 /Iinclude /clang:-Rpass=inline src\tokenizer.cpp 2&gt;&amp;1 `
+  | Select-String '^src\\'</code></pre>
+
+<h3>9.6.2 マングル名を戻す</h3>
+
+<p>読みたい名前が出てきたら、<code>llvm-undname</code> にかけます。</p>
+
+<pre><code>echo ?parse_line@loglab@@YA_N... | llvm-undname</code></pre>
+
+<h3>9.6.3 そもそもリマークで読むのをやめる</h3>
+
+<p>これが本命です。<strong>リマークは流れて消えるテキストであり、集計にも保存にも向いていません。</strong> 同じ情報を機械可読な形で保存する仕組みが次章の最適化レコードです。「この関数のインライン化だけを今すぐ見たい」ときはリマーク、「全体を俯瞰したい・前回と比べたい」ときはレコード、と使い分けます。</p>
+
+<h2>9.7 ハンズオン — LogLab で読む</h2>
+
+<p>プロジェクトの <strong>追加のオプション</strong> に次を書いてリビルドしてください。</p>
+
+<pre><code>/clang:-Rpass-missed=inline /clang:-gcolumn-info</code></pre>
+
+<p>出力ウィンドウを「ビルド」にして、<code>src\</code> で始まる行を探します。次のことを確認してください。</p>
+
+<ol>
+<li><code>main.cpp</code> から <code>parse_line</code> を呼ぶ箇所に、<code>function definition is not available</code> のリマークが出ているか</li>
+<li><code>Filter::accept()</code> の呼び出しについて、間接呼び出しに関するリマークが出ているか</li>
+<li><code>Stats::add</code> から <code>handle_error</code> への呼び出しはどう扱われているか</li>
+</ol>
+
+<p>1 番が確認できれば、それが第 4 部で LTO を導入する直接の動機になります。確認できたら追加のオプションは消しておいてください（ビルドが遅くなり、出力も長大になるため）。</p>
+
+<h2>9.8 まとめ</h2>
+
+<ul>
+<li>リマークは最適化パス自身による<strong>判断の説明</strong>である</li>
+<li><code>-Rpass</code>（やった）／<code>-Rpass-missed</code>（やらなかった）／<code>-Rpass-analysis</code>（その材料）の三種類。引数はパス名の正規表現</li>
+<li>clang-cl では <strong><code>/clang:</code> が必須</strong>。付けないと警告だけ出て何も表示されない</li>
+<li>インライン化の判定は <code>cost ≤ threshold</code>。<code>cost=always</code> / <code>cost=never</code> は属性による強制</li>
+<li><code>function definition is not available</code> は LTO が、<code>indirect call</code> はデバーチャライズと PGO が解決する問題</li>
+<li><code>/Z7</code> を使うと桁情報が落ちる。<code>/clang:-gcolumn-info</code> で戻せる</li>
+<li>実コードではリマークの 8 割が標準ライブラリ由来。フィルタするか、次章のレコードに移行する</li>
+</ul>
+
+<p class="next"><strong>次章では</strong>、同じ情報を YAML ファイルとして保存する <code>-fsave-optimization-record</code> を扱います。ファイルになれば、集計もできますし、前回のビルドとの比較もできます。さらに opt-viewer を使えば、ソースコード上に最適化の判断を重ねた HTML を生成できます。第 4 部以降で「LTO の前後を比べる」ときの主力になります。</p>
+
+</div>
+</body>
+</html>

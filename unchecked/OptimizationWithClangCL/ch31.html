@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第31章 最適化ビルド — Clang最適化入門</title>
+<style>
+:root{
+  --ink:#1b1d21; --sub:#5c626b; --line:#dfe3e8; --bg:#fff;
+  --code-bg:#f5f7f9; --code-ink:#22262b; --accent:#2f5d8a;
+  --note-bg:#eef4fa; --note-line:#4a80b5;
+  --warn-bg:#fdf4ec; --warn-line:#c07830;
+  --tip-bg:#eef7f1; --tip-line:#4a8c5f;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Meiryo",system-ui,sans-serif;
+  font-size:16px; line-height:1.9; text-align:justify;
+}
+.book{max-width:46rem; margin:0 auto; padding:3rem 1.25rem 6rem}
+.chapno{font-size:.82rem; letter-spacing:.18em; color:var(--accent); font-weight:700; margin:0 0 .4rem}
+h1{font-size:1.85rem; line-height:1.45; margin:0 0 .6rem; letter-spacing:.01em}
+.lead{color:var(--sub); font-size:1.02rem; margin:0 0 2.5rem; padding-bottom:2rem; border-bottom:2px solid var(--line)}
+h2{font-size:1.32rem; margin:3.2rem 0 1rem; padding-bottom:.45rem; border-bottom:1px solid var(--line); letter-spacing:.01em}
+h3{font-size:1.08rem; margin:2.2rem 0 .7rem; color:#2c3239}
+h4{font-size:.98rem; margin:1.6rem 0 .5rem; color:#3a4048}
+p{margin:0 0 1.1rem}
+ul,ol{margin:0 0 1.2rem; padding-left:1.5rem}
+li{margin:.4rem 0}
+code{
+  font-family:"Cascadia Mono","Consolas","SF Mono",monospace;
+  font-size:.88em; background:var(--code-bg); padding:.12em .38em;
+  border-radius:3px; border:1px solid var(--line); word-break:break-all;
+}
+pre{
+  background:var(--code-bg); color:var(--code-ink); border:1px solid var(--line);
+  border-left:3px solid var(--accent); border-radius:4px;
+  padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.6;
+}
+pre code{background:none; border:none; padding:0; font-size:.85rem; word-break:normal}
+.cap{font-size:.83rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+.box{border-radius:4px; padding:.95rem 1.15rem; margin:1.6rem 0; font-size:.95rem}
+.box p:last-child{margin-bottom:0}
+.box .t{font-weight:700; font-size:.86rem; letter-spacing:.06em; display:block; margin-bottom:.4rem}
+.note{background:var(--note-bg); border-left:4px solid var(--note-line)}
+.note .t{color:var(--note-line)}
+.warn{background:var(--warn-bg); border-left:4px solid var(--warn-line)}
+.warn .t{color:var(--warn-line)}
+.tip{background:var(--tip-bg); border-left:4px solid var(--tip-line)}
+.tip .t{color:var(--tip-line)}
+table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+th{background:var(--code-bg); font-weight:700}
+figure{margin:2rem 0}
+figure svg{display:block; width:100%; height:auto}
+figcaption{font-size:.83rem; color:var(--sub); text-align:center; margin-top:.7rem}
+.goal{border:1px solid var(--line); border-top:3px solid var(--accent); border-radius:4px; padding:1.1rem 1.3rem; margin:0 0 2.4rem; background:#fbfcfd}
+.goal h2{margin:0 0 .6rem; font-size:1rem; border:none; padding:0; letter-spacing:.06em}
+.goal ul{margin-bottom:0}
+.next{margin-top:3.5rem; padding-top:1.4rem; border-top:2px solid var(--line); color:var(--sub); font-size:.95rem}
+.next strong{color:var(--ink)}
+.chk{list-style:none; padding-left:0}
+.chk li{padding-left:1.7rem; position:relative}
+.chk li::before{content:"\2610"; position:absolute; left:.2rem; color:var(--accent); font-size:1.05rem}
+.path{font-size:.93rem; color:var(--sub); background:var(--code-bg); border:1px solid var(--line); border-radius:3px; padding:.5rem .8rem; margin:0 0 1.2rem}
+.partend{margin-top:3rem; padding:1.2rem 1.4rem; border:2px solid var(--accent); border-radius:5px; background:#fbfcfd}
+.partend h3{margin-top:0; color:var(--accent)}
+.real{border-left-color:var(--tip-line)}
+@media (prefers-color-scheme:dark){
+  :root{
+    --ink:#e6e8ea; --sub:#a2a9b2; --line:#333940; --bg:#16181b;
+    --code-bg:#1e2126; --code-ink:#dfe3e8; --accent:#7fb0dd;
+    --note-bg:#1b2530; --note-line:#5f96c9;
+    --warn-bg:#2b2118; --warn-line:#d09154;
+    --tip-bg:#182619; --tip-line:#6aad7d;
+  }
+  h3{color:#d5d9dd} h4{color:#c3c9cf}
+  .goal,.partend{background:#1a1d21}
+}
+</style>
+</head>
+<body>
+<div class="book">
+
+<p class="chapno">第 31 章</p>
+<h1>最適化ビルド<br>— <code>-fprofile-use</code> を適用する</h1>
+<p class="lead">三段階の最後です。集めたプロファイルをコンパイラに渡し、その結果を第 15 章の手順で測ります。そして本書で最も重要な計測上の教訓が、この章で出てきます——<strong>同じバイナリでも、マシンが変われば結論が変わりました。</strong></p>
+
+<div class="goal">
+<h2>この章のゴール</h2>
+<ul>
+<li>プロファイルを使って最適化ビルドを作る</li>
+<li>正しさを検証する</li>
+<li>効果を測定し、ノイズ床と比較する</li>
+<li><strong>その結果がハードウェアに依存することを知る</strong></li>
+<li>三段階を一つのスクリプトにまとめる</li>
+</ul>
+</div>
+
+<h2>31.1 オプション</h2>
+
+<p class="path"><strong>構成プロパティ &gt; C/C++ &gt; コマンド ライン &gt; 追加のオプション</strong></p>
+
+<pre><code>/clang:-fprofile-use=C:\work\ClangOptLab\app.profdata</code></pre>
+
+<p>計装ビルドの <code>/clang:-fprofile-generate</code> は<strong>外してください</strong>。両方を同時に指定してはいけません。</p>
+
+<div class="box tip">
+<span class="t">相対パスとマクロ</span>
+<p>MSBuild のマクロが使えるので、プロジェクトを移動しても壊れない書き方ができます。</p>
+<pre><code>/clang:-fprofile-use=$(ProjectDir)app.profdata</code></pre>
+<p>ただしパスに空白が含まれる場合は注意が必要です。うまくいかないときは、まず絶対パスで動くことを確認してから調整してください。</p>
+</div>
+
+<h2>31.2 ビルドと検証</h2>
+
+<ol>
+<li>追加のオプションを <code>/clang:-fprofile-use=...</code> に変える</li>
+<li><code>/O2</code> はそのまま</li>
+<li>リビルドする</li>
+<li>実行して <strong>checksum が <code>0x0e8685105a08f105</code></strong> であることを確認する</li>
+<li><code>accepted</code> が <code>4941900</code> であることを確認する</li>
+<li>できた <code>.exe</code> と <code>.pdb</code> を <code>builds\pgo\</code> に退避する</li>
+</ol>
+
+<div class="box warn">
+<span class="t">プロファイルが見つからないとき</span>
+<p>指定したファイルが存在しない場合、Clang はエラーを出します。逆に、<strong>プロファイルにその関数の記録が無い場合はエラーになりません</strong>。黙って「プロファイルの無い関数」として扱われます。</p>
+<p>つまり「パスを間違えていた」以外に「トレーニングでその関数を通っていなかった」という可能性が常にあります。第 34 章でこの区別を扱います。</p>
+</div>
+
+<h2>31.3 測る</h2>
+
+<p>第 15 章の手順です。<strong>まず空試験でノイズ床を確認</strong>してから比較します。</p>
+
+<pre><code>:: 空試験
+copy builds\baseline\ClangOptLab.exe builds\baseline2\ClangOptLab.exe
+python bench.py builds\baseline\ClangOptLab.exe builds\baseline2\ClangOptLab.exe -n 10 --args 200000 30
+  最小値の差: +0.38%          &lt;- ノイズ床
+
+:: 本番
+python bench.py builds\baseline\ClangOptLab.exe builds\pgo\ClangOptLab.exe -n 10 --args 200000 30</code></pre>
+
+<h3>31.3.1 結果 — 環境 A</h3>
+
+<table>
+<thead><tr><th>試行</th><th>最小値の差（基準ビルド比）</th></tr></thead>
+<tbody>
+<tr><td>空試験（ノイズ床）</td><td>+0.38%</td></tr>
+<tr><td>試行 1</td><td><strong>&minus;7.96%</strong></td></tr>
+<tr><td>試行 2</td><td><strong>&minus;6.65%</strong></td></tr>
+<tr><td>試行 3</td><td><strong>&minus;7.52%</strong></td></tr>
+<tr><td>試行 4</td><td><strong>&minus;8.95%</strong></td></tr>
+<tr><td>試行 5</td><td><strong>&minus;7.77%</strong></td></tr>
+<tr><td>試行 6</td><td><strong>&minus;6.47%</strong></td></tr>
+<tr><td>A と B を入れ替えて</td><td>基準ビルドが +11.19% 遅い（同じ結論）</td></tr>
+</tbody>
+</table>
+<p class="cap">環境 A での実測。n=8〜10、交互実行、最小値比較</p>
+
+<p>6 回すべてで同じ向きの結果が出ており、ノイズ床 0.38% を一桁上回っています。第 15 章の基準では、疑いようのない差です。</p>
+
+<h3>31.3.2 ところが — 環境 B では差が消えました</h3>
+
+<p>本書の実測は、途中で別のマシンに移りました。まったく同じ実行ファイルを、まったく同じ手順で測り直した結果がこれです。</p>
+
+<table>
+<thead><tr><th>ビルド</th><th>環境 A（基準比）</th><th>環境 B（基準比）</th></tr></thead>
+<tbody>
+<tr><td>空試験（ノイズ床）</td><td>+0.38%</td><td>+0.00%</td></tr>
+<tr><td>ThinLTO（第 20 章）</td><td>&minus;0.35%</td><td>&minus;0.35%</td></tr>
+<tr><td>Full LTO（第 20 章）</td><td>+0.23〜+0.62%</td><td>+0.68%</td></tr>
+<tr><td><strong>PGO</strong></td><td><strong>&minus;6.5 〜 &minus;9.0%</strong></td><td><strong>&minus;0.66%</strong></td></tr>
+</tbody>
+</table>
+<p class="cap">環境 B は Intel Xeon 2.80GHz / L3 33 MB / 2 コア。n=30、交互実行</p>
+
+<p><strong>PGO の効果が、環境 B ではノイズ床の水準まで縮みました。</strong> 中央値で比べると +0.21%、つまり逆方向です。バイナリは同一で、第 32 章で確認するコンパイラの判断も同一です。</p>
+
+<div class="box warn">
+<span class="t">これは測定の失敗ではありません</span>
+<p>LTO の結果は両環境で一致しています（どちらもノイズ床以下）。ノイズ床自体も 0.38% と 0.00% で、測定が壊れていたわけではありません。<strong>PGO の効果だけが、ハードウェアによって現れたり現れなかったりした</strong>のです。</p>
+</div>
+
+<h3>31.3.3 なぜ環境で変わるのか</h3>
+
+<p>第 32 章で詳しく見ますが、LogLab における PGO の効果の正体は<strong>コード配置とインライン化の抑制</strong>——つまり命令キャッシュに関わる効果でした。そして命令キャッシュの挙動は、CPU によって大きく異なります。</p>
+
+<ul>
+<li>キャッシュの容量と構成</li>
+<li>プリフェッチャの賢さ</li>
+<li>分岐予測器の規模</li>
+<li>命令デコーダやマイクロオペキャッシュの構造</li>
+</ul>
+
+<p>環境 B は L3 が 33 MB あります。LogLab の <code>.text</code> は 8 KB 程度でした。<strong>コードも作業データもキャッシュに余裕で収まる環境では、配置を改善しても得るものがありません。</strong></p>
+
+<p>これは第 20 章で LTO の効果が測れなかった理由として挙げた分析——「題材が小さく、命令キャッシュに全部載ってしまう」——と同じ話です。環境 A ではその余裕が少なく、環境 B では十分にあった、ということになります。</p>
+
+<div class="box note">
+<span class="t">本書の報告の仕方</span>
+<p>第 15 章 15.8 節の書式に、環境の情報を足します。</p>
+<blockquote style="border-left:3px solid var(--accent); padding-left:1rem; margin:1rem 0; color:var(--sub)">
+LogLab において、PGO による実行時間の差は<strong>環境に強く依存した</strong>。環境 A では最小値で 6.5〜9.0% 短縮（n=8〜10、交互実行、6 回試行、ノイズ床 0.38%）。環境 B（Xeon 2.80GHz / L3 33MB）では &minus;0.66%（n=30、ノイズ床 0.00%）で、差は測れなかった。<strong>コンパイラの判断は両環境で同一</strong>（第 32 章）。
+</blockquote>
+</div>
+
+<div class="box tip">
+<span class="t">この経験から学べること</span>
+<p>本書はここまで「自分の環境で測れ」と繰り返してきました。その理由が、いま具体的な形で現れました。<strong>他人が報告した最適化の効果は、あなたの環境では再現しないかもしれません。</strong> 本書の数字も例外ではありません。</p>
+<p>そして、だからこそ<strong>二本立ての評価</strong>が要ります。</p>
+<ul>
+<li><strong>コンパイラの判断</strong>（最適化レコード）——決定的。環境によらず同じ</li>
+<li><strong>実行時間</strong>——確率的。ハードウェアに依存する</li>
+</ul>
+<p>前者で「最適化が機能していること」を確認し、後者で「あなたの環境で得があるか」を判断する。第 10 章でレコードを重視した理由が、ここに帰結します。</p>
+</div>
+
+<h2>31.4 三段階をスクリプトにまとめる</h2>
+
+<p>PGO は手順が多く、順番を間違えやすいものです。一連の流れをスクリプトにしておきます。</p>
+
+<pre><code>@echo off
+:: pgo.cmd — 計装 → トレーニング → 最適化 を一気に行う
+setlocal
+set ROOT=%~dp0
+set SLN=%ROOT%ClangOptLab.sln
+set PROFDIR=%ROOT%prof
+set PROFDATA=%ROOT%app.profdata
+
+echo ========== [1/4] 計装ビルド ==========
+msbuild "%SLN%" /p:Configuration=Release /p:Platform=x64 ^
+    /p:ClangExtraOptions=/clang:-fprofile-generate /t:Rebuild || exit /b 1
+if not exist "%ROOT%builds\instr" mkdir "%ROOT%builds\instr"
+copy /y "%ROOT%x64\Release\ClangOptLab.*" "%ROOT%builds\instr\" &gt;nul
+
+echo ========== [2/4] トレーニング ==========
+if exist "%PROFDIR%" rmdir /s /q "%PROFDIR%"
+mkdir "%PROFDIR%"
+set LLVM_PROFILE_FILE=%PROFDIR%\run-%%p.profraw
+"%ROOT%builds\instr\ClangOptLab.exe" 200000 10 &gt;nul
+"%ROOT%builds\instr\ClangOptLab.exe"  20000 20 &gt;nul
+"%ROOT%builds\instr\ClangOptLab.exe" 500000  4 &gt;nul
+set LLVM_PROFILE_FILE=
+
+echo ========== [3/4] マージ ==========
+llvm-profdata merge -output="%PROFDATA%" "%PROFDIR%\*.profraw" || exit /b 1
+llvm-profdata show "%PROFDATA%" | findstr /C:"Total functions" /C:"Maximum function count"
+
+echo ========== [4/4] 最適化ビルド ==========
+msbuild "%SLN%" /p:Configuration=Release /p:Platform=x64 ^
+    /p:ClangExtraOptions=/clang:-fprofile-use=%PROFDATA% /t:Rebuild || exit /b 1
+if not exist "%ROOT%builds\pgo" mkdir "%ROOT%builds\pgo"
+copy /y "%ROOT%x64\Release\ClangOptLab.*" "%ROOT%builds\pgo\" &gt;nul
+
+echo.
+echo 完了: builds\pgo\ClangOptLab.exe
+endlocal</code></pre>
+<p class="cap">リスト 31-1　pgo.cmd</p>
+
+<div class="box note">
+<span class="t"><code>ClangExtraOptions</code> について</span>
+<p>このスクリプトは、追加のオプションを MSBuild のプロパティ経由で切り替えています。そのためには <code>.vcxproj</code> 側で、そのプロパティを受け取る記述が必要です。</p>
+<pre><code>&lt;ClCompile&gt;
+  &lt;AdditionalOptions&gt;$(ClangExtraOptions) %(AdditionalOptions)&lt;/AdditionalOptions&gt;
+&lt;/ClCompile&gt;</code></pre>
+<p>プロパティシートを使ったより整った方法は第 39 章で扱います。まずは手でプロパティを切り替える運用でも構いません。<strong>大事なのは、三段階が順番どおりに実行され、途中の成果物が正しく引き継がれること</strong>です。</p>
+</div>
+
+<h3>31.4.1 順番を間違えるとどうなるか</h3>
+
+<table>
+<thead><tr><th>間違い</th><th>症状</th></tr></thead>
+<tbody>
+<tr><td>トレーニング前の古いプロファイルを使ってしまう</td><td>ソースを変えていれば第 34 章の警告が出る。変えていなければ気づけない</td></tr>
+<tr><td>計装ビルドで測ってしまう</td><td>2 倍遅い数字が出る。「PGO で遅くなった」と誤解する</td></tr>
+<tr><td>プロファイルを消し忘れて足し込む</td><td>意図しない配合になる</td></tr>
+<tr><td><code>-fprofile-generate</code> を外し忘れる</td><td>計装と最適化が同時指定になり、意図が不明な状態になる</td></tr>
+</tbody>
+</table>
+
+<p>二番目が特に多い失敗です。<strong>測るのは必ず最適化ビルド（第 4 段階の成果物）</strong>です。</p>
+
+<h2>31.5 効かなかったときの調べ方</h2>
+
+<p>あなたのプロジェクトで効果が出なかった場合、次の順で確認してください。</p>
+
+<ol>
+<li><strong>本当に最適化ビルドを測っているか。</strong> <code>.exe</code> のサイズと更新日時を確認する</li>
+<li><strong>プロファイルが渡っているか。</strong> ビルドログで <code>-fprofile-use=</code> の行を確認する（第 3 章）</li>
+<li><strong>プロファイルの中身は妥当か。</strong> <code>llvm-profdata show --topn</code>（第 30 章）</li>
+<li><strong>トレーニングは代表的か。</strong> <code>overlap</code> で規模違いを比較（第 28 章）</li>
+<li><strong>コンパイラの判断は変わったか。</strong> 最適化レコードを比較（第 32 章）</li>
+<li><strong>そもそも測れる差なのか。</strong> ノイズ床を確認（第 15 章）</li>
+</ol>
+
+<p>5 番が重要です。時間が動かなくても、<strong>コンパイラの判断が変わっていれば PGO は機能しています</strong>。あとは「その判断の変化が、この題材では時間に現れなかった」という第 20 章と同じ話になります。</p>
+
+<h2>31.6 ハンズオン</h2>
+
+<ol>
+<li>追加のオプションを <code>/clang:-fprofile-use=&lt;絶対パス&gt;</code> に変えてリビルドする</li>
+<li>checksum と accepted を確認する</li>
+<li><code>builds\pgo\</code> に退避する</li>
+<li>空試験でノイズ床を測る</li>
+<li><code>bench.py</code> で基準ビルドと比較する</li>
+<li>少なくとも 3 回試行し、向きが揃うことを確認する</li>
+<li>A と B を入れ替えても同じ結論になることを確認する</li>
+</ol>
+
+<h2>31.7 まとめ</h2>
+
+<ul>
+<li>最適化ビルドは <code>/clang:-fprofile-use=&lt;file&gt;</code>。<code>-fprofile-generate</code> は外す</li>
+<li>プロファイルに記録の無い関数は<strong>エラーにならず</strong>、単にプロファイル無しとして扱われる</li>
+<li>LogLab では、<strong>環境 A で 6.5〜9.0% 短縮</strong>（ノイズ床 0.38%、6 回試行で再現）。<strong>環境 B では &minus;0.66% でノイズ床以下</strong>だった</li>
+<li>同じバイナリ・同じ手順でこの差が出る。PGO の効果は<strong>命令キャッシュに関わるため、CPU に強く依存する</strong></li>
+<li>評価は二本立てで行う。<strong>コンパイラの判断は決定的、実行時間は環境依存</strong></li>
+<li>三段階はスクリプト化する。<strong>測るのは最適化ビルド</strong>という点を間違えない</li>
+<li>効果が出ないときは「測っている対象 → オプション → プロファイルの中身 → トレーニング → 判断の変化 → ノイズ床」の順で確認する</li>
+</ul>
+
+<p class="next"><strong>次章は第 5 部の山場です。</strong> なぜ 7% 速くなったのか。コンパイラは何を変えたのか。最適化レコードを突き合わせると、直感に反する事実が見つかります——<strong>PGO はインライン化を「減らし」ていました。</strong></p>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第8章 生成コードを見る — Clang最適化入門</title>
+<style>
+:root{
+  --ink:#1b1d21; --sub:#5c626b; --line:#dfe3e8; --bg:#fff;
+  --code-bg:#f5f7f9; --code-ink:#22262b; --accent:#2f5d8a;
+  --note-bg:#eef4fa; --note-line:#4a80b5;
+  --warn-bg:#fdf4ec; --warn-line:#c07830;
+  --tip-bg:#eef7f1; --tip-line:#4a8c5f;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Meiryo",system-ui,sans-serif;
+  font-size:16px; line-height:1.9; text-align:justify;
+}
+.book{max-width:46rem; margin:0 auto; padding:3rem 1.25rem 6rem}
+.chapno{font-size:.82rem; letter-spacing:.18em; color:var(--accent); font-weight:700; margin:0 0 .4rem}
+h1{font-size:1.85rem; line-height:1.45; margin:0 0 .6rem; letter-spacing:.01em}
+.lead{color:var(--sub); font-size:1.02rem; margin:0 0 2.5rem; padding-bottom:2rem; border-bottom:2px solid var(--line)}
+h2{font-size:1.32rem; margin:3.2rem 0 1rem; padding-bottom:.45rem; border-bottom:1px solid var(--line); letter-spacing:.01em}
+h3{font-size:1.08rem; margin:2.2rem 0 .7rem; color:#2c3239}
+h4{font-size:.98rem; margin:1.6rem 0 .5rem; color:#3a4048}
+p{margin:0 0 1.1rem}
+ul,ol{margin:0 0 1.2rem; padding-left:1.5rem}
+li{margin:.4rem 0}
+code{
+  font-family:"Cascadia Mono","Consolas","SF Mono",monospace;
+  font-size:.88em; background:var(--code-bg); padding:.12em .38em;
+  border-radius:3px; border:1px solid var(--line); word-break:break-all;
+}
+pre{
+  background:var(--code-bg); color:var(--code-ink); border:1px solid var(--line);
+  border-left:3px solid var(--accent); border-radius:4px;
+  padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.6;
+}
+pre code{background:none; border:none; padding:0; font-size:.85rem; word-break:normal}
+.cap{font-size:.83rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+.box{border-radius:4px; padding:.95rem 1.15rem; margin:1.6rem 0; font-size:.95rem}
+.box p:last-child{margin-bottom:0}
+.box .t{font-weight:700; font-size:.86rem; letter-spacing:.06em; display:block; margin-bottom:.4rem}
+.note{background:var(--note-bg); border-left:4px solid var(--note-line)}
+.note .t{color:var(--note-line)}
+.warn{background:var(--warn-bg); border-left:4px solid var(--warn-line)}
+.warn .t{color:var(--warn-line)}
+.tip{background:var(--tip-bg); border-left:4px solid var(--tip-line)}
+.tip .t{color:var(--tip-line)}
+table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+th{background:var(--code-bg); font-weight:700}
+figure{margin:2rem 0}
+figure svg{display:block; width:100%; height:auto}
+figcaption{font-size:.83rem; color:var(--sub); text-align:center; margin-top:.7rem}
+.goal{border:1px solid var(--line); border-top:3px solid var(--accent); border-radius:4px; padding:1.1rem 1.3rem; margin:0 0 2.4rem; background:#fbfcfd}
+.goal h2{margin:0 0 .6rem; font-size:1rem; border:none; padding:0; letter-spacing:.06em}
+.goal ul{margin-bottom:0}
+.next{margin-top:3.5rem; padding-top:1.4rem; border-top:2px solid var(--line); color:var(--sub); font-size:.95rem}
+.next strong{color:var(--ink)}
+.chk{list-style:none; padding-left:0}
+.chk li{padding-left:1.7rem; position:relative}
+.chk li::before{content:"\2610"; position:absolute; left:.2rem; color:var(--accent); font-size:1.05rem}
+.path{font-size:.93rem; color:var(--sub); background:var(--code-bg); border:1px solid var(--line); border-radius:3px; padding:.5rem .8rem; margin:0 0 1.2rem}
+.partend{margin-top:3rem; padding:1.2rem 1.4rem; border:2px solid var(--accent); border-radius:5px; background:#fbfcfd}
+.partend h3{margin-top:0; color:var(--accent)}
+.real{border-left-color:var(--tip-line)}
+@media (prefers-color-scheme:dark){
+  :root{
+    --ink:#e6e8ea; --sub:#a2a9b2; --line:#333940; --bg:#16181b;
+    --code-bg:#1e2126; --code-ink:#dfe3e8; --accent:#7fb0dd;
+    --note-bg:#1b2530; --note-line:#5f96c9;
+    --warn-bg:#2b2118; --warn-line:#d09154;
+    --tip-bg:#182619; --tip-line:#6aad7d;
+  }
+  h3{color:#d5d9dd} h4{color:#c3c9cf}
+  .goal,.partend{background:#1a1d21}
+}
+</style>
+</head>
+<body>
+<div class="book">
+
+<p class="chapno">第 8 章</p>
+<h1>生成コードを見る<br>— <code>/FA</code>、llvm-objdump、逆アセンブルウィンドウ</h1>
+<p class="lead">最適化の結果を最終的に裏付けるのは、生成された機械語です。この章では三つの見方を使い分けられるようにし、そこから何を読み取るべきかを整理します。全部を読む必要はありません。見るべき場所は決まっています。</p>
+
+<div class="goal">
+<h2>この章のゴール</h2>
+<ul>
+<li><code>/FA</code> でアセンブリリストを出力する</li>
+<li><code>llvm-objdump</code> を読みやすい設定で使う</li>
+<li>Visual Studio の逆アセンブルウィンドウを使う</li>
+<li>最適化の痕跡をどこに探せばよいかを知る</li>
+<li>ベースラインを保存し、あとで差分を取れる形にしておく</li>
+</ul>
+</div>
+
+<h2>8.1 三つの見方の使い分け</h2>
+
+<table>
+<thead><tr><th>手段</th><th>見えるもの</th><th>向いている場面</th></tr></thead>
+<tbody>
+<tr><td><code>/FA</code>（アセンブリリスト）</td><td>コンパイル時点の 1 翻訳単位。ラベル名・セクション情報が残る</td><td>特定の関数がどう出力されたかを丁寧に読む</td></tr>
+<tr><td><code>llvm-objdump</code></td><td>リンク後の <code>.exe</code> / <code>.obj</code> 全体</td><td><strong>LTO の効果を見る</strong>。全体を検索・差分する</td></tr>
+<tr><td>逆アセンブルウィンドウ</td><td>実行中のプロセスの実際のコード</td><td>デバッガで止めた場所の周辺を確認する</td></tr>
+</tbody>
+</table>
+
+<p>本書でいちばん使うのは <code>llvm-objdump</code> です。LTO はリンク時に働くため、コンパイル時点の <code>/FA</code> では効果が見えないからです。</p>
+
+<h2>8.2 <code>/FA</code> — アセンブリリストを出す</h2>
+
+<pre><code>clang-cl /c /O2 /FA sample.cpp</code></pre>
+
+<p><code>sample.asm</code> が生成されます。第 7 章のリスト 7-1 に対する出力から、<code>caller</code> の部分を抜き出したものが次です。</p>
+
+<pre><code>"?caller@@YAHH@Z":                      # @"?caller@@YAHH@Z"
+# %bb.0:
+        test    ecx, ecx
+        jle     .LBB1_1
+# %bb.2:
+        mov     edx, ecx
+        and     edx, 3
+        cmp     ecx, 4
+        jae     .LBB1_7
+# %bb.3:
+        xor     r8d, r8d
+        xor     eax, eax
+        jmp     .LBB1_4
+.LBB1_1:
+        xor     eax, eax
+        ret
+.LBB1_7:
+        and     ecx, 2147483644
+        xor     r8d, r8d
+        xor     eax, eax
+        .p2align        4, 0x90
+.LBB1_8:                                # =&gt;This Inner Loop Header: Depth=1
+        mov     r9d, r8d</code></pre>
+<p class="cap">clang-cl /FA の出力（抜粋）</p>
+
+<p>ここから読み取れることが三つあります。</p>
+
+<ul>
+<li><strong>Intel 構文である。</strong> 出力の先頭に <code>.intel_syntax noprefix</code> が付きます（<code>mov 宛先, 元</code> の順）。MSVC のリストと同じ向きなので、読み替えは不要です</li>
+<li><strong>ループが 4 回展開されている。</strong> <code>and edx, 3</code> と <code>cmp ecx, 4</code>、<code>and ecx, 2147483644</code>（＝ <code>~3</code>）は、反復回数を 4 で割った商と余りに分ける処理です。<code>helper()</code> はインライン化され、その本体が 4 つ並べられています</li>
+<li><strong><code># %bb.0</code> や <code>Depth=1</code> といったコメントが付く。</strong> これは LLVM が付ける基本ブロックの識別子で、IR の構造を追うときの手がかりになります</li>
+</ul>
+
+<div class="box warn">
+<span class="t"><code>/FAsc</code> は MSVC と同じようには動きません</span>
+<p>MSVC の <code>/FAsc</code> は、アセンブリにソース行と機械語バイトを織り交ぜた読みやすいリストを出します。clang-cl も <code>/FAsc</code> を<strong>受け付けますが、出力は <code>/FA</code> とまったく同じ</strong>です（実測で確認済み）。ソースとの対応を見たい場合は、次節の <code>llvm-objdump</code> か、逆アセンブルウィンドウを使ってください。</p>
+</div>
+
+<h2>8.3 <code>llvm-objdump</code> — リンク後の姿を見る</h2>
+
+<p>第 5 章で一度使いましたが、あらためて読みやすい設定を決めておきます。</p>
+
+<pre><code>llvm-objdump -d --demangle --x86-asm-syntax=intel --no-show-raw-insn ^
+    ClangOptLab.exe &gt; disasm.txt</code></pre>
+
+<table>
+<thead><tr><th>オプション</th><th>効果</th></tr></thead>
+<tbody>
+<tr><td><code>-d</code></td><td>実行可能セクションを逆アセンブルする</td></tr>
+<tr><td><code>--demangle</code></td><td>C++ の名前を読める形に戻す</td></tr>
+<tr><td><code>--x86-asm-syntax=intel</code></td><td>Intel 構文にする（既定は AT&amp;T 構文）</td></tr>
+<tr><td><code>--no-show-raw-insn</code></td><td>機械語のバイト列を省く。<strong>差分を取るときに重要</strong></td></tr>
+</tbody>
+</table>
+
+<p>この設定での出力例です。</p>
+
+<pre><code>    3766:       call    0x3d20 &lt;loglab::parse_line(std::basic_string_view&lt;char, ...&gt;, loglab::Record&amp;)&gt;
+    376b:       test    al, al
+    376d:       je      0x372d &lt;main+0x1fd&gt;
+    376f:       mov     r13, qword ptr [rsp + 0x18]
+    3774:       mov     r14, qword ptr [rsp + 0x20]
+    3779:       cmp     r13, r14
+    377c:       je      0x3720 &lt;main+0x1f0&gt;
+    377e:       nop
+    3780:       mov     rdi, qword ptr [r13]
+    3784:       mov     rax, qword ptr [rdi]
+    3787:       mov     rsi, r12
+    378a:       call    qword ptr [rax + 0x10]</code></pre>
+
+<h3>8.3.1 関数を絞る</h3>
+
+<p>実行ファイル全体は数万行になります。特定の関数だけを見たいときは <code>--disassemble-symbols</code> を使います。</p>
+
+<pre><code>llvm-objdump -d --demangle --x86-asm-syntax=intel --no-show-raw-insn ^
+    --disassemble-symbols="?parse_line@loglab@@YA_NV?$basic_string_view@DU?$char_traits@D@std@@@std@@AEAURecord@1@@Z" ^
+    ClangOptLab.exe</code></pre>
+
+<p>マングル名を手で打つのは現実的ではないので、次のようにシンボル一覧から探すのが実用的です。</p>
+
+<pre><code>:: 関数の一覧を出す
+llvm-objdump --syms --demangle ClangOptLab.exe | findstr parse_line</code></pre>
+
+<h2>8.4 Visual Studio の逆アセンブルウィンドウ</h2>
+
+<p>デバッグ実行中に <strong>デバッグ &gt; ウィンドウ &gt; 逆アセンブル</strong>（<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>D</kbd>）で開きます。<strong>デバッグを開始していないと開けません</strong>ので、まずブレークポイントを置いて止めてください。</p>
+
+<p>このウィンドウの利点は、ソース行と機械語が対応付けて表示されることです。<code>/FA</code> では得られない情報が、ここでは見られます。</p>
+
+<div class="box warn">
+<span class="t">最適化されたコードのデバッグは混乱します</span>
+<p>Release 構成でステップ実行すると、カーソルが行を飛び越え、逆戻りし、ローカル変数が「最適化により使用できません」と表示されます。これは壊れているのではなく、命令が並べ替えられ、変数がレジスタに載り、関数が展開された結果です。</p>
+<p>混乱を避けるコツは、<strong>ソース行を追うのをやめて、逆アセンブルウィンドウだけを見る</strong>ことです。行単位ではなく命令単位でステップ実行すれば、実際に起きていることと表示が一致します。</p>
+</div>
+
+<h2>8.5 どこを見るのか — 四つの着眼点</h2>
+
+<p>逆アセンブルを頭から読む必要はありません。本書で追いかけるのは次の四つです。</p>
+
+<h3>8.5.1 呼び出しの形</h3>
+
+<table>
+<thead><tr><th>見た目</th><th>意味</th><th>本書での扱い</th></tr></thead>
+<tbody>
+<tr><td><code>call 0x3d20 &lt;関数名&gt;</code></td><td>直接呼び出し。呼び先が確定している</td><td>LTO でこれが消える（＝インライン化される）かを見る。第 20 章</td></tr>
+<tr><td><code>call qword ptr [rax + 0x10]</code></td><td>間接呼び出し。仮想関数テーブル経由</td><td>デバーチャライズ（第 21 章）、間接呼び出しの投機的展開（第 32 章）</td></tr>
+<tr><td>呼び出しが<strong>無い</strong></td><td>インライン展開された</td><td>これが最も見たい状態</td></tr>
+</tbody>
+</table>
+
+<h3>8.5.2 ループ展開の痕跡</h3>
+
+<p>同じ演算パターンが 2 回、4 回、8 回と繰り返されていたら展開されています。前節の <code>and edx, 3</code> のような「余りを分離する」処理が近くにあるのも目印です。</p>
+
+<h3>8.5.3 ベクトル化の痕跡</h3>
+
+<p><code>xmm</code> / <code>ymm</code> レジスタが出てきたら SIMD 化されています。<code>movdqu</code>、<code>paddd</code>、<code>vpmulld</code> のような命令が並びます。LogLab は文字列処理が中心なのでベクトル化は限定的ですが、<code>memcmp</code> 相当の比較などで現れることがあります。</p>
+
+<h3>8.5.4 コールドコードの配置</h3>
+
+<p>関数の末尾や、別セクションに追いやられたコード片。第 4 章で作った <code>handle_error()</code> のような「めったに通らない処理」が、ホットな経路から離れた場所に置かれているかどうかを見ます。<strong>いまの <code>/O2</code> ではまだ分離されていません。</strong> PGO を有効にすると変わります（第 32 章）。</p>
+
+<h2>8.6 ベースラインを保存する</h2>
+
+<p>この章の実用的な成果物は、あとで差分を取るための基準ファイルです。</p>
+
+<pre><code>cd x64\Release
+llvm-objdump -d --demangle --x86-asm-syntax=intel --no-show-raw-insn ^
+    ClangOptLab.exe &gt; ..\..\baseline_O2.asm</code></pre>
+
+<div class="box tip">
+<span class="t">差分を取りやすくする工夫</span>
+<p><code>--no-show-raw-insn</code> を付けるのは、機械語のバイト列が差分のノイズになるからです。それでも命令が一つ増減するだけで以降のアドレスがすべてずれるため、素直に <code>fc</code> や <code>diff</code> にかけると全行が差分として出てしまいます。</p>
+<p>実用的なのは、次のような比較です。</p>
+<ul>
+<li>特定の関数だけを <code>--disassemble-symbols</code> で切り出して比較する</li>
+<li>関数ごとの命令数を数えて比較する（<code>findstr /C:"call" | find /c /v ""</code> など）</li>
+<li><code>call</code> 命令の一覧だけを抜き出して比較する ← <strong>LTO の効果を見るにはこれが最も分かりやすい</strong></li>
+</ul>
+</div>
+
+<p>最後の方法を、いま作っておきましょう。</p>
+
+<pre><code>:: call 命令だけを抜き出す
+findstr /C:"call" baseline_O2.asm &gt; baseline_O2_calls.txt</code></pre>
+
+<p>第 20 章では、LTO を有効にしたあとの同じファイルを作り、この行数と中身を比較します。<strong>翻訳単位をまたぐ <code>call</code> が減っていれば、LTO が効いた証拠です。</strong></p>
+
+<h2>8.7 ハンズオン</h2>
+
+<ol>
+<li>LogLab を Release / x64 でビルドする</li>
+<li><code>llvm-objdump</code> で <code>baseline_O2.asm</code> を作る</li>
+<li><code>parse_line</code> を検索し、<code>main</code> からの <code>call</code> が残っていることを確認する</li>
+<li><code>call qword ptr [</code> で検索し、<code>Filter::accept()</code> の間接呼び出しを見つける</li>
+<li><code>handle_error</code> を検索し、それが <code>Stats::add</code> の直後に置かれているか、別の場所にあるかを確認する</li>
+<li><code>baseline_O2_calls.txt</code> を作り、行数をメモする</li>
+</ol>
+
+<h2>8.8 まとめ</h2>
+
+<ul>
+<li><code>/FA</code> はコンパイル時点の 1 翻訳単位、<code>llvm-objdump</code> はリンク後の全体を見る。<strong>LTO の確認には後者が必要</strong></li>
+<li>clang-cl の <code>/FA</code> は Intel 構文。<code>/FAsc</code> は受け付けるが <code>/FA</code> と同じ出力になる</li>
+<li><code>llvm-objdump -d --demangle --x86-asm-syntax=intel --no-show-raw-insn</code> を定型として覚える</li>
+<li>逆アセンブルウィンドウはデバッグ中のみ。最適化コードでは行単位ではなく<strong>命令単位</strong>でステップする</li>
+<li>着眼点は四つ：呼び出しの形、ループ展開、ベクトル化、コールドコードの配置</li>
+<li><code>call</code> 命令の一覧を抜き出したファイルを、LTO 前のベースラインとして保存しておく</li>
+</ul>
+
+<p class="next"><strong>次章では</strong>、機械語を読む代わりに、コンパイラ自身に説明させる方法を扱います。「この関数をインライン化した／しなかった、その理由はこれだ」を出力させる最適化リマークです。逆アセンブルが「結果」を見るものだとすれば、リマークは「判断」を見るものです。本書で最も使う道具になります。</p>
+
+</div>
+</body>
+</html>

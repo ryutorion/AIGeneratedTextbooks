@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第30章 プロファイルの中身を読む — Clang最適化入門</title>
+<style>
+:root{
+  --ink:#1b1d21; --sub:#5c626b; --line:#dfe3e8; --bg:#fff;
+  --code-bg:#f5f7f9; --code-ink:#22262b; --accent:#2f5d8a;
+  --note-bg:#eef4fa; --note-line:#4a80b5;
+  --warn-bg:#fdf4ec; --warn-line:#c07830;
+  --tip-bg:#eef7f1; --tip-line:#4a8c5f;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Meiryo",system-ui,sans-serif;
+  font-size:16px; line-height:1.9; text-align:justify;
+}
+.book{max-width:46rem; margin:0 auto; padding:3rem 1.25rem 6rem}
+.chapno{font-size:.82rem; letter-spacing:.18em; color:var(--accent); font-weight:700; margin:0 0 .4rem}
+h1{font-size:1.85rem; line-height:1.45; margin:0 0 .6rem; letter-spacing:.01em}
+.lead{color:var(--sub); font-size:1.02rem; margin:0 0 2.5rem; padding-bottom:2rem; border-bottom:2px solid var(--line)}
+h2{font-size:1.32rem; margin:3.2rem 0 1rem; padding-bottom:.45rem; border-bottom:1px solid var(--line); letter-spacing:.01em}
+h3{font-size:1.08rem; margin:2.2rem 0 .7rem; color:#2c3239}
+h4{font-size:.98rem; margin:1.6rem 0 .5rem; color:#3a4048}
+p{margin:0 0 1.1rem}
+ul,ol{margin:0 0 1.2rem; padding-left:1.5rem}
+li{margin:.4rem 0}
+code{
+  font-family:"Cascadia Mono","Consolas","SF Mono",monospace;
+  font-size:.88em; background:var(--code-bg); padding:.12em .38em;
+  border-radius:3px; border:1px solid var(--line); word-break:break-all;
+}
+pre{
+  background:var(--code-bg); color:var(--code-ink); border:1px solid var(--line);
+  border-left:3px solid var(--accent); border-radius:4px;
+  padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.6;
+}
+pre code{background:none; border:none; padding:0; font-size:.85rem; word-break:normal}
+.cap{font-size:.83rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+.box{border-radius:4px; padding:.95rem 1.15rem; margin:1.6rem 0; font-size:.95rem}
+.box p:last-child{margin-bottom:0}
+.box .t{font-weight:700; font-size:.86rem; letter-spacing:.06em; display:block; margin-bottom:.4rem}
+.note{background:var(--note-bg); border-left:4px solid var(--note-line)}
+.note .t{color:var(--note-line)}
+.warn{background:var(--warn-bg); border-left:4px solid var(--warn-line)}
+.warn .t{color:var(--warn-line)}
+.tip{background:var(--tip-bg); border-left:4px solid var(--tip-line)}
+.tip .t{color:var(--tip-line)}
+table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+th{background:var(--code-bg); font-weight:700}
+figure{margin:2rem 0}
+figure svg{display:block; width:100%; height:auto}
+figcaption{font-size:.83rem; color:var(--sub); text-align:center; margin-top:.7rem}
+.goal{border:1px solid var(--line); border-top:3px solid var(--accent); border-radius:4px; padding:1.1rem 1.3rem; margin:0 0 2.4rem; background:#fbfcfd}
+.goal h2{margin:0 0 .6rem; font-size:1rem; border:none; padding:0; letter-spacing:.06em}
+.goal ul{margin-bottom:0}
+.next{margin-top:3.5rem; padding-top:1.4rem; border-top:2px solid var(--line); color:var(--sub); font-size:.95rem}
+.next strong{color:var(--ink)}
+.chk{list-style:none; padding-left:0}
+.chk li{padding-left:1.7rem; position:relative}
+.chk li::before{content:"\2610"; position:absolute; left:.2rem; color:var(--accent); font-size:1.05rem}
+.path{font-size:.93rem; color:var(--sub); background:var(--code-bg); border:1px solid var(--line); border-radius:3px; padding:.5rem .8rem; margin:0 0 1.2rem}
+.partend{margin-top:3rem; padding:1.2rem 1.4rem; border:2px solid var(--accent); border-radius:5px; background:#fbfcfd}
+.partend h3{margin-top:0; color:var(--accent)}
+.real{border-left-color:var(--tip-line)}
+@media (prefers-color-scheme:dark){
+  :root{
+    --ink:#e6e8ea; --sub:#a2a9b2; --line:#333940; --bg:#16181b;
+    --code-bg:#1e2126; --code-ink:#dfe3e8; --accent:#7fb0dd;
+    --note-bg:#1b2530; --note-line:#5f96c9;
+    --warn-bg:#2b2118; --warn-line:#d09154;
+    --tip-bg:#182619; --tip-line:#6aad7d;
+  }
+  h3{color:#d5d9dd} h4{color:#c3c9cf}
+  .goal,.partend{background:#1a1d21}
+}
+</style>
+</head>
+<body>
+<div class="book">
+
+<p class="chapno">第 30 章</p>
+<h1>プロファイルの中身を読む<br>— <code>llvm-profdata show</code> / <code>overlap</code> と llvm-cov</h1>
+<p class="lead">プロファイルはブラックボックスではありません。中身を読めば、トレーニングが妥当だったかを最適化ビルドを作る前に判断できます。ここが Clang の PGO の大きな強みです。</p>
+
+<div class="goal">
+<h2>この章のゴール</h2>
+<ul>
+<li><code>llvm-profdata show</code> でホットな関数を特定する</li>
+<li>第 12・13 章のプロファイラの結果と照合する</li>
+<li><code>overlap</code> でプロファイルどうしを比較する</li>
+<li><code>llvm-cov</code> でソース上にカウンタを重ねる（と、その制約）</li>
+</ul>
+</div>
+
+<h2>30.1 サマリを見る</h2>
+
+<pre><code>llvm-profdata show app.profdata</code></pre>
+
+<pre><code>Instrumentation level: IR  entry_first = 0
+Total functions: 40
+Maximum function count: 52000000
+Maximum internal block count: 116121080</code></pre>
+
+<table>
+<thead><tr><th>項目</th><th>意味</th></tr></thead>
+<tbody>
+<tr><td><code>Instrumentation level: IR</code></td><td>IR レベル計装（第 25 章）。<code>Front-end</code> なら別方式</td></tr>
+<tr><td><code>Total functions</code></td><td>プロファイルに含まれる関数の数</td></tr>
+<tr><td><code>Maximum function count</code></td><td>最も多く呼ばれた関数の呼び出し回数</td></tr>
+<tr><td><code>Maximum internal block count</code></td><td>最も多く通った基本ブロックの通過回数</td></tr>
+</tbody>
+</table>
+
+<div class="box tip">
+<span class="t">まずここで異常に気づけます</span>
+<p><code>Maximum function count</code> が極端に小さい（数千程度）なら、トレーニングが足りていません。<code>Total functions</code> が想定よりずっと少なければ、プロファイルの取り漏らしを疑います。第 28 章の極小トレーニングは、この段階で見破れる類のものです。</p>
+</div>
+
+<h2>30.2 ホットな関数を並べる</h2>
+
+<pre><code>llvm-profdata show --topn=8 app.profdata</code></pre>
+
+<p>LogLab の結果です（マングル名は読みやすく整形しています）。</p>
+
+<table>
+<thead><tr><th>順</th><th>関数</th><th>最大ブロック通過回数</th></tr></thead>
+<tbody>
+<tr><td>1</td><td><code>loglab::(匿名)::next_field</code></td><td>116,121,080</td></tr>
+<tr><td>2</td><td><code>loglab::parse_line</code></td><td>52,000,000</td></tr>
+<tr><td>3</td><td><code>std::string_view::find</code></td><td>15,831,640</td></tr>
+<tr><td>4</td><td><code>main</code></td><td>9,938,860</td></tr>
+<tr><td>5</td><td><code>std::string_view::starts_with</code></td><td>5,943,880</td></tr>
+<tr><td>6</td><td><code>loglab::(匿名)::LevelFilter::accept</code></td><td>4,000,000</td></tr>
+<tr><td>7</td><td><code>loglab::(匿名)::ComponentFilter::accept</code></td><td>3,564,220</td></tr>
+<tr><td>8</td><td><code>std::__to_chars_10</code></td><td>2,401,196</td></tr>
+</tbody>
+</table>
+<p class="cap">実測の一例（トレーニング: 20 万行 × 10 反復ほか）</p>
+
+<h3>30.2.1 プロファイラの結果と一致するか</h3>
+
+<p>第 12・13 章で、私たちは「<code>parse_line</code> が最もホットなはず」と予想し、プロファイラで確認しました。上の表はそれを裏付けています。1 位の <code>next_field</code> は <code>parse_line</code> の中で呼ばれる関数なので、実質的に同じ場所です。</p>
+
+<div class="box note">
+<span class="t">二つの計測は別物です</span>
+<p>混同しないでください。</p>
+<ul>
+<li><strong>プロファイラ（第 12・13 章）</strong>：サンプリング。<strong>時間</strong>を測る。1 ミリ秒ごとの統計</li>
+<li><strong>PGO のプロファイル</strong>：計装。<strong>回数</strong>を数える。すべての実行を漏れなく記録</li>
+</ul>
+<p>「よく呼ばれる」と「時間を食う」は別です。1 億回呼ばれても中身が 2 命令なら大した時間ではありませんし、1 回しか呼ばれなくても中で 10 秒かかるなら、それがボトルネックです。</p>
+<p>とはいえ両者は多くの場合一致します。<strong>食い違ったときこそ面白い</strong>——「回数は少ないのに時間を食っている関数」は、中身が重い証拠です。</p>
+</div>
+
+<h3>30.2.2 フィルタの分布</h3>
+
+<p>6 位と 7 位に注目してください。</p>
+
+<pre><code>LevelFilter::accept       4,000,000
+ComponentFilter::accept   3,564,220</code></pre>
+
+<p><code>LevelFilter</code> を通過したレコードだけが <code>ComponentFilter</code> に渡るので、この二つの比が通過率です。3,564,220 ÷ 4,000,000 ≒ <strong>89%</strong>。第 4 章の設計（TRACE を落とす＝約 11%）と一致します。</p>
+
+<p>そして <code>Filter::accept()</code> は仮想関数でした。<strong>この分布こそ、第 21 章で「デバーチャライズできない」と結論した間接呼び出しに対して、PGO が持ち込む新しい情報です。</strong></p>
+
+<h2>30.3 プロファイルどうしを比べる</h2>
+
+<pre><code>llvm-profdata overlap base.profdata test.profdata</code></pre>
+
+<p>二つのプロファイルがどれだけ似ているかを数値化します。第 28 章で使った機能です。</p>
+
+<pre><code>Program level:
+  # of functions overlap: 40
+  Edge profile overlap: 88.154%
+  Edge profile base count sum: 616483160
+  Edge profile test count sum: 700799
+  IndirectCall profile overlap: 50.000%
+  MemOP profile overlap: 78.422%</code></pre>
+
+<table>
+<thead><tr><th>項目</th><th>意味</th></tr></thead>
+<tbody>
+<tr><td><code>Edge profile overlap</code></td><td><strong>分岐の分布の一致度。最も重要</strong></td></tr>
+<tr><td><code>IndirectCall profile overlap</code></td><td>間接呼び出しの行き先の分布の一致度</td></tr>
+<tr><td><code>MemOP profile overlap</code></td><td><code>memcpy</code> などのサイズ分布の一致度</td></tr>
+<tr><td><code>count sum</code></td><td>それぞれの総カウント。規模の違いが分かる</td></tr>
+</tbody>
+</table>
+
+<h3>30.3.1 使いどころ</h3>
+
+<table>
+<thead><tr><th>比べる相手</th><th>分かること</th></tr></thead>
+<tbody>
+<tr><td>トレーニングの規模違い</td><td>どこまで増やせば飽和するか（第 28 章）</td></tr>
+<tr><td>実行ごとのプロファイル</td><td>実行間のばらつき。極端に違う実行があれば異常</td></tr>
+<tr><td>先月のプロファイルと今月のプロファイル</td><td>本番の傾向が変わっていないか</td></tr>
+<tr><td>トレーニングと本番のプロファイル</td><td><strong>トレーニングの妥当性そのもの</strong></td></tr>
+</tbody>
+</table>
+
+<p>最後の使い方が理想です。本番環境で計装ビルドを短時間だけ動かせるなら、そのプロファイルとトレーニング用プロファイルを <code>overlap</code> で比べることで、トレーニングの代表性を直接検証できます。</p>
+
+<h2>30.4 <code>llvm-cov</code> でソース上に重ねる</h2>
+
+<p>数字の羅列より、ソースコードの各行に回数が書いてあるほうが分かりやすい。それをやるのが <code>llvm-cov</code> です。</p>
+
+<div class="box warn">
+<span class="t">ただし、PGO のプロファイルは <code>llvm-cov</code> で読めません</span>
+<p>実際に試すとこうなります。</p>
+<pre><code>llvm-cov show ClangOptLab.exe -instr-profile=app.profdata
+error: failed to load coverage: 'ClangOptLab.exe': no coverage data found</code></pre>
+<p>第 25 章で触れた二つの計装方式の違いが、ここで効いてきます。<code>llvm-cov</code> が必要とするのは<strong>カバレッジマッピング</strong>——「このカウンタはソースのこの範囲に対応する」という情報です。これはフロントエンド計装でしか生成されません。</p>
+</div>
+
+<h3>30.4.1 可視化専用のビルドを作る</h3>
+
+<p>カウンタをソース上で見たいなら、別にビルドします。</p>
+
+<pre><code>clang-cl /c /O2 /std:c++23 /Iinclude ^
+    /clang:-fprofile-instr-generate /clang:-fcoverage-mapping src\*.cpp
+
+:: 実行
+set LLVM_PROFILE_FILE=cov\c.profraw
+ClangOptLab_cov.exe 50000 3
+
+:: マージ（これは同じ）
+llvm-profdata merge -output=cov.profdata cov\c.profraw
+
+:: 表示
+llvm-cov show ClangOptLab_cov.exe -instr-profile=cov.profdata src\stats.cpp</code></pre>
+
+<p>出力はこうなります。</p>
+
+<pre><code>   19|       |void Stats::add(const Record&amp; r)
+   20|  74.2k|{
+   21|  74.2k|    ++accepted_;
+   22|  74.2k|    ++per_level_[static_cast&lt;std::size_t&gt;(r.level)];
+   23|       |
+   24|  74.2k|    hash_ = mix(hash_, r.timestamp);
+   ...
+   32|  74.2k|    if (r.level == Level::Error) {
+   33|    258|        handle_error(r);
+   34|    258|    }
+   35|  74.2k|}
+   36|       |
+   37|       |void Stats::handle_error(const Record&amp; r)
+   38|    258|{
+   40|    258|    std::uint64_t h = hash_;
+   41|  2.21k|    for (const char c : r.component) {
+   44|  4.40k|    for (const char c : r.message) {
+   47|    258|    hash_ = mix(h, r.code);
+   48|    258|    error_bytes_ += r.component.size() + r.message.size();
+   49|    258|}</code></pre>
+<p class="cap">実測の出力（一部省略）</p>
+
+<h3>30.4.2 第 4 章の設計が数字になった</h3>
+
+<p>33 行目を見てください。</p>
+
+<pre><code>   32|  74.2k|    if (r.level == Level::Error) {
+   33|    258|        handle_error(r);</code></pre>
+
+<p><strong>74,200 回のうち 258 回。</strong> 割合にして 0.348% です。第 4 章で「1000 行に 3 行程度」と設計した比率が、そのまま現れています。</p>
+
+<p>そして第 4 章では、この <code>if</code> に <code>[[unlikely]]</code> を<strong>意図的に書きませんでした</strong>。コンパイラはソースからこの 0.348% を知る術がありません。しかしプロファイルには、はっきりと記録されています。</p>
+
+<div class="box tip">
+<span class="t">これが第 32 章の主役になります</span>
+<p>この 258 という数字を渡されたコンパイラが、何を変えるのか。それが次々章のテーマです。</p>
+</div>
+
+<h3>30.4.3 <code>llvm-cov</code> の他の使い方</h3>
+
+<table>
+<thead><tr><th>コマンド</th><th>用途</th></tr></thead>
+<tbody>
+<tr><td><code>llvm-cov show</code></td><td>ソースに重ねて表示</td></tr>
+<tr><td><code>llvm-cov report</code></td><td>ファイル単位の要約表</td></tr>
+<tr><td><code>llvm-cov show --format=html --output-dir=&lt;dir&gt;</code></td><td>HTML で出力。色分けされて読みやすい</td></tr>
+</tbody>
+</table>
+
+<div class="box warn">
+<span class="t">可視化用ビルドは最適化の判断には使わないでください</span>
+<p>フロントエンド計装のプロファイルも <code>-fprofile-instr-use</code> で最適化に使えますが、第 25 章の表のとおり PGO には向きません。カウンタの位置が最適化前のソース構造に固定されているためです。</p>
+<p><strong>可視化はフロントエンド計装、最適化は IR 計装。</strong> 二つのビルドを使い分けてください。</p>
+</div>
+
+<h2>30.5 確認の手順としてまとめる</h2>
+
+<p>最適化ビルドを作る前に、次を確認する習慣をつけると事故が減ります。</p>
+
+<ol>
+<li><code>llvm-profdata show</code> で <code>Maximum function count</code> が十分大きいか</li>
+<li><code>--topn</code> の顔ぶれが、プロファイラの結果と矛盾しないか</li>
+<li>規模の違うトレーニングと <code>overlap</code> を取り、飽和しているか</li>
+<li>（必要なら）<code>llvm-cov</code> で、気になる分岐の実際の比率を確認する</li>
+</ol>
+
+<h2>30.6 ハンズオン</h2>
+
+<ol>
+<li><code>llvm-profdata show app.profdata</code> でサマリを見る</li>
+<li><code>--topn=10</code> でホットな関数を並べ、第 12・13 章のメモと比べる</li>
+<li><code>LevelFilter</code> と <code>ComponentFilter</code> のカウントから通過率を計算する</li>
+<li>小さいトレーニングのプロファイルを作り、<code>overlap</code> で比較する</li>
+<li>フロントエンド計装のビルドを別に作り、<code>llvm-cov show</code> で <code>stats.cpp</code> を表示する</li>
+<li>33 行目のカウントを確認する</li>
+</ol>
+
+<h2>30.7 まとめ</h2>
+
+<ul>
+<li><code>llvm-profdata show</code> でサマリ、<code>--topn</code> でホットな関数のランキングが得られる</li>
+<li>LogLab では <code>next_field</code> / <code>parse_line</code> が上位に来て、<strong>第 12・13 章のプロファイラの結果と一致した</strong></li>
+<li>サンプリング（時間）と計装（回数）は別物。食い違ったときこそ調べる価値がある</li>
+<li><code>overlap</code> でプロファイルどうしの一致度を数値化できる。<code>Edge profile overlap</code> が最重要</li>
+<li><strong>PGO 用の IR 計装プロファイルは <code>llvm-cov</code> で読めない。</strong> 可視化には <code>-fprofile-instr-generate -fcoverage-mapping</code> の別ビルドが要る</li>
+<li>実測では <code>handle_error</code> の呼び出しが 74,200 回中 <strong>258 回</strong>（0.348%）と記録されていた</li>
+</ul>
+
+<p class="next"><strong>次章では</strong>、いよいよプロファイルを使って最適化ビルドを作ります。オプションは一つ、確認することも決まっています。そして第 15 章の手順で測ります。第 20 章の LTO とは違う結果になります。</p>
+
+</div>
+</body>
+</html>

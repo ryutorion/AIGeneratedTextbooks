@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第27章 プロファイル出力の制御 — Clang最適化入門</title>
+<style>
+:root{
+  --ink:#1b1d21; --sub:#5c626b; --line:#dfe3e8; --bg:#fff;
+  --code-bg:#f5f7f9; --code-ink:#22262b; --accent:#2f5d8a;
+  --note-bg:#eef4fa; --note-line:#4a80b5;
+  --warn-bg:#fdf4ec; --warn-line:#c07830;
+  --tip-bg:#eef7f1; --tip-line:#4a8c5f;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Meiryo",system-ui,sans-serif;
+  font-size:16px; line-height:1.9; text-align:justify;
+}
+.book{max-width:46rem; margin:0 auto; padding:3rem 1.25rem 6rem}
+.chapno{font-size:.82rem; letter-spacing:.18em; color:var(--accent); font-weight:700; margin:0 0 .4rem}
+h1{font-size:1.85rem; line-height:1.45; margin:0 0 .6rem; letter-spacing:.01em}
+.lead{color:var(--sub); font-size:1.02rem; margin:0 0 2.5rem; padding-bottom:2rem; border-bottom:2px solid var(--line)}
+h2{font-size:1.32rem; margin:3.2rem 0 1rem; padding-bottom:.45rem; border-bottom:1px solid var(--line); letter-spacing:.01em}
+h3{font-size:1.08rem; margin:2.2rem 0 .7rem; color:#2c3239}
+h4{font-size:.98rem; margin:1.6rem 0 .5rem; color:#3a4048}
+p{margin:0 0 1.1rem}
+ul,ol{margin:0 0 1.2rem; padding-left:1.5rem}
+li{margin:.4rem 0}
+code{
+  font-family:"Cascadia Mono","Consolas","SF Mono",monospace;
+  font-size:.88em; background:var(--code-bg); padding:.12em .38em;
+  border-radius:3px; border:1px solid var(--line); word-break:break-all;
+}
+pre{
+  background:var(--code-bg); color:var(--code-ink); border:1px solid var(--line);
+  border-left:3px solid var(--accent); border-radius:4px;
+  padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.6;
+}
+pre code{background:none; border:none; padding:0; font-size:.85rem; word-break:normal}
+.cap{font-size:.83rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+.box{border-radius:4px; padding:.95rem 1.15rem; margin:1.6rem 0; font-size:.95rem}
+.box p:last-child{margin-bottom:0}
+.box .t{font-weight:700; font-size:.86rem; letter-spacing:.06em; display:block; margin-bottom:.4rem}
+.note{background:var(--note-bg); border-left:4px solid var(--note-line)}
+.note .t{color:var(--note-line)}
+.warn{background:var(--warn-bg); border-left:4px solid var(--warn-line)}
+.warn .t{color:var(--warn-line)}
+.tip{background:var(--tip-bg); border-left:4px solid var(--tip-line)}
+.tip .t{color:var(--tip-line)}
+table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+th{background:var(--code-bg); font-weight:700}
+figure{margin:2rem 0}
+figure svg{display:block; width:100%; height:auto}
+figcaption{font-size:.83rem; color:var(--sub); text-align:center; margin-top:.7rem}
+.goal{border:1px solid var(--line); border-top:3px solid var(--accent); border-radius:4px; padding:1.1rem 1.3rem; margin:0 0 2.4rem; background:#fbfcfd}
+.goal h2{margin:0 0 .6rem; font-size:1rem; border:none; padding:0; letter-spacing:.06em}
+.goal ul{margin-bottom:0}
+.next{margin-top:3.5rem; padding-top:1.4rem; border-top:2px solid var(--line); color:var(--sub); font-size:.95rem}
+.next strong{color:var(--ink)}
+.chk{list-style:none; padding-left:0}
+.chk li{padding-left:1.7rem; position:relative}
+.chk li::before{content:"\2610"; position:absolute; left:.2rem; color:var(--accent); font-size:1.05rem}
+.path{font-size:.93rem; color:var(--sub); background:var(--code-bg); border:1px solid var(--line); border-radius:3px; padding:.5rem .8rem; margin:0 0 1.2rem}
+.partend{margin-top:3rem; padding:1.2rem 1.4rem; border:2px solid var(--accent); border-radius:5px; background:#fbfcfd}
+.partend h3{margin-top:0; color:var(--accent)}
+.real{border-left-color:var(--tip-line)}
+@media (prefers-color-scheme:dark){
+  :root{
+    --ink:#e6e8ea; --sub:#a2a9b2; --line:#333940; --bg:#16181b;
+    --code-bg:#1e2126; --code-ink:#dfe3e8; --accent:#7fb0dd;
+    --note-bg:#1b2530; --note-line:#5f96c9;
+    --warn-bg:#2b2118; --warn-line:#d09154;
+    --tip-bg:#182619; --tip-line:#6aad7d;
+  }
+  h3{color:#d5d9dd} h4{color:#c3c9cf}
+  .goal,.partend{background:#1a1d21}
+}
+</style>
+</head>
+<body>
+<div class="book">
+
+<p class="chapno">第 27 章</p>
+<h1>プロファイル出力の制御<br>— <code>LLVM_PROFILE_FILE</code> と <code>%p</code> / <code>%m</code></h1>
+<p class="lead">既定では、プロファイルはカレントディレクトリに固定の名前で出力されます。二回実行すれば二回目が一回目を上書きします。複数回・複数プロセスの実行結果を集めるには、出力先を制御する必要があります。</p>
+
+<div class="goal">
+<h2>この章のゴール</h2>
+<ul>
+<li>既定の出力先と命名規則を知る</li>
+<li>上書き事故が起きることを実際に確認する</li>
+<li><code>LLVM_PROFILE_FILE</code> のパターン指定を使い分ける</li>
+<li>複数プロセスのアプリでの採り方を知る</li>
+</ul>
+</div>
+
+<h2>27.1 既定の出力</h2>
+
+<p>計装ビルドを実行すると、カレントディレクトリに次のようなファイルができます。</p>
+
+<pre><code>default_6242892255425663173_0.profraw</code></pre>
+
+<p>数字はバイナリごとに決まる識別子です。同じバイナリを何度実行しても、同じ名前になります。</p>
+
+<h3>27.1.1 上書きされることの確認</h3>
+
+<p>実際に確かめてみましょう。同じ名前に二回出力させ、中身を比べます。</p>
+
+<pre><code>set LLVM_PROFILE_FILE=fixed.profraw
+ClangOptLab.exe 50000 2
+llvm-profdata show fixed.profraw | findstr "Maximum function count"
+  Maximum function count: 1300000
+
+ClangOptLab.exe 50000 2
+llvm-profdata show fixed.profraw | findstr "Maximum function count"
+  Maximum function count: 1300000</code></pre>
+
+<p>二回実行しても値が同じです。<strong>足し込まれてはいません。上書きされています。</strong></p>
+
+<div class="box warn">
+<span class="t">「たくさん実行したから精度が上がったはず」は間違いです</span>
+<p>トレーニングとして何十回もアプリを起動しても、既定の設定では最後の一回ぶんしか残りません。「何回も走らせたのに効果が出ない」という失敗の、地味だが実際にある原因です。</p>
+</div>
+
+<h2>27.2 出力先を指定する三つの方法</h2>
+
+<table>
+<thead><tr><th>方法</th><th>指定するもの</th><th>優先順位</th></tr></thead>
+<tbody>
+<tr><td><code>-fprofile-generate=&lt;dir&gt;</code></td><td>ビルド時に既定の出力ディレクトリを埋め込む</td><td>低</td></tr>
+<tr><td><code>LLVM_PROFILE_FILE</code> 環境変数</td><td>実行時にファイル名（パス込み）を指定する</td><td><strong>高</strong></td></tr>
+<tr><td>プログラムから API を呼ぶ</td><td><code>__llvm_profile_set_filename()</code></td><td>最高</td></tr>
+</tbody>
+</table>
+
+<h3>27.2.1 ビルド時に指定する</h3>
+
+<pre><code>/clang:-fprofile-generate=C:\work\ClangOptLab\prof</code></pre>
+
+<p>このディレクトリが出力先になります。実行時にカレントディレクトリを気にしなくてよくなるので、実務では便利です。ただしパスがバイナリに焼き込まれるため、別のマシンで実行すると存在しないパスを指すことになります。</p>
+
+<h3>27.2.2 実行時に指定する</h3>
+
+<pre><code>set LLVM_PROFILE_FILE=C:\work\prof\run.profraw
+ClangOptLab.exe 200000 10</code></pre>
+
+<p>環境変数のほうが強いので、ビルド時の指定を上書きできます。<strong>本書ではこちらを主に使います。</strong> トレーニングをスクリプト化するときに扱いやすいためです。</p>
+
+<h2>27.3 パターン指定</h2>
+
+<p><code>LLVM_PROFILE_FILE</code> には、実行時に展開される特殊な記号を書けます。</p>
+
+<table>
+<thead><tr><th>記号</th><th>展開されるもの</th><th>実測での例</th></tr></thead>
+<tbody>
+<tr><td><code>%p</code></td><td>プロセス ID</td><td><code>r-2191.profraw</code></td></tr>
+<tr><td><code>%h</code></td><td>ホスト名</td><td><code>b-vm.profraw</code></td></tr>
+<tr><td><code>%m</code></td><td>バイナリごとの識別子。<strong>同じファイルに足し込む</strong>（オンラインマージ）</td><td>後述</td></tr>
+<tr><td><code>%Nm</code></td><td>同上。N 個のファイルに分散して競合を減らす</td><td><code>%4m</code> など</td></tr>
+<tr><td><code>%t</code></td><td>環境変数 <code>TMPDIR</code> の値</td><td>—</td></tr>
+<tr><td><code>%%</code></td><td>文字としての <code>%</code></td><td>—</td></tr>
+</tbody>
+</table>
+
+<h3>27.3.1 <code>%p</code> — 実行ごとに別ファイル</h3>
+
+<pre><code>set LLVM_PROFILE_FILE=prof\run-%p.profraw
+ClangOptLab.exe 50000 2
+ClangOptLab.exe 50000 4
+
+dir prof
+  run-2191.profraw
+  run-2192.profraw</code></pre>
+
+<p>両方が残りました。あとで <code>llvm-profdata merge</code>（第 29 章）でまとめます。実際にまとめると、二回ぶんの合計になっていることが確認できます。</p>
+
+<pre><code>llvm-profdata merge -output=both.profdata prof\run-*.profraw
+llvm-profdata show both.profdata | findstr "Maximum function count"
+  Maximum function count: 3900000       &lt;- 1300000 + 2600000</code></pre>
+
+<div class="box warn">
+<span class="t">Windows のバッチファイルでは <code>%</code> の扱いに注意</span>
+<p>バッチファイル（<code>.cmd</code> / <code>.bat</code>）の中では <code>%</code> が変数展開に使われるため、二重に書く必要があります。</p>
+<pre><code>:: コマンドプロンプトで直接打つとき
+set LLVM_PROFILE_FILE=prof\run-%p.profraw
+
+:: バッチファイルの中に書くとき
+set LLVM_PROFILE_FILE=prof\run-%%p.profraw</code></pre>
+<p>PowerShell ではこの問題は起きません。</p>
+<pre><code>$env:LLVM_PROFILE_FILE = "prof\run-%p.profraw"</code></pre>
+</div>
+
+<h3>27.3.2 <code>%m</code> — 実行時に足し込む</h3>
+
+<p><code>%m</code> を使うと、プロセス終了時に既存のファイルへ<strong>足し込まれます</strong>。実測してみます。</p>
+
+<pre><code>set LLVM_PROFILE_FILE=m-%m.profraw
+
+ClangOptLab.exe 50000 2
+llvm-profdata show m-*.profraw | findstr "Maximum function count"
+  Maximum function count: 1300000
+
+ClangOptLab.exe 50000 2
+llvm-profdata show m-*.profraw | findstr "Maximum function count"
+  Maximum function count: 2600000       &lt;- 足し込まれた</code></pre>
+
+<p>ファイルが一つで済むので、何百回も実行するトレーニングでは <code>%p</code> より扱いやすくなります。</p>
+
+<table>
+<thead><tr><th></th><th><code>%p</code></th><th><code>%m</code></th></tr></thead>
+<tbody>
+<tr><td>ファイル数</td><td>実行回数ぶん</td><td>1 つ（<code>%Nm</code> なら N 個）</td></tr>
+<tr><td>あとで merge</td><td>必要</td><td>必要（形式変換のため）</td></tr>
+<tr><td>実行ごとの寄与</td><td>個別に確認できる</td><td>できない</td></tr>
+<tr><td>並列実行</td><td>安全</td><td>ファイルロックで競合しうる。<code>%Nm</code> で緩和</td></tr>
+<tr><td>向いている場面</td><td>数回〜数十回のトレーニング</td><td>数百回以上、あるいはプロセスが多数</td></tr>
+</tbody>
+</table>
+
+<div class="box tip">
+<span class="t">本書では <code>%p</code> を使います</span>
+<p>実行ごとのプロファイルが個別に残っていると、「この実行だけ極端に違う」といった異常に気づけます。第 30 章の <code>llvm-profdata overlap</code> で、実行どうしを比べることもできます。トレーニングの回数が現実的な範囲なら、<code>%p</code> のほうが情報が多く残ります。</p>
+</div>
+
+<h2>27.4 トレーニング用のスクリプト</h2>
+
+<p>ここまでを踏まえて、トレーニング実行のスクリプトを作ります。</p>
+
+<pre><code>@echo off
+:: train.cmd — 計装ビルドを複数回実行してプロファイルを集める
+setlocal
+
+set PROFDIR=%~dp0prof
+set EXE=%~dp0builds\instr\ClangOptLab.exe
+
+if exist "%PROFDIR%" rmdir /s /q "%PROFDIR%"
+mkdir "%PROFDIR%"
+
+set LLVM_PROFILE_FILE=%PROFDIR%\run-%%p.profraw
+
+echo [1/3] 通常のワークロード
+"%EXE%" 200000 10
+echo [2/3] 小さめの入力
+"%EXE%"  20000 20
+echo [3/3] 大きめの入力
+"%EXE%" 500000  4
+
+echo.
+dir /b "%PROFDIR%"
+endlocal</code></pre>
+<p class="cap">リスト 27-1　train.cmd</p>
+
+<p>古いプロファイルを消してから始めているのが重要です。前回の残骸が混ざると、何を測ったのか分からなくなります。</p>
+
+<h2>27.5 複数プロセスのアプリ</h2>
+
+<p>実際のアプリケーションでは、子プロセスを起動したり、複数の実行ファイルが連携したりします。</p>
+
+<ul>
+<li><code>LLVM_PROFILE_FILE</code> は環境変数なので、<strong>子プロセスにも引き継がれます</strong></li>
+<li>そのため <code>%p</code> を入れておかないと、親子でファイル名が衝突します</li>
+<li>複数の実行ファイル（<code>app.exe</code> と <code>tool.exe</code>）が同時に動く場合は <code>%m</code> も入れると、バイナリごとに分かれます</li>
+</ul>
+
+<pre><code>set LLVM_PROFILE_FILE=prof\%m-%p.profraw</code></pre>
+
+<div class="box note">
+<span class="t">プロファイルはプロセス終了時に書かれます</span>
+<p>第 26 章でも触れましたが、重要なので繰り返します。<code>abort()</code>、<code>TerminateProcess()</code>、クラッシュ——いずれの場合もプロファイルは書き出されません。テストの中でプロセスを強制終了している場合、そのぶんの実行は記録されないことになります。</p>
+<p>どうしても必要なら、実行中に書き出す API（<code>__llvm_profile_write_file()</code>）を呼ぶ方法がありますが、本書では扱いません。</p>
+</div>
+
+<h2>27.6 ハンズオン</h2>
+
+<ol>
+<li>計装ビルドを <code>builds\instr\</code> に退避する</li>
+<li>固定名で二回実行し、<code>llvm-profdata show</code> の値が変わらないことを確認する（上書きの実感）</li>
+<li><code>%p</code> に変えて二回実行し、ファイルが二つできることを確認する</li>
+<li>リスト 27-1 の <code>train.cmd</code> を作る</li>
+<li>実行して <code>prof\</code> に三つの <code>.profraw</code> ができることを確認する</li>
+<li>それぞれのファイルサイズを見る（入力の規模で変わるはずです）</li>
+</ol>
+
+<h2>27.7 まとめ</h2>
+
+<ul>
+<li>既定の出力はカレントディレクトリの固定名。<strong>複数回実行すると上書きされる</strong></li>
+<li>出力先はビルド時（<code>-fprofile-generate=&lt;dir&gt;</code>）と実行時（<code>LLVM_PROFILE_FILE</code>）で指定でき、後者が優先される</li>
+<li><code>%p</code> はプロセス ID、<code>%h</code> はホスト名、<strong><code>%m</code> は同じファイルに足し込む</strong></li>
+<li>実測では <code>%p</code> で分けた二回ぶんを merge すると、値が合計になった</li>
+<li>バッチファイル内では <code>%%p</code> と二重に書く</li>
+<li>環境変数は子プロセスに継承される。プロセスが複数なら <code>%p</code> は必須</li>
+<li>トレーニングは古いプロファイルを消してから始める</li>
+</ul>
+
+<p class="next"><strong>次章では</strong>、そのトレーニングで「何を実行するか」を考えます。カバレッジを上げればよいのか、本番と同じ入力を使えばよいのか。ここを間違えると、PGO はむしろ性能を悪化させます。</p>
+
+</div>
+</body>
+</html>

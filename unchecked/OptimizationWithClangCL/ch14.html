@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第14章 シンボル解決と PDB — Clang最適化入門</title>
+<style>
+:root{
+  --ink:#1b1d21; --sub:#5c626b; --line:#dfe3e8; --bg:#fff;
+  --code-bg:#f5f7f9; --code-ink:#22262b; --accent:#2f5d8a;
+  --note-bg:#eef4fa; --note-line:#4a80b5;
+  --warn-bg:#fdf4ec; --warn-line:#c07830;
+  --tip-bg:#eef7f1; --tip-line:#4a8c5f;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Meiryo",system-ui,sans-serif;
+  font-size:16px; line-height:1.9; text-align:justify;
+}
+.book{max-width:46rem; margin:0 auto; padding:3rem 1.25rem 6rem}
+.chapno{font-size:.82rem; letter-spacing:.18em; color:var(--accent); font-weight:700; margin:0 0 .4rem}
+h1{font-size:1.85rem; line-height:1.45; margin:0 0 .6rem; letter-spacing:.01em}
+.lead{color:var(--sub); font-size:1.02rem; margin:0 0 2.5rem; padding-bottom:2rem; border-bottom:2px solid var(--line)}
+h2{font-size:1.32rem; margin:3.2rem 0 1rem; padding-bottom:.45rem; border-bottom:1px solid var(--line); letter-spacing:.01em}
+h3{font-size:1.08rem; margin:2.2rem 0 .7rem; color:#2c3239}
+h4{font-size:.98rem; margin:1.6rem 0 .5rem; color:#3a4048}
+p{margin:0 0 1.1rem}
+ul,ol{margin:0 0 1.2rem; padding-left:1.5rem}
+li{margin:.4rem 0}
+code{
+  font-family:"Cascadia Mono","Consolas","SF Mono",monospace;
+  font-size:.88em; background:var(--code-bg); padding:.12em .38em;
+  border-radius:3px; border:1px solid var(--line); word-break:break-all;
+}
+pre{
+  background:var(--code-bg); color:var(--code-ink); border:1px solid var(--line);
+  border-left:3px solid var(--accent); border-radius:4px;
+  padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.6;
+}
+pre code{background:none; border:none; padding:0; font-size:.85rem; word-break:normal}
+.cap{font-size:.83rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+.box{border-radius:4px; padding:.95rem 1.15rem; margin:1.6rem 0; font-size:.95rem}
+.box p:last-child{margin-bottom:0}
+.box .t{font-weight:700; font-size:.86rem; letter-spacing:.06em; display:block; margin-bottom:.4rem}
+.note{background:var(--note-bg); border-left:4px solid var(--note-line)}
+.note .t{color:var(--note-line)}
+.warn{background:var(--warn-bg); border-left:4px solid var(--warn-line)}
+.warn .t{color:var(--warn-line)}
+.tip{background:var(--tip-bg); border-left:4px solid var(--tip-line)}
+.tip .t{color:var(--tip-line)}
+table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+th{background:var(--code-bg); font-weight:700}
+figure{margin:2rem 0}
+figure svg{display:block; width:100%; height:auto}
+figcaption{font-size:.83rem; color:var(--sub); text-align:center; margin-top:.7rem}
+.goal{border:1px solid var(--line); border-top:3px solid var(--accent); border-radius:4px; padding:1.1rem 1.3rem; margin:0 0 2.4rem; background:#fbfcfd}
+.goal h2{margin:0 0 .6rem; font-size:1rem; border:none; padding:0; letter-spacing:.06em}
+.goal ul{margin-bottom:0}
+.next{margin-top:3.5rem; padding-top:1.4rem; border-top:2px solid var(--line); color:var(--sub); font-size:.95rem}
+.next strong{color:var(--ink)}
+.chk{list-style:none; padding-left:0}
+.chk li{padding-left:1.7rem; position:relative}
+.chk li::before{content:"\2610"; position:absolute; left:.2rem; color:var(--accent); font-size:1.05rem}
+.path{font-size:.93rem; color:var(--sub); background:var(--code-bg); border:1px solid var(--line); border-radius:3px; padding:.5rem .8rem; margin:0 0 1.2rem}
+.partend{margin-top:3rem; padding:1.2rem 1.4rem; border:2px solid var(--accent); border-radius:5px; background:#fbfcfd}
+.partend h3{margin-top:0; color:var(--accent)}
+.real{border-left-color:var(--tip-line)}
+@media (prefers-color-scheme:dark){
+  :root{
+    --ink:#e6e8ea; --sub:#a2a9b2; --line:#333940; --bg:#16181b;
+    --code-bg:#1e2126; --code-ink:#dfe3e8; --accent:#7fb0dd;
+    --note-bg:#1b2530; --note-line:#5f96c9;
+    --warn-bg:#2b2118; --warn-line:#d09154;
+    --tip-bg:#182619; --tip-line:#6aad7d;
+  }
+  h3{color:#d5d9dd} h4{color:#c3c9cf}
+  .goal,.partend{background:#1a1d21}
+}
+</style>
+</head>
+<body>
+<div class="book">
+
+<p class="chapno">第 14 章</p>
+<h1>シンボル解決と PDB<br>— clang-cl の <code>/Z7</code>・<code>/Zi</code> とリンカ設定</h1>
+<p class="lead">プロファイラが関数名を表示できるかどうかは、PDB にかかっています。そして clang-cl の PDB の作られ方は、MSVC のそれとは違います。ここを知らないまま進むと、「なぜかシンボルが出ない」「別の関数の名前が表示される」という状況に必ず出会います。</p>
+
+<div class="goal">
+<h2>この章のゴール</h2>
+<ul>
+<li>clang-cl における <code>/Z7</code> と <code>/Zi</code> の関係を正しく理解する</li>
+<li>PDB を作っているのが誰なのかを知る</li>
+<li><code>llvm-pdbutil</code> で PDB の中身を確認する</li>
+<li>リンカ設定がシンボルを壊す仕組みを理解する</li>
+<li>最適化されたコードでシンボルに何が起きるかを知る</li>
+</ul>
+</div>
+
+<h2>14.1 シンボルが無いとどうなるか</h2>
+
+<p>前章で Load Symbols を忘れた場合、WPA のスタックはこうなります。</p>
+
+<pre><code>ClangOptLab.exe!0x140001a3f     31.2%
+ClangOptLab.exe!0x1400023c1     18.7%
+ClangOptLab.exe!0x140001f04     12.4%</code></pre>
+
+<p>アドレスは分かりますが、それがどの関数かは分かりません。逆アセンブルと突き合わせれば手作業で辿れますが、実用的ではありません。<strong>PDB は、アドレスと関数名を対応づける辞書</strong>です。</p>
+
+<h2>14.2 clang-cl の <code>/Zi</code> は MSVC の <code>/Zi</code> ではない</h2>
+
+<p>MSVC には二つのデバッグ情報の形式があります。</p>
+
+<table>
+<thead><tr><th>MSVC のオプション</th><th>MSVC での挙動</th></tr></thead>
+<tbody>
+<tr><td><code>/Z7</code></td><td>デバッグ情報を <code>.obj</code> の中に埋め込む。PDB は作らない</td></tr>
+<tr><td><code>/Zi</code></td><td>コンパイラが <code>vc143.pdb</code> のような中間 PDB を作り、そこにデバッグ情報を置く</td></tr>
+</tbody>
+</table>
+
+<p>clang-cl では<strong>この区別がありません。</strong> 実測で確認すると、<code>/Z7</code> と <code>/Zi</code> はまったく同じ引数を生成します。</p>
+
+<pre><code>:: /Z7 でも /Zi でも、内部に渡るのは同じ
+"-gno-column-info" "-gcodeview" "-debug-info-kind=constructor"</code></pre>
+
+<p>どちらの場合も、デバッグ情報は <code>.obj</code> の中の CodeView セクションに入ります。</p>
+
+<pre><code>llvm-readobj --sections tokenizer.obj
+
+  Name: .debug$S      &lt;- シンボル情報
+  Name: .debug$T      &lt;- 型情報</code></pre>
+
+<p>つまり <strong>clang-cl の <code>/Zi</code> は、実質的に <code>/Z7</code> です。</strong> コンパイラは PDB を一切作りません。</p>
+
+<div class="box warn">
+<span class="t"><code>/Fd</code> は無視されます</span>
+<p>MSVC で中間 PDB のファイル名を指定する <code>/Fd</code> は、clang-cl でも受け付けられますが<strong>何も起こりません</strong>。実際に <code>/Fd foo.pdb</code> を指定してコンパイルしても、<code>foo.pdb</code> は生成されません。</p>
+<p>第 3 章でプロパティページのコマンドラインに <code>/Fd"x64\Release\vc143.pdb"</code> が入っていたのを覚えているでしょうか。あれは MSBuild が MSVC 向けに生成しているもので、ClangCL では効果がありません。害もないので放置して構いません。</p>
+</div>
+
+<div class="box note">
+<span class="t">ではどちらを指定すべきか</span>
+<p>どちらでも同じ結果になりますが、意味が正しいのは <code>/Z7</code> です。<code>/Zi</code> を選ぶと「中間 PDB が作られる」という誤解が残ります。とはいえ Visual Studio のプロパティページの既定は <code>/Zi</code> であり、そのままでも動作に違いはありません。本書はどちらでも進められます。</p>
+</div>
+
+<h2>14.3 PDB を作っているのはリンカ</h2>
+
+<p>では最終的な <code>ClangOptLab.pdb</code> は誰が作っているのか。<strong>リンカ（<code>lld-link</code>）です。</strong></p>
+
+<figure>
+<svg viewBox="0 0 720 250" role="img" aria-label="clang-cl におけるデバッグ情報の流れ。コンパイラが obj に CodeView を埋め、リンカがそれを集めて PDB を作る">
+  <defs>
+    <marker id="a14" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
+      <path d="M0,0 L9,4.5 L0,9 z" fill="#2f5d8a"/>
+    </marker>
+  </defs>
+  <text x="20" y="26" font-size="12.5" font-weight="700" fill="#2f5d8a" font-family="sans-serif">clang-cl でのデバッグ情報の流れ</text>
+
+  <rect x="20" y="50" width="150" height="60" rx="4" fill="#eef4fa" stroke="#4a80b5"/>
+  <text x="95" y="74" font-size="12" text-anchor="middle" font-weight="700" font-family="monospace" fill="#1b1d21">clang-cl</text>
+  <text x="95" y="94" font-size="10.5" text-anchor="middle" font-family="monospace" fill="#5c626b">/Z7 または /Zi</text>
+
+  <rect x="222" y="50" width="160" height="60" rx="4" fill="#f5f7f9" stroke="#dfe3e8"/>
+  <text x="302" y="72" font-size="12" text-anchor="middle" font-family="monospace" fill="#1b1d21">*.obj</text>
+  <text x="302" y="92" font-size="10.5" text-anchor="middle" font-family="monospace" fill="#5c626b">.debug$S / .debug$T</text>
+
+  <rect x="434" y="50" width="150" height="60" rx="4" fill="#eef4fa" stroke="#4a80b5"/>
+  <text x="509" y="74" font-size="12" text-anchor="middle" font-weight="700" font-family="monospace" fill="#1b1d21">lld-link</text>
+  <text x="509" y="94" font-size="10.5" text-anchor="middle" font-family="monospace" fill="#5c626b">/DEBUG</text>
+
+  <rect x="612" y="30" width="88" height="46" rx="4" fill="#eef7f1" stroke="#4a8c5f"/>
+  <text x="656" y="58" font-size="11.5" text-anchor="middle" font-family="monospace" fill="#1b1d21">.exe</text>
+  <rect x="612" y="86" width="88" height="46" rx="4" fill="#eef7f1" stroke="#4a8c5f"/>
+  <text x="656" y="114" font-size="11.5" text-anchor="middle" font-family="monospace" fill="#1b1d21">.pdb</text>
+
+  <line x1="174" y1="80" x2="218" y2="80" stroke="#2f5d8a" stroke-width="1.6" marker-end="url(#a14)"/>
+  <line x1="386" y1="80" x2="430" y2="80" stroke="#2f5d8a" stroke-width="1.6" marker-end="url(#a14)"/>
+  <path d="M588,72 L604,56" stroke="#2f5d8a" stroke-width="1.6" fill="none" marker-end="url(#a14)"/>
+  <path d="M588,90 L604,106" stroke="#2f5d8a" stroke-width="1.6" fill="none" marker-end="url(#a14)"/>
+
+  <rect x="20" y="156" width="680" height="76" rx="4" fill="#fdf4ec" stroke="#c07830"/>
+  <text x="38" y="180" font-size="11.5" font-weight="700" fill="#c07830" font-family="sans-serif">MSVC との違い</text>
+  <text x="38" y="201" font-size="11" fill="#5c626b" font-family="sans-serif">MSVC の /Zi は「コンパイラが中間 PDB を作る」経路を持つが、clang-cl にはそれが無い。</text>
+  <text x="38" y="220" font-size="11" fill="#5c626b" font-family="sans-serif">PDB は必ずリンク時に一度だけ作られる。だから /DEBUG を外すと PDB は存在しなくなる。</text>
+</svg>
+<figcaption>図 14-1　clang-cl におけるデバッグ情報の流れ</figcaption>
+</figure>
+
+<h3>14.3.1 リンカ側の設定</h3>
+
+<p class="path"><strong>構成プロパティ &gt; リンカー &gt; デバッグ &gt; デバッグ情報の生成</strong></p>
+
+<table>
+<thead><tr><th>設定</th><th>lld-link での挙動</th></tr></thead>
+<tbody>
+<tr><td><code>/DEBUG</code> / <code>/DEBUG:FULL</code></td><td>完全な PDB を生成する。<strong>本書はこれ</strong></td></tr>
+<tr><td><code>/DEBUG:GHASH</code></td><td>型のハッシュを使って PDB 生成を高速化する。結果の PDB は FULL と同等</td></tr>
+<tr><td><code>/DEBUG:FASTLINK</code></td><td><strong>非対応。</strong>警告を出して FULL にフォールバックする</td></tr>
+<tr><td>なし</td><td>PDB が作られない。プロファイラでシンボルが出ない</td></tr>
+</tbody>
+</table>
+
+<p><code>/DEBUG:FASTLINK</code> を指定すると、次の警告が出ます。</p>
+
+<pre><code>lld-link: warning: /debug:fastlink unsupported; using /debug:full</code></pre>
+
+<p>MSVC のプロジェクトを ClangCL に移行すると、この警告が出ることがあります。動作に支障はありませんが、リンク時間は FULL 相当になります。</p>
+
+<h2>14.4 PDB の中身を見る</h2>
+
+<p><code>llvm-pdbutil</code> で PDB を検査できます。「PDB は本当に作られているのか」「自分の関数は入っているのか」を確かめる道具です。</p>
+
+<pre><code>llvm-pdbutil dump --summary ClangOptLab.pdb</code></pre>
+
+<pre><code>                          Summary
+============================================================
+  Block Size: 4096
+  Number of streams: 15
+  Age: 1
+  GUID: {C944909C-8F26-11EF-4C4C-44205044422E}
+  Has Debug Info: true
+  Has Types: true
+  Has Globals: true
+  Has Publics: true
+  Is stripped: false</code></pre>
+
+<p><code>Has Debug Info</code> と <code>Has Publics</code> が <code>true</code> であることを確認します。</p>
+
+<table>
+<thead><tr><th>コマンド</th><th>用途</th></tr></thead>
+<tbody>
+<tr><td><code>llvm-pdbutil dump --summary</code></td><td>PDB 全体の概要</td></tr>
+<tr><td><code>llvm-pdbutil dump --modules</code></td><td>どの <code>.obj</code> が寄与しているか</td></tr>
+<tr><td><code>llvm-pdbutil dump --publics</code></td><td>公開シンボルの一覧とアドレス</td></tr>
+<tr><td><code>llvm-pdbutil dump --symbols</code></td><td>詳細なシンボルレコード</td></tr>
+</tbody>
+</table>
+
+<div class="box tip">
+<span class="t">GUID と Age が一致していないと使われません</span>
+<p>PDB は実行ファイルと GUID・Age で結び付けられています。<code>.exe</code> を作り直したら PDB も作り直されるので、<strong>古い PDB を新しい exe と組み合わせることはできません</strong>。プロファイラが「シンボルが見つからない」と言うとき、PDB が古いだけということがよくあります。トレースと PDB はセットで保存してください。</p>
+</div>
+
+<h2>14.5 リンカ設定がシンボルを壊す — <code>/OPT:ICF</code></h2>
+
+<p>ここが実務で最も厄介な落とし穴です。</p>
+
+<p><code>/OPT:ICF</code>（Identical COMDAT Folding）は、機械語が完全に一致する関数を一つにまとめる最適化です。コードサイズが減るので、Release 構成では既定で有効になっています。</p>
+
+<p>しかし、まとめられた関数は<strong>同じアドレスを共有します</strong>。実際に確認してみましょう。中身が同一の関数を二つ用意し、リンクして PDB を覗きます。</p>
+
+<pre><code>extern "C" int f1(int x) { return x * 3 + 1; }
+extern "C" int f2(int x) { return x * 3 + 1; }</code></pre>
+
+<pre><code>:: /OPT:NOICF の場合
+llvm-pdbutil dump --publics app.pdb
+
+  S_PUB32 `f1`   addr = 0001:0000
+  S_PUB32 `f2`   addr = 0001:0016    &lt;- 別のアドレス
+
+:: /OPT:ICF の場合
+  S_PUB32 `f1`   addr = 0001:0000
+  S_PUB32 `f2`   addr = 0001:0000    &lt;- 同じアドレス</code></pre>
+
+<p><code>/OPT:ICF</code> のとき、<code>f1</code> と <code>f2</code> はどちらも <code>0001:0000</code> にいます。プロファイラがこのアドレスでサンプルを拾っても、それが <code>f1</code> だったのか <code>f2</code> だったのかを区別する方法はありません。表示される名前は、たまたま先に見つかったほうです。</p>
+
+<div class="box warn">
+<span class="t">C++ ではこれが頻繁に起こります</span>
+<p>テンプレートの実体化は、型が違っても機械語が同じになりがちです。<code>std::vector&lt;int*&gt;</code> と <code>std::vector&lt;char*&gt;</code> のメンバ関数は、ポインタのサイズが同じなら同一のコードになります。プロファイルに「なぜこの関数が」という名前が出てきたら、ICF を疑ってください。</p>
+<p>プロファイルを取るときだけ <code>/OPT:NOICF</code> にする、という運用が有効です。</p>
+</div>
+
+<p class="path"><strong>構成プロパティ &gt; リンカー &gt; 最適化 &gt; COMDAT の折りたたみ</strong> → <code>COMDAT の折りたたみを行わない (/OPT:NOICF)</code></p>
+
+<p>ただし、これはコードサイズと配置を変えるので、<strong>性能そのものが変わりえます</strong>。最終的な性能測定は、本番と同じリンカ設定で行ってください。ICF を切るのはあくまで「どの関数が重いのかを特定する」段階の話です。</p>
+
+<h2>14.6 最適化されたコードのシンボル</h2>
+
+<h3>14.6.1 インライン展開された関数</h3>
+
+<p>第 12 章で触れた「インライン化された関数はプロファイルに出てこない」問題ですが、情報自体は PDB に入っています。<code>S_INLINESITE</code> というレコードがそれです。</p>
+
+<pre><code>llvm-pdbutil dump --symbols ClangOptLab.pdb
+
+  S_GPROC32  `main`
+  S_INLINEES
+  S_INLINESITE          &lt;- ここに展開された関数の情報がある
+  S_INLINESITE_END</code></pre>
+
+<p>これを解釈できるツールなら、インライン展開された関数を独立した行として表示できます。WPA や PIX はこれに対応していますが、表示上は元の関数の中に入れ子で現れるため、見落としやすいところです。「この関数が見当たらない」と思ったら、呼び出し元を展開してみてください。</p>
+
+<h3>14.6.2 フレームポインタとスタックウォーク</h3>
+
+<p>サンプリングプロファイラはコールスタックを辿る必要があります。その方法として、伝統的には <code>rbp</code> レジスタ（フレームポインタ）の連鎖を辿る方式がありました。最適化するとこのレジスタが汎用に使われてしまうため、「最適化するとスタックが辿れない」という問題が古くから知られています。</p>
+
+<p><strong>x64 の Windows では、この心配は基本的に不要です。</strong> x64 の呼び出し規約は、すべての関数に巻き戻し情報（<code>.pdata</code> / <code>.xdata</code> セクション）を持つことを義務づけています。ETW のスタックウォークはこの情報を使うので、フレームポインタが無くてもスタックを辿れます。</p>
+
+<div class="box warn">
+<span class="t">それでも知っておくべき罠：<code>/Oy-</code> は効きません</span>
+<p>MSVC では <code>/Oy-</code> が「フレームポインタを省略しない」という指示でした。clang-cl でも受け付けられますが、<strong>実際には何も起こりません</strong>。実測すると、内部には <code>-mframe-pointer=none</code> が渡り続けます。</p>
+<p>本当にフレームポインタを残したい場合は、Clang 形式のオプションを使います。</p>
+<pre><code>/clang:-fno-omit-frame-pointer</code></pre>
+<p>こちらを指定すると、生成コードに実際にプロローグが現れます。</p>
+<pre><code>"?caller@@YAHH@Z":
+.seh_proc "?caller@@YAHH@Z"
+        push    rbp
+        .seh_pushreg rbp
+        mov     rbp, rsp
+        .seh_setframe rbp, 0</code></pre>
+<p>通常は必要ありませんが、フレームポインタを前提とするサードパーティのプロファイラやクラッシュレポータを使う場合には効いてきます。「<code>/Oy-</code> を付けたのに直らない」という状況に陥ったら、この事実を思い出してください。</p>
+</div>
+
+<h2>14.7 シンボルパスの設定</h2>
+
+<p>前章でも触れましたが、まとめておきます。</p>
+
+<pre><code>set _NT_SYMBOL_PATH=srv*C:\symbols*https://msdl.microsoft.com/download/symbols;C:\work\ClangOptLab\x64\Release</code></pre>
+
+<table>
+<thead><tr><th>部分</th><th>意味</th></tr></thead>
+<tbody>
+<tr><td><code>srv*C:\symbols*https://...</code></td><td>Microsoft のシンボルサーバから OS の PDB を取得し、<code>C:\symbols</code> にキャッシュする</td></tr>
+<tr><td><code>;C:\work\...\x64\Release</code></td><td>自分のプロジェクトの PDB があるフォルダ</td></tr>
+</tbody>
+</table>
+
+<p>OS 側のシンボルも入れておく理由は、スタックの根元が <code>kernel32.dll</code> や <code>ntdll.dll</code> だからです。これらが解決できないと、スタックツリーが途中で切れて読みにくくなります。</p>
+
+<h2>14.8 ハンズオン</h2>
+
+<ol>
+<li><code>x64\Release\ClangOptLab.pdb</code> が存在することを確認する</li>
+<li><code>llvm-pdbutil dump --summary</code> で <code>Has Debug Info: true</code> を確認する</li>
+<li><code>llvm-pdbutil dump --modules</code> で 5 つの <code>.cpp</code> がすべて含まれていることを確認する</li>
+<li>プロパティで <code>/Fd</code> の指定を変えても PDB のファイル名が変わらないことを確認する（clang-cl では無効なため）</li>
+<li>リンカーの COMDAT の折りたたみを <code>/OPT:NOICF</code> にしてリビルドし、<code>.exe</code> のサイズが変わることを確認する</li>
+<li>前章のトレースを取り直し、シンボルが正しく出るか確認する</li>
+</ol>
+
+<h2>14.9 まとめ</h2>
+
+<ul>
+<li><strong>clang-cl では <code>/Zi</code> と <code>/Z7</code> が同じ</strong>。どちらもデバッグ情報を <code>.obj</code> の CodeView セクションに埋める。コンパイラは PDB を作らない</li>
+<li><code>/Fd</code> は受け付けられるが<strong>無効</strong></li>
+<li>PDB を作るのは <strong><code>lld-link</code> の <code>/DEBUG</code></strong>。<code>/DEBUG:FASTLINK</code> は非対応で FULL にフォールバックする</li>
+<li><code>llvm-pdbutil</code> で PDB の中身を検査できる。PDB と <code>.exe</code> は GUID で結び付いており、組み合わせを間違えると使われない</li>
+<li><strong><code>/OPT:ICF</code> は同一の関数を同じアドレスにまとめる</strong>。プロファイルで別の関数名が表示される原因になる。調査中は <code>/OPT:NOICF</code></li>
+<li>インライン展開された関数の情報は <code>S_INLINESITE</code> として PDB に入っている</li>
+<li>x64 Windows のスタックウォークは <code>.pdata</code> を使うのでフレームポインタは不要。<strong><code>/Oy-</code> は clang-cl では効かず</strong>、必要なら <code>/clang:-fno-omit-frame-pointer</code></li>
+</ul>
+
+<p class="next"><strong>次章では</strong>、第 3 部の締めくくりとして「時間の測り方」そのものを扱います。同じバイナリを 30 回走らせると実行時間が何パーセント揺れるのか、その揺れの中で「速くなった」と言うには何が必要なのか。実測データを添えて、本書で使う計測手順を確定させます。</p>
+
+</div>
+</body>
+</html>

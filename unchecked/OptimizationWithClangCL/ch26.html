@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第26章 計装ビルド — Clang最適化入門</title>
+<style>
+:root{
+  --ink:#1b1d21; --sub:#5c626b; --line:#dfe3e8; --bg:#fff;
+  --code-bg:#f5f7f9; --code-ink:#22262b; --accent:#2f5d8a;
+  --note-bg:#eef4fa; --note-line:#4a80b5;
+  --warn-bg:#fdf4ec; --warn-line:#c07830;
+  --tip-bg:#eef7f1; --tip-line:#4a8c5f;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Meiryo",system-ui,sans-serif;
+  font-size:16px; line-height:1.9; text-align:justify;
+}
+.book{max-width:46rem; margin:0 auto; padding:3rem 1.25rem 6rem}
+.chapno{font-size:.82rem; letter-spacing:.18em; color:var(--accent); font-weight:700; margin:0 0 .4rem}
+h1{font-size:1.85rem; line-height:1.45; margin:0 0 .6rem; letter-spacing:.01em}
+.lead{color:var(--sub); font-size:1.02rem; margin:0 0 2.5rem; padding-bottom:2rem; border-bottom:2px solid var(--line)}
+h2{font-size:1.32rem; margin:3.2rem 0 1rem; padding-bottom:.45rem; border-bottom:1px solid var(--line); letter-spacing:.01em}
+h3{font-size:1.08rem; margin:2.2rem 0 .7rem; color:#2c3239}
+h4{font-size:.98rem; margin:1.6rem 0 .5rem; color:#3a4048}
+p{margin:0 0 1.1rem}
+ul,ol{margin:0 0 1.2rem; padding-left:1.5rem}
+li{margin:.4rem 0}
+code{
+  font-family:"Cascadia Mono","Consolas","SF Mono",monospace;
+  font-size:.88em; background:var(--code-bg); padding:.12em .38em;
+  border-radius:3px; border:1px solid var(--line); word-break:break-all;
+}
+pre{
+  background:var(--code-bg); color:var(--code-ink); border:1px solid var(--line);
+  border-left:3px solid var(--accent); border-radius:4px;
+  padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.6;
+}
+pre code{background:none; border:none; padding:0; font-size:.85rem; word-break:normal}
+.cap{font-size:.83rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+.box{border-radius:4px; padding:.95rem 1.15rem; margin:1.6rem 0; font-size:.95rem}
+.box p:last-child{margin-bottom:0}
+.box .t{font-weight:700; font-size:.86rem; letter-spacing:.06em; display:block; margin-bottom:.4rem}
+.note{background:var(--note-bg); border-left:4px solid var(--note-line)}
+.note .t{color:var(--note-line)}
+.warn{background:var(--warn-bg); border-left:4px solid var(--warn-line)}
+.warn .t{color:var(--warn-line)}
+.tip{background:var(--tip-bg); border-left:4px solid var(--tip-line)}
+.tip .t{color:var(--tip-line)}
+table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+th{background:var(--code-bg); font-weight:700}
+figure{margin:2rem 0}
+figure svg{display:block; width:100%; height:auto}
+figcaption{font-size:.83rem; color:var(--sub); text-align:center; margin-top:.7rem}
+.goal{border:1px solid var(--line); border-top:3px solid var(--accent); border-radius:4px; padding:1.1rem 1.3rem; margin:0 0 2.4rem; background:#fbfcfd}
+.goal h2{margin:0 0 .6rem; font-size:1rem; border:none; padding:0; letter-spacing:.06em}
+.goal ul{margin-bottom:0}
+.next{margin-top:3.5rem; padding-top:1.4rem; border-top:2px solid var(--line); color:var(--sub); font-size:.95rem}
+.next strong{color:var(--ink)}
+.chk{list-style:none; padding-left:0}
+.chk li{padding-left:1.7rem; position:relative}
+.chk li::before{content:"\2610"; position:absolute; left:.2rem; color:var(--accent); font-size:1.05rem}
+.path{font-size:.93rem; color:var(--sub); background:var(--code-bg); border:1px solid var(--line); border-radius:3px; padding:.5rem .8rem; margin:0 0 1.2rem}
+.partend{margin-top:3rem; padding:1.2rem 1.4rem; border:2px solid var(--accent); border-radius:5px; background:#fbfcfd}
+.partend h3{margin-top:0; color:var(--accent)}
+.real{border-left-color:var(--tip-line)}
+@media (prefers-color-scheme:dark){
+  :root{
+    --ink:#e6e8ea; --sub:#a2a9b2; --line:#333940; --bg:#16181b;
+    --code-bg:#1e2126; --code-ink:#dfe3e8; --accent:#7fb0dd;
+    --note-bg:#1b2530; --note-line:#5f96c9;
+    --warn-bg:#2b2118; --warn-line:#d09154;
+    --tip-bg:#182619; --tip-line:#6aad7d;
+  }
+  h3{color:#d5d9dd} h4{color:#c3c9cf}
+  .goal,.partend{background:#1a1d21}
+}
+</style>
+</head>
+<body>
+<div class="book">
+
+<p class="chapno">第 26 章</p>
+<h1>計装ビルド<br>— <code>-fprofile-generate</code> とプロファイルランタイム</h1>
+<p class="lead">オプションは一つです。しかし Windows では「ライブラリが見つからない」という壁にぶつかることがあります。仕組みを知っていれば数分で解決する問題なので、先に押さえておきます。</p>
+
+<div class="goal">
+<h2>この章のゴール</h2>
+<ul>
+<li>LogLab の計装ビルドを作る</li>
+<li>プロファイルランタイムがどうリンクされるかを理解する</li>
+<li>計装のコスト（サイズと速度）を実測する</li>
+<li>ビルド構成を分ける準備をする</li>
+</ul>
+</div>
+
+<h2>26.1 オプション</h2>
+
+<p class="path"><strong>構成プロパティ &gt; C/C++ &gt; コマンド ライン &gt; 追加のオプション</strong></p>
+
+<pre><code>/clang:-fprofile-generate</code></pre>
+
+<p>これだけです。<code>/O2</code> はそのまま残します。<strong>計装ビルドも最適化された状態で作る</strong>のが重要です。最適化を切ってしまうと、実際に出荷するバイナリとは違う構造のコードを計測することになり、プロファイルの意味が薄れます。</p>
+
+<div class="box warn">
+<span class="t">リンカ側の設定は不要ですが、注意点があります</span>
+<p><code>-fprofile-generate</code> はコンパイラのオプションですが、リンク時にプロファイルランタイムのライブラリが必要になります。次節で説明する仕組みにより自動的にリンクされますが、<strong>ライブラリが見つかる場所にある必要があります</strong>。</p>
+</div>
+
+<h2>26.2 プロファイルランタイムはどうリンクされるか</h2>
+
+<p>計装ビルドで作った <code>.obj</code> の中身を調べると、リンカへの指示が埋め込まれていることが分かります。</p>
+
+<pre><code>llvm-readobj --coff-directives tokenizer.obj
+
+Directive(s): /DEFAULTLIB:libcmt.lib /DEFAULTLIB:oldnames.lib
+              /DEFAULTLIB:clang_rt.profile-x86_64.lib
+              /INCLUDE:__llvm_profile_runtime_user</code></pre>
+
+<p><code>/DEFAULTLIB:clang_rt.profile-x86_64.lib</code>。これが「このライブラリもリンクしてくれ」という指示です。C++ で <code>#pragma comment(lib, "...")</code> と書いたときと同じ仕組みで、コンパイラが自動的に埋め込んでいます。</p>
+
+<p>つまり、リンカのプロパティに何も書かなくてもリンクされます。<strong>ただしリンカがそのファイルを見つけられれば</strong>、の話です。</p>
+
+<h3>26.2.1 見つからないとき</h3>
+
+<p><code>clang_rt.profile-x86_64.lib</code> は、LLVM のインストール先の下にあります。</p>
+
+<pre><code>&lt;LLVM のルート&gt;\lib\clang\&lt;バージョン&gt;\lib\windows\clang_rt.profile-x86_64.lib</code></pre>
+
+<p>実際の場所は環境によって違うので、まず探してください。</p>
+
+<pre><code>:: Visual Studio 同梱の LLVM の場合
+dir /s /b "%VCINSTALLDIR%Tools\Llvm\x64\lib\clang_rt.profile*"
+
+:: 公式 LLVM を入れている場合
+dir /s /b "C:\Program Files\LLVM\lib\clang_rt.profile*"</code></pre>
+
+<p>見つかったら、そのフォルダをリンカのライブラリ検索パスに追加します。</p>
+
+<p class="path"><strong>構成プロパティ &gt; リンカー &gt; 全般 &gt; 追加のライブラリ ディレクトリ</strong></p>
+
+<pre><code>C:\Program Files\LLVM\lib\clang\21\lib\windows;%(AdditionalLibraryDirectories)</code></pre>
+
+<div class="box warn">
+<span class="t">見つからないときのエラー</span>
+<p><code>clang_rt.profile-x86_64.lib</code> が見つからない、という趣旨のリンクエラーになります。<strong>「PGO のオプションが間違っている」と誤解しやすい</strong>ところですが、単にライブラリの場所を教えていないだけです。</p>
+<p>そもそもファイル自体が存在しない場合もあります。Visual Studio 同梱の LLVM には含まれていないことがあるので、その場合は第 2 章の手順で公式 LLVM を導入してください。第 5 章のチェックリストで <code>llvm-profdata</code> の有無を確認しておいたのは、この伏線でもあります。</p>
+</div>
+
+<h2>26.3 計装ビルドのコスト</h2>
+
+<p>計装ビルドは、あらゆる分岐と関数呼び出しにカウンタの更新を挿入します。当然ながら重くなります。LogLab で実測しました。</p>
+
+<table>
+<thead><tr><th>ビルド</th><th><code>.text</code> サイズ</th><th>実行時間</th></tr></thead>
+<tbody>
+<tr><td>通常（<code>/O2</code>）</td><td>8,103 B</td><td>150 ms</td></tr>
+<tr><td>計装（<code>-fprofile-generate</code>）</td><td><strong>34,274 B</strong>（4.2 倍）</td><td><strong>284 ms</strong>（1.9 倍）</td></tr>
+</tbody>
+</table>
+<p class="cap">実測の一例</p>
+
+<p>コードが 4 倍に膨らみ、実行時間が約 2 倍になりました。この数字は覚えておく価値があります。</p>
+
+<div class="box note">
+<span class="t">計装ビルドを出荷してはいけません</span>
+<p>当たり前のようですが、実際に起こる事故です。ビルド構成を分けずに <code>-fprofile-generate</code> を追加のオプションに書き、そのままリリースしてしまう。2 倍遅いバイナリが世に出ることになります。</p>
+<p>しかも計装ビルドは、実行のたびにプロファイルデータをディスクに書き出します。ユーザーの環境に見慣れないファイルが増える、という副作用も付いてきます。</p>
+</div>
+
+<h3>26.3.1 オーバーヘッドが問題になる場合</h3>
+
+<p>2 倍というのは、多くの場合は許容範囲です。トレーニング実行は開発者の手元か CI で行うものだからです。ただし次のような場合は困ります。</p>
+
+<ul>
+<li>実時間の制約があるアプリ（ゲーム、リアルタイム処理）。フレーム落ちで挙動そのものが変わってしまう</li>
+<li>タイムアウトのあるテストスイート</li>
+<li>非常に長時間動かす必要があるワークロード</li>
+</ul>
+
+<p>これらの場合は、トレーニングの範囲を絞る、あるいはサンプリング型のプロファイルを使うといった選択肢があります（付録 C）。</p>
+
+<h2>26.4 ビルドして確認する</h2>
+
+<ol>
+<li>追加のオプションに <code>/clang:-fprofile-generate</code> を設定する</li>
+<li>ビルドが通ることを確認する（通らなければ 26.2.1 節）</li>
+<li>実行して <strong>checksum が <code>0x0e8685105a08f105</code> のまま</strong>であることを確認する</li>
+<li>実行時間が通常ビルドの約 2 倍になっていることを確認する</li>
+<li><code>.exe</code> のサイズが大きくなっていることを確認する</li>
+<li>実行後、カレントディレクトリに <code>*.profraw</code> ができていることを確認する</li>
+</ol>
+
+<p>6 番のファイル名は次のような形です。</p>
+
+<pre><code>default_6242892255425663173_0.profraw</code></pre>
+
+<p>これが計測結果の生データです。中身の読み方と出力先の制御は次章で扱います。</p>
+
+<div class="box tip">
+<span class="t">checksum の確認を忘れずに</span>
+<p>計装ビルドでも結果は同じになるはずです。ここで値が変わるなら、計装がプログラムの挙動を変えてしまっている——つまり元のコードに未定義動作がある可能性があります。第 23 章で LTO について書いたのと同じ話です。</p>
+</div>
+
+<h2>26.5 ビルド構成を分ける</h2>
+
+<p>PGO では、同じソースから<strong>三つの異なるバイナリ</strong>を作ることになります。</p>
+
+<table>
+<thead><tr><th>バイナリ</th><th>オプション</th><th>用途</th></tr></thead>
+<tbody>
+<tr><td>基準</td><td><code>/O2</code></td><td>比較の基準（第 4 部で <code>builds\baseline\</code> に退避済み）</td></tr>
+<tr><td>計装</td><td><code>/O2 /clang:-fprofile-generate</code></td><td>トレーニング実行専用。捨てる</td></tr>
+<tr><td>最適化</td><td><code>/O2 /clang:-fprofile-use=...</code></td><td><strong>成果物</strong></td></tr>
+</tbody>
+</table>
+
+<p>プロパティを手で切り替えながら進めることもできますが、切り替え忘れの事故が起きます。MSBuild で構成を追加するのが本筋で、その手順は第 39 章で扱います。本書の第 5 部では、当面は手で切り替えつつ、できた <code>.exe</code> を退避していく方式で進めます。</p>
+
+<pre><code>builds\
+  baseline\   ClangOptLab.exe   &lt;- /O2 のみ（第 4 部で作成）
+  instr\      ClangOptLab.exe   &lt;- 計装ビルド
+  pgo\        ClangOptLab.exe   &lt;- 最適化ビルド（第 31 章）</code></pre>
+
+<h2>26.6 よくある失敗</h2>
+
+<h4><code>clang_rt.profile-x86_64.lib</code> が見つからない</h4>
+<p>26.2.1 節。ライブラリ検索パスの設定か、公式 LLVM の導入。</p>
+
+<h4><code>.profraw</code> ができない</h4>
+<p>プログラムが正常終了していない可能性があります。プロファイルはプロセス終了時に書き出されるため、<code>abort()</code> や <code>TerminateProcess</code>、あるいはクラッシュで終わると書き出されません。まず正常に <code>main</code> から <code>return</code> しているかを確認してください。</p>
+
+<h4>書き込み権限がない場所で実行している</h4>
+<p><code>.profraw</code> はカレントディレクトリに出力されます。書き込めない場所（<code>C:\Program Files</code> の下など）で実行すると失敗します。出力先の指定方法は次章で扱います。</p>
+
+<h4>計装ビルドが遅すぎて終わらない</h4>
+<p>反復回数を減らしてください。トレーニングに必要なのは「代表的な分布」であって「長時間の実行」ではありません。この話は第 28 章で扱います。</p>
+
+<h2>26.7 まとめ</h2>
+
+<ul>
+<li>計装ビルドは <code>/clang:-fprofile-generate</code>。<code>/O2</code> は<strong>そのまま残す</strong></li>
+<li>プロファイルランタイムは <code>.obj</code> に埋め込まれた <code>/DEFAULTLIB</code> 指示で自動的にリンクされる</li>
+<li><strong>ライブラリが見つからないときは検索パスの問題。</strong> <code>lib\clang\&lt;ver&gt;\lib\windows\</code> を追加する</li>
+<li>実測では <code>.text</code> が 4.2 倍、実行時間が 1.9 倍になった</li>
+<li>計装ビルドは測定専用。<strong>出荷してはいけない</strong></li>
+<li>計装ビルドでも checksum は変わらないはず。変わったら未定義動作を疑う</li>
+<li>プロセスが正常終了しないと <code>.profraw</code> は書き出されない</li>
+</ul>
+
+<p class="next"><strong>次章では</strong>、プロファイルの出力先を制御します。既定ではカレントディレクトリに固定の名前で出るため、複数回実行すると上書きされてしまいます。<code>LLVM_PROFILE_FILE</code> 環境変数とそのパターン指定を使って、実行ごと・プロセスごとにファイルを分ける方法を扱います。</p>
+
+</div>
+</body>
+</html>

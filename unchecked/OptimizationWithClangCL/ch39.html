@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第39章 MSBuild で最適化パイプラインを組む — Clang最適化入門</title>
+<style>
+:root{
+  --ink:#1b1d21; --sub:#5c626b; --line:#dfe3e8; --bg:#fff;
+  --code-bg:#f5f7f9; --code-ink:#22262b; --accent:#2f5d8a;
+  --note-bg:#eef4fa; --note-line:#4a80b5;
+  --warn-bg:#fdf4ec; --warn-line:#c07830;
+  --tip-bg:#eef7f1; --tip-line:#4a8c5f;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Meiryo",system-ui,sans-serif;
+  font-size:16px; line-height:1.9; text-align:justify;
+}
+.book{max-width:46rem; margin:0 auto; padding:3rem 1.25rem 6rem}
+.chapno{font-size:.82rem; letter-spacing:.18em; color:var(--accent); font-weight:700; margin:0 0 .4rem}
+h1{font-size:1.85rem; line-height:1.45; margin:0 0 .6rem; letter-spacing:.01em}
+.lead{color:var(--sub); font-size:1.02rem; margin:0 0 2.5rem; padding-bottom:2rem; border-bottom:2px solid var(--line)}
+h2{font-size:1.32rem; margin:3.2rem 0 1rem; padding-bottom:.45rem; border-bottom:1px solid var(--line); letter-spacing:.01em}
+h3{font-size:1.08rem; margin:2.2rem 0 .7rem; color:#2c3239}
+h4{font-size:.98rem; margin:1.6rem 0 .5rem; color:#3a4048}
+p{margin:0 0 1.1rem}
+ul,ol{margin:0 0 1.2rem; padding-left:1.5rem}
+li{margin:.4rem 0}
+code{
+  font-family:"Cascadia Mono","Consolas","SF Mono",monospace;
+  font-size:.88em; background:var(--code-bg); padding:.12em .38em;
+  border-radius:3px; border:1px solid var(--line); word-break:break-all;
+}
+pre{
+  background:var(--code-bg); color:var(--code-ink); border:1px solid var(--line);
+  border-left:3px solid var(--accent); border-radius:4px;
+  padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.6;
+}
+pre code{background:none; border:none; padding:0; font-size:.85rem; word-break:normal}
+.cap{font-size:.83rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+.box{border-radius:4px; padding:.95rem 1.15rem; margin:1.6rem 0; font-size:.95rem}
+.box p:last-child{margin-bottom:0}
+.box .t{font-weight:700; font-size:.86rem; letter-spacing:.06em; display:block; margin-bottom:.4rem}
+.note{background:var(--note-bg); border-left:4px solid var(--note-line)}
+.note .t{color:var(--note-line)}
+.warn{background:var(--warn-bg); border-left:4px solid var(--warn-line)}
+.warn .t{color:var(--warn-line)}
+.tip{background:var(--tip-bg); border-left:4px solid var(--tip-line)}
+.tip .t{color:var(--tip-line)}
+table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+th{background:var(--code-bg); font-weight:700}
+figure{margin:2rem 0}
+figure svg{display:block; width:100%; height:auto}
+figcaption{font-size:.83rem; color:var(--sub); text-align:center; margin-top:.7rem}
+.goal{border:1px solid var(--line); border-top:3px solid var(--accent); border-radius:4px; padding:1.1rem 1.3rem; margin:0 0 2.4rem; background:#fbfcfd}
+.goal h2{margin:0 0 .6rem; font-size:1rem; border:none; padding:0; letter-spacing:.06em}
+.goal ul{margin-bottom:0}
+.next{margin-top:3.5rem; padding-top:1.4rem; border-top:2px solid var(--line); color:var(--sub); font-size:.95rem}
+.next strong{color:var(--ink)}
+.chk{list-style:none; padding-left:0}
+.chk li{padding-left:1.7rem; position:relative}
+.chk li::before{content:"\2610"; position:absolute; left:.2rem; color:var(--accent); font-size:1.05rem}
+.path{font-size:.93rem; color:var(--sub); background:var(--code-bg); border:1px solid var(--line); border-radius:3px; padding:.5rem .8rem; margin:0 0 1.2rem}
+.partend{margin-top:3rem; padding:1.2rem 1.4rem; border:2px solid var(--accent); border-radius:5px; background:#fbfcfd}
+.partend h3{margin-top:0; color:var(--accent)}
+.real{border-left-color:var(--tip-line)}
+@media (prefers-color-scheme:dark){
+  :root{
+    --ink:#e6e8ea; --sub:#a2a9b2; --line:#333940; --bg:#16181b;
+    --code-bg:#1e2126; --code-ink:#dfe3e8; --accent:#7fb0dd;
+    --note-bg:#1b2530; --note-line:#5f96c9;
+    --warn-bg:#2b2118; --warn-line:#d09154;
+    --tip-bg:#182619; --tip-line:#6aad7d;
+  }
+  h3{color:#d5d9dd} h4{color:#c3c9cf}
+  .goal,.partend{background:#1a1d21}
+}
+</style>
+</head>
+<body>
+<div class="book">
+
+<p class="chapno">第 39 章</p>
+<h1>MSBuild で最適化パイプラインを組む<br>— 構成の追加とプロパティシート</h1>
+<p class="lead">ここまで、プロパティページを手で切り替えながら進めてきました。切り替え忘れは実際に起こります。構成として定義してしまえば、コマンド一つで正しいビルドが得られます。</p>
+
+<div class="goal">
+<h2>この章のゴール</h2>
+<ul>
+<li>プロパティシートで設定を切り出す</li>
+<li>最適化用のビルド構成を追加する</li>
+<li>コマンドラインから構成を指定してビルドする</li>
+<li>PGO の三段階を構成の切り替えとして表現する</li>
+</ul>
+</div>
+
+<h2>39.1 なぜ構成を分けるのか</h2>
+
+<p>第 26 章で触れた事故を思い出してください。計装ビルドのオプションを外し忘れたまま出荷する、というものです。手でプロパティを切り替える運用では、これを防げません。</p>
+
+<p>また、日常の開発では LTO を切りたい（第 19 章）という要求もあります。「Release」が一つしかないと、この使い分けができません。</p>
+
+<table>
+<thead><tr><th>構成</th><th>用途</th><th>オプション</th></tr></thead>
+<tbody>
+<tr><td><code>Debug</code></td><td>開発</td><td><code>/Od</code></td></tr>
+<tr><td><code>Release</code></td><td>日常のビルド、比較の基準</td><td><code>/O2</code></td></tr>
+<tr><td><code>Release-Instr</code></td><td>トレーニング用（使い捨て）</td><td><code>/O2 -fprofile-generate</code></td></tr>
+<tr><td><code>Release-PGO</code></td><td>PGO 適用</td><td><code>/O2 -fprofile-use</code></td></tr>
+<tr><td><code>Release-Opt</code></td><td><strong>出荷用</strong>（PGO + ThinLTO）</td><td><code>/O2 -fprofile-use -flto=thin</code></td></tr>
+</tbody>
+</table>
+
+<h2>39.2 プロパティシート</h2>
+
+<p>構成ごとに <code>.vcxproj</code> を書き換えるのは保守しづらいので、共通部分をプロパティシート（<code>.props</code>）に切り出します。</p>
+
+<h3>39.2.1 共通の設定</h3>
+
+<pre><code>&lt;?xml version="1.0" encoding="utf-8"?&gt;
+&lt;Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003"&gt;
+  &lt;PropertyGroup&gt;
+    &lt;!-- プロファイルの置き場所 --&gt;
+    &lt;ProfileDir&gt;$(SolutionDir)prof&lt;/ProfileDir&gt;
+    &lt;ProfileData&gt;$(SolutionDir)app.profdata&lt;/ProfileData&gt;
+    &lt;LtoCacheDir&gt;$(SolutionDir)ltocache&lt;/LtoCacheDir&gt;
+  &lt;/PropertyGroup&gt;
+
+  &lt;ItemDefinitionGroup&gt;
+    &lt;ClCompile&gt;
+      &lt;LanguageStandard&gt;stdcpp23&lt;/LanguageStandard&gt;
+      &lt;DebugInformationFormat&gt;ProgramDatabase&lt;/DebugInformationFormat&gt;
+      &lt;AdditionalIncludeDirectories&gt;
+        $(ProjectDir)include;%(AdditionalIncludeDirectories)
+      &lt;/AdditionalIncludeDirectories&gt;
+    &lt;/ClCompile&gt;
+    &lt;Link&gt;
+      &lt;GenerateDebugInformation&gt;true&lt;/GenerateDebugInformation&gt;
+    &lt;/Link&gt;
+  &lt;/ItemDefinitionGroup&gt;
+&lt;/Project&gt;</code></pre>
+<p class="cap">リスト 39-1　Common.props</p>
+
+<h3>39.2.2 最適化ごとのシート</h3>
+
+<pre><code>&lt;?xml version="1.0" encoding="utf-8"?&gt;
+&lt;Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003"&gt;
+  &lt;ItemDefinitionGroup&gt;
+    &lt;ClCompile&gt;
+      &lt;AdditionalOptions&gt;
+        /clang:-fprofile-generate=$(ProfileDir) %(AdditionalOptions)
+      &lt;/AdditionalOptions&gt;
+    &lt;/ClCompile&gt;
+    &lt;Link&gt;
+      &lt;AdditionalLibraryDirectories&gt;
+        $(LLVMInstallDir)lib\clang\$(LLVMToolsVersion)\lib\windows;%(AdditionalLibraryDirectories)
+      &lt;/AdditionalLibraryDirectories&gt;
+    &lt;/Link&gt;
+  &lt;/ItemDefinitionGroup&gt;
+&lt;/Project&gt;</code></pre>
+<p class="cap">リスト 39-2　Instrument.props（計装ビルド用）</p>
+
+<pre><code>&lt;?xml version="1.0" encoding="utf-8"?&gt;
+&lt;Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003"&gt;
+  &lt;ItemDefinitionGroup&gt;
+    &lt;ClCompile&gt;
+      &lt;AdditionalOptions&gt;
+        /clang:-fprofile-use=$(ProfileData)
+        /clang:-Werror=backend-plugin
+        %(AdditionalOptions)
+      &lt;/AdditionalOptions&gt;
+    &lt;/ClCompile&gt;
+  &lt;/ItemDefinitionGroup&gt;
+&lt;/Project&gt;</code></pre>
+<p class="cap">リスト 39-3　UseProfile.props（PGO 適用用）</p>
+
+<div class="box tip">
+<span class="t"><code>-Werror=backend-plugin</code> を入れておく</span>
+<p>第 34 章で扱ったプロファイルの陳腐化を、ビルドエラーとして検出させます。「知らないうちにプロファイルが効かなくなっていた」という事態を防げます。</p>
+<p>ただし、開発中はこれが邪魔になることもあります。その場合は CI 用の構成にだけ入れる、といった使い分けをしてください。</p>
+</div>
+
+<pre><code>&lt;?xml version="1.0" encoding="utf-8"?&gt;
+&lt;Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003"&gt;
+  &lt;ItemDefinitionGroup&gt;
+    &lt;ClCompile&gt;
+      &lt;AdditionalOptions&gt;/clang:-flto=thin %(AdditionalOptions)&lt;/AdditionalOptions&gt;
+    &lt;/ClCompile&gt;
+    &lt;Link&gt;
+      &lt;AdditionalOptions&gt;
+        /lldltocache:$(LtoCacheDir)
+        /lldltocachepolicy:cache_size_bytes=2g:prune_after=168h
+        %(AdditionalOptions)
+      &lt;/AdditionalOptions&gt;
+    &lt;/Link&gt;
+  &lt;/ItemDefinitionGroup&gt;
+&lt;/Project&gt;</code></pre>
+<p class="cap">リスト 39-4　ThinLTO.props</p>
+
+<div class="box warn">
+<span class="t"><code>%(AdditionalOptions)</code> を必ず末尾に置く</span>
+<p>第 4 章でも触れましたが、これは「既存の設定を引き継ぐ」という意味です。省くと、他のプロパティシートやプロジェクト設定で指定したオプションが消えます。<strong>プロパティシートを重ねる設計では、これが特に重要になります。</strong></p>
+</div>
+
+<h2>39.3 構成を追加する</h2>
+
+<p>Visual Studio の <strong>ビルド &gt; 構成マネージャー</strong> から、<code>Release</code> をコピーして新しい構成を作ります。</p>
+
+<ol>
+<li>「アクティブ ソリューション構成」のドロップダウンから <strong>&lt;新規作成&gt;</strong></li>
+<li>名前を <code>Release-Opt</code> とする</li>
+<li>「設定のコピー元」に <code>Release</code> を選ぶ</li>
+<li>「新しいプロジェクト構成を作成する」にチェック</li>
+</ol>
+
+<p>次に、その構成にプロパティシートを適用します。<strong>表示 &gt; その他のウィンドウ &gt; プロパティ マネージャー</strong> を開き、対象の構成を右クリックして「既存のプロパティ シートの追加」を選びます。</p>
+
+<table>
+<thead><tr><th>構成</th><th>適用するシート</th></tr></thead>
+<tbody>
+<tr><td><code>Release</code></td><td><code>Common.props</code></td></tr>
+<tr><td><code>Release-Instr</code></td><td><code>Common.props</code> + <code>Instrument.props</code></td></tr>
+<tr><td><code>Release-PGO</code></td><td><code>Common.props</code> + <code>UseProfile.props</code></td></tr>
+<tr><td><code>Release-Opt</code></td><td><code>Common.props</code> + <code>UseProfile.props</code> + <code>ThinLTO.props</code></td></tr>
+</tbody>
+</table>
+
+<p>組み合わせで表現できるのが、この方式の利点です。</p>
+
+<h2>39.4 コマンドラインからビルドする</h2>
+
+<pre><code>msbuild ClangOptLab.sln /p:Configuration=Release-Instr /p:Platform=x64 /t:Rebuild
+msbuild ClangOptLab.sln /p:Configuration=Release-Opt   /p:Platform=x64 /t:Rebuild</code></pre>
+
+<p>出力先も構成ごとに分かれるので、退避のコピーが不要になります。</p>
+
+<pre><code>x64\Release\        ← 基準
+x64\Release-Instr\  ← 計装
+x64\Release-PGO\    ← PGO
+x64\Release-Opt\    ← 出荷用</code></pre>
+
+<h2>39.5 パイプラインのスクリプト</h2>
+
+<p>第 31 章の <code>pgo.cmd</code> が、構成の切り替えだけで書けるようになります。</p>
+
+<pre><code>@echo off
+:: build-pgo.cmd
+setlocal
+set ROOT=%~dp0
+set SLN=%ROOT%ClangOptLab.sln
+set MSB=msbuild "%SLN%" /p:Platform=x64 /m /nologo /v:minimal
+
+echo ===== [1/4] 計装ビルド =====
+%MSB% /p:Configuration=Release-Instr /t:Rebuild || exit /b 1
+
+echo ===== [2/4] トレーニング =====
+if exist "%ROOT%prof" rmdir /s /q "%ROOT%prof"
+mkdir "%ROOT%prof"
+set LLVM_PROFILE_FILE=%ROOT%prof\run-%%p.profraw
+call "%ROOT%train.cmd" "%ROOT%x64\Release-Instr\ClangOptLab.exe" || exit /b 1
+set LLVM_PROFILE_FILE=
+
+echo ===== [3/4] マージ =====
+llvm-profdata merge -sparse -output="%ROOT%app.profdata" "%ROOT%prof\*.profraw" || exit /b 1
+llvm-profdata show "%ROOT%app.profdata" | findstr /C:"Maximum function count"
+
+echo ===== [4/4] 出荷用ビルド =====
+%MSB% /p:Configuration=Release-Opt /t:Rebuild || exit /b 1
+
+echo.
+echo 完了: x64\Release-Opt\ClangOptLab.exe
+endlocal</code></pre>
+<p class="cap">リスト 39-5　build-pgo.cmd</p>
+
+<p>トレーニングの中身を <code>train.cmd</code> に分けているのは、第 36 章で述べた理由——一周目と二周目で同じワークロードを使う——のためです。CSPGO に拡張するときも、この部分を使い回せます。</p>
+
+<h2>39.6 プロファイルが無いときのフォールバック</h2>
+
+<p>実務で必ずぶつかる問題です。<code>Release-Opt</code> 構成は <code>app.profdata</code> を必要としますが、そのファイルはリポジトリに無いかもしれません。新しく参加した開発者がクローンした直後がそうです。</p>
+
+<p>MSBuild の条件で、存在しない場合は指定を落とせます。</p>
+
+<pre><code>&lt;ItemDefinitionGroup&gt;
+  &lt;ClCompile&gt;
+    &lt;AdditionalOptions Condition="Exists('$(ProfileData)')"&gt;
+      /clang:-fprofile-use=$(ProfileData) %(AdditionalOptions)
+    &lt;/AdditionalOptions&gt;
+  &lt;/ClCompile&gt;
+&lt;/ItemDefinitionGroup&gt;
+
+&lt;Target Name="WarnNoProfile" BeforeTargets="ClCompile"
+        Condition="!Exists('$(ProfileData)')"&gt;
+  &lt;Warning Text="プロファイル $(ProfileData) が見つかりません。PGO 無しでビルドします。" /&gt;
+&lt;/Target&gt;</code></pre>
+<p class="cap">リスト 39-6　UseProfile.props（フォールバック付き）</p>
+
+<div class="box note">
+<span class="t">黙って落とすか、失敗させるか</span>
+<p>開発者の手元では「警告を出して PGO 無しでビルド」が親切です。一方 CI では、<strong>プロファイルが無いことに気づかず最適化されていないバイナリを出荷する</strong>のは避けたい。</p>
+<p>この使い分けは、CI 側でプロパティを渡して切り替えるのが素直です。</p>
+<pre><code>msbuild ... /p:Configuration=Release-Opt /p:RequireProfile=true</code></pre>
+<p>そして <code>RequireProfile</code> が <code>true</code> のときは <code>&lt;Error&gt;</code> にする、という条件を書きます。詳しくは第 41 章で扱います。</p>
+</div>
+
+<h2>39.7 CSPGO への拡張</h2>
+
+<p>構成をもう一つ足すだけです。</p>
+
+<pre><code>&lt;!-- CsInstrument.props --&gt;
+&lt;ClCompile&gt;
+  &lt;AdditionalOptions&gt;
+    /clang:-fprofile-use=$(ProfileData)
+    /clang:-fcs-profile-generate=$(CsProfileDir)
+    /clang:-flto=thin
+    %(AdditionalOptions)
+  &lt;/AdditionalOptions&gt;
+&lt;/ClCompile&gt;</code></pre>
+
+<p>構成名は <code>Release-CsInstr</code>。スクリプト側は、第 36 章のリスト 36-1 と同じ流れを構成の切り替えで書き直します。</p>
+
+<h2>39.8 ハンズオン</h2>
+
+<ol>
+<li>リスト 39-1 の <code>Common.props</code> を作り、既存の <code>Release</code> に適用する</li>
+<li>プロパティページから、シートに移した設定が消えていることを確認する（継承されているので値は残る）</li>
+<li>構成マネージャーで <code>Release-Instr</code> と <code>Release-Opt</code> を作る</li>
+<li>それぞれにシートを適用する</li>
+<li>コマンドラインから両方をビルドし、出力先が分かれることを確認する</li>
+<li>リスト 39-5 の <code>build-pgo.cmd</code> を作って通しで実行する</li>
+<li><code>app.profdata</code> を一時的に別名にして、フォールバックが働くことを確認する</li>
+</ol>
+
+<h2>39.9 まとめ</h2>
+
+<ul>
+<li>手でプロパティを切り替える運用は<strong>切り替え忘れの事故</strong>を防げない</li>
+<li>共通設定を <code>Common.props</code> に、最適化ごとの設定を個別のシートに切り出す</li>
+<li>構成（<code>Release-Instr</code> / <code>Release-PGO</code> / <code>Release-Opt</code>）とシートの<strong>組み合わせ</strong>で表現する</li>
+<li><code>%(AdditionalOptions)</code> を末尾に置くのを忘れない</li>
+<li>構成ごとに出力先が分かれるので、退避のコピーが不要になる</li>
+<li><code>Condition="Exists(...)"</code> でプロファイルが無いときのフォールバックを書ける</li>
+<li><code>-Werror=backend-plugin</code> を入れて陳腐化を検出させる（第 34 章）</li>
+</ul>
+
+<p class="next"><strong>次章では</strong>、同じことを CMake で行います。ClangCL を使う設定、LTO の指定、そして PGO の三段階をどう表現するか。MSBuild と CMake の対応表も用意します。</p>
+
+</div>
+</body>
+</html>

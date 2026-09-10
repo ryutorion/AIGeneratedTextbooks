@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第16章 LTO とは何か — Clang最適化入門</title>
+<style>
+:root{
+  --ink:#1b1d21; --sub:#5c626b; --line:#dfe3e8; --bg:#fff;
+  --code-bg:#f5f7f9; --code-ink:#22262b; --accent:#2f5d8a;
+  --note-bg:#eef4fa; --note-line:#4a80b5;
+  --warn-bg:#fdf4ec; --warn-line:#c07830;
+  --tip-bg:#eef7f1; --tip-line:#4a8c5f;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Meiryo",system-ui,sans-serif;
+  font-size:16px; line-height:1.9; text-align:justify;
+}
+.book{max-width:46rem; margin:0 auto; padding:3rem 1.25rem 6rem}
+.chapno{font-size:.82rem; letter-spacing:.18em; color:var(--accent); font-weight:700; margin:0 0 .4rem}
+h1{font-size:1.85rem; line-height:1.45; margin:0 0 .6rem; letter-spacing:.01em}
+.lead{color:var(--sub); font-size:1.02rem; margin:0 0 2.5rem; padding-bottom:2rem; border-bottom:2px solid var(--line)}
+h2{font-size:1.32rem; margin:3.2rem 0 1rem; padding-bottom:.45rem; border-bottom:1px solid var(--line); letter-spacing:.01em}
+h3{font-size:1.08rem; margin:2.2rem 0 .7rem; color:#2c3239}
+h4{font-size:.98rem; margin:1.6rem 0 .5rem; color:#3a4048}
+p{margin:0 0 1.1rem}
+ul,ol{margin:0 0 1.2rem; padding-left:1.5rem}
+li{margin:.4rem 0}
+code{
+  font-family:"Cascadia Mono","Consolas","SF Mono",monospace;
+  font-size:.88em; background:var(--code-bg); padding:.12em .38em;
+  border-radius:3px; border:1px solid var(--line); word-break:break-all;
+}
+pre{
+  background:var(--code-bg); color:var(--code-ink); border:1px solid var(--line);
+  border-left:3px solid var(--accent); border-radius:4px;
+  padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.6;
+}
+pre code{background:none; border:none; padding:0; font-size:.85rem; word-break:normal}
+.cap{font-size:.83rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+.box{border-radius:4px; padding:.95rem 1.15rem; margin:1.6rem 0; font-size:.95rem}
+.box p:last-child{margin-bottom:0}
+.box .t{font-weight:700; font-size:.86rem; letter-spacing:.06em; display:block; margin-bottom:.4rem}
+.note{background:var(--note-bg); border-left:4px solid var(--note-line)}
+.note .t{color:var(--note-line)}
+.warn{background:var(--warn-bg); border-left:4px solid var(--warn-line)}
+.warn .t{color:var(--warn-line)}
+.tip{background:var(--tip-bg); border-left:4px solid var(--tip-line)}
+.tip .t{color:var(--tip-line)}
+table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+th{background:var(--code-bg); font-weight:700}
+figure{margin:2rem 0}
+figure svg{display:block; width:100%; height:auto}
+figcaption{font-size:.83rem; color:var(--sub); text-align:center; margin-top:.7rem}
+.goal{border:1px solid var(--line); border-top:3px solid var(--accent); border-radius:4px; padding:1.1rem 1.3rem; margin:0 0 2.4rem; background:#fbfcfd}
+.goal h2{margin:0 0 .6rem; font-size:1rem; border:none; padding:0; letter-spacing:.06em}
+.goal ul{margin-bottom:0}
+.next{margin-top:3.5rem; padding-top:1.4rem; border-top:2px solid var(--line); color:var(--sub); font-size:.95rem}
+.next strong{color:var(--ink)}
+.chk{list-style:none; padding-left:0}
+.chk li{padding-left:1.7rem; position:relative}
+.chk li::before{content:"\2610"; position:absolute; left:.2rem; color:var(--accent); font-size:1.05rem}
+.path{font-size:.93rem; color:var(--sub); background:var(--code-bg); border:1px solid var(--line); border-radius:3px; padding:.5rem .8rem; margin:0 0 1.2rem}
+.partend{margin-top:3rem; padding:1.2rem 1.4rem; border:2px solid var(--accent); border-radius:5px; background:#fbfcfd}
+.partend h3{margin-top:0; color:var(--accent)}
+.real{border-left-color:var(--tip-line)}
+@media (prefers-color-scheme:dark){
+  :root{
+    --ink:#e6e8ea; --sub:#a2a9b2; --line:#333940; --bg:#16181b;
+    --code-bg:#1e2126; --code-ink:#dfe3e8; --accent:#7fb0dd;
+    --note-bg:#1b2530; --note-line:#5f96c9;
+    --warn-bg:#2b2118; --warn-line:#d09154;
+    --tip-bg:#182619; --tip-line:#6aad7d;
+  }
+  h3{color:#d5d9dd} h4{color:#c3c9cf}
+  .goal,.partend{background:#1a1d21}
+}
+</style>
+</head>
+<body>
+<div class="book">
+
+<p class="chapno">第 16 章</p>
+<h1>LTO とは何か<br>— 翻訳単位の壁を越える</h1>
+<p class="lead">ここから第 4 部です。第 9 章で見た <code>function definition is not available</code> というリマーク——「定義が見えないのでインライン化できない」という報告を覚えているでしょうか。LTO はこの壁を壊す仕組みです。まずは何が起きているのかを理解します。</p>
+
+<div class="goal">
+<h2>この章のゴール</h2>
+<ul>
+<li>翻訳単位の壁が何を妨げているのかを整理する</li>
+<li>LTO を有効にすると <code>.obj</code> の中身が変わることを知る</li>
+<li>最適化がいつ走るのかを理解する</li>
+<li>Full LTO と ThinLTO の違いの見取り図を持つ</li>
+</ul>
+</div>
+
+<h2>16.1 壁の正体</h2>
+
+<p>第 11 章で使った例をもう一度見ます。</p>
+
+<pre><code>// lib.cpp
+int scale(int v, int factor, bool clamp) {
+    int r = v * factor;
+    if (clamp) { if (r &gt; 1000) r = 1000; if (r &lt; -1000) r = -1000; }
+    return r;
+}
+
+// app.cpp
+int scale(int v, int factor, bool clamp);   // 宣言だけ
+int total = 0;
+for (int i = 0; i &lt; 64; ++i) total += scale(seed + i, 2, false);</code></pre>
+
+<p><code>app.cpp</code> をコンパイルしているとき、コンパイラが <code>scale</code> について知っているのは<strong>宣言だけ</strong>です。引数を三つ取って <code>int</code> を返す、それだけ。中身が分からないので、次のことができません。</p>
+
+<ul>
+<li><code>clamp = false</code> が定数だと分かっても、それを活かせない</li>
+<li>展開して <code>if</code> を消すことができない</li>
+<li>この関数がメモリに触るのか、例外を投げるのか、いつ戻るのかも分からない</li>
+</ul>
+
+<p>結果、<code>app.obj</code> には <code>call</code> 命令が残ります。<code>lib.obj</code> の側では <code>scale</code> が独立した関数として最適化されて存在していますが、二つの <code>.obj</code> は互いを知らないまま完成します。</p>
+
+<p><strong>リンカは、この二つを機械語のまま繋ぐだけです。</strong> 最適化の機会は、リンクの時点ではとうに失われています。</p>
+
+<h2>16.2 LTO の考え方 — 最適化を後回しにする</h2>
+
+<p>LTO（Link Time Optimization）の発想は単純です。<strong>コンパイル時に機械語まで作ってしまうのをやめる。</strong></p>
+
+<p>コンパイラは <code>.obj</code> に機械語ではなく LLVM IR（第 7 章で見たあの中間表現）を書き込みます。リンカはそれらを集め、<strong>プログラム全体が揃った状態で</strong>最適化パイプラインを走らせ、そのあとで機械語を生成します。</p>
+
+<figure>
+<svg viewBox="0 0 720 320" role="img" aria-label="通常のビルドと LTO のビルドの比較。LTO では obj に IR が入り、最適化と機械語生成がリンク時に行われる">
+  <defs>
+    <marker id="a16" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
+      <path d="M0,0 L9,4.5 L0,9 z" fill="#5c626b"/>
+    </marker>
+  </defs>
+
+  <text x="20" y="24" font-size="12" font-weight="700" fill="#5c626b" font-family="sans-serif">通常のビルド</text>
+  <rect x="20" y="36" width="96" height="44" rx="4" fill="#f5f7f9" stroke="#dfe3e8"/>
+  <text x="68" y="63" font-size="11" text-anchor="middle" font-family="monospace" fill="#1b1d21">app.cpp</text>
+  <rect x="20" y="88" width="96" height="44" rx="4" fill="#f5f7f9" stroke="#dfe3e8"/>
+  <text x="68" y="115" font-size="11" text-anchor="middle" font-family="monospace" fill="#1b1d21">lib.cpp</text>
+
+  <rect x="150" y="36" width="132" height="96" rx="4" fill="#eef4fa" stroke="#4a80b5"/>
+  <text x="216" y="72" font-size="11.5" text-anchor="middle" font-weight="700" font-family="sans-serif" fill="#1b1d21">最適化</text>
+  <text x="216" y="92" font-size="11.5" text-anchor="middle" font-weight="700" font-family="sans-serif" fill="#1b1d21">＋機械語生成</text>
+  <text x="216" y="112" font-size="10" text-anchor="middle" font-family="sans-serif" fill="#c07830">TU ごとに独立</text>
+
+  <rect x="316" y="36" width="96" height="96" rx="4" fill="#f5f7f9" stroke="#dfe3e8"/>
+  <text x="364" y="72" font-size="11" text-anchor="middle" font-family="monospace" fill="#1b1d21">*.obj</text>
+  <text x="364" y="92" font-size="10" text-anchor="middle" font-family="sans-serif" fill="#5c626b">機械語</text>
+
+  <rect x="446" y="52" width="110" height="64" rx="4" fill="#eef4fa" stroke="#4a80b5"/>
+  <text x="501" y="80" font-size="11.5" text-anchor="middle" font-weight="700" font-family="monospace" fill="#1b1d21">リンカ</text>
+  <text x="501" y="99" font-size="10" text-anchor="middle" font-family="sans-serif" fill="#5c626b">繋ぐだけ</text>
+
+  <rect x="590" y="60" width="90" height="48" rx="4" fill="#eef7f1" stroke="#4a8c5f"/>
+  <text x="635" y="89" font-size="11" text-anchor="middle" font-family="monospace" fill="#1b1d21">.exe</text>
+
+  <line x1="120" y1="84" x2="146" y2="84" stroke="#5c626b" stroke-width="1.4" marker-end="url(#a16)"/>
+  <line x1="286" y1="84" x2="312" y2="84" stroke="#5c626b" stroke-width="1.4" marker-end="url(#a16)"/>
+  <line x1="416" y1="84" x2="442" y2="84" stroke="#5c626b" stroke-width="1.4" marker-end="url(#a16)"/>
+  <line x1="560" y1="84" x2="586" y2="84" stroke="#5c626b" stroke-width="1.4" marker-end="url(#a16)"/>
+
+  <line x1="20" y1="156" x2="700" y2="156" stroke="#dfe3e8" stroke-width="1.5"/>
+
+  <text x="20" y="182" font-size="12" font-weight="700" fill="#4a8c5f" font-family="sans-serif">LTO のビルド</text>
+  <rect x="20" y="194" width="96" height="44" rx="4" fill="#f5f7f9" stroke="#dfe3e8"/>
+  <text x="68" y="221" font-size="11" text-anchor="middle" font-family="monospace" fill="#1b1d21">app.cpp</text>
+  <rect x="20" y="246" width="96" height="44" rx="4" fill="#f5f7f9" stroke="#dfe3e8"/>
+  <text x="68" y="273" font-size="11" text-anchor="middle" font-family="monospace" fill="#1b1d21">lib.cpp</text>
+
+  <rect x="150" y="194" width="132" height="96" rx="4" fill="#eef4fa" stroke="#4a80b5"/>
+  <text x="216" y="230" font-size="11.5" text-anchor="middle" font-weight="700" font-family="sans-serif" fill="#1b1d21">前処理まで</text>
+  <text x="216" y="250" font-size="10" text-anchor="middle" font-family="sans-serif" fill="#5c626b">機械語は作らない</text>
+
+  <rect x="316" y="194" width="96" height="96" rx="4" fill="#fdf4ec" stroke="#c07830"/>
+  <text x="364" y="230" font-size="11" text-anchor="middle" font-family="monospace" fill="#1b1d21">*.obj</text>
+  <text x="364" y="250" font-size="10" text-anchor="middle" font-weight="700" font-family="sans-serif" fill="#c07830">LLVM IR</text>
+  <text x="364" y="268" font-size="10" text-anchor="middle" font-family="sans-serif" fill="#5c626b">ビットコード</text>
+
+  <rect x="446" y="194" width="110" height="96" rx="4" fill="#eef7f1" stroke="#4a8c5f"/>
+  <text x="501" y="224" font-size="11.5" text-anchor="middle" font-weight="700" font-family="monospace" fill="#1b1d21">lld-link</text>
+  <text x="501" y="245" font-size="10" text-anchor="middle" font-weight="700" font-family="sans-serif" fill="#4a8c5f">最適化</text>
+  <text x="501" y="263" font-size="10" text-anchor="middle" font-weight="700" font-family="sans-serif" fill="#4a8c5f">＋機械語生成</text>
+  <text x="501" y="281" font-size="10" text-anchor="middle" font-family="sans-serif" fill="#5c626b">全体が揃った状態で</text>
+
+  <rect x="590" y="218" width="90" height="48" rx="4" fill="#eef7f1" stroke="#4a8c5f"/>
+  <text x="635" y="247" font-size="11" text-anchor="middle" font-family="monospace" fill="#1b1d21">.exe</text>
+
+  <line x1="120" y1="242" x2="146" y2="242" stroke="#5c626b" stroke-width="1.4" marker-end="url(#a16)"/>
+  <line x1="286" y1="242" x2="312" y2="242" stroke="#5c626b" stroke-width="1.4" marker-end="url(#a16)"/>
+  <line x1="416" y1="242" x2="442" y2="242" stroke="#5c626b" stroke-width="1.4" marker-end="url(#a16)"/>
+  <line x1="560" y1="242" x2="586" y2="242" stroke="#5c626b" stroke-width="1.4" marker-end="url(#a16)"/>
+</svg>
+<figcaption>図 16-1　通常のビルドと LTO のビルド</figcaption>
+</figure>
+
+<h2>16.3 <code>.obj</code> は本当に変わる</h2>
+
+<p>これは概念的な説明ではありません。実際にファイルの種類が変わります。</p>
+
+<pre><code>:: 通常のビルド
+clang-cl /c /O2 lib.cpp
+  → lib.obj : Intel amd64 COFF object file, 6 sections, 1st section name ".text"
+
+:: LTO を有効にしたビルド
+clang-cl /c /O2 /clang:-flto=thin lib.cpp
+  → lib.obj : LLVM IR bitcode</code></pre>
+
+<p>COFF のオブジェクトファイルですらなくなっています。オブジェクトファイルを読むツールに渡すと拒否されます。</p>
+
+<pre><code>llvm-readobj --file-headers lib.obj
+llvm-readobj: warning: 'lib.obj': bitcode files are not supported</code></pre>
+
+<div class="box warn">
+<span class="t">だから <code>link.exe</code> ではリンクできません</span>
+<p>MSVC のリンカは COFF しか理解しません。ビットコードが入った <code>.obj</code> を渡してもオブジェクトファイルとして解釈できず、リンクは失敗します。第 3 章で「<code>UseLldLink</code> を <code>true</code> のままにしておいてください」と念を押したのは、この章のためでした。</p>
+<p><strong>LTO を使うなら <code>lld-link</code> が必須です。</strong></p>
+</div>
+
+<h2>16.4 LTO で何ができるようになるか</h2>
+
+<p>「翻訳単位をまたいでインライン化できる」が代表的な効果ですが、それだけではありません。プログラム全体が見えることで、次の四つが可能になります。</p>
+
+<table>
+<thead><tr><th>できること</th><th>内容</th><th>本書での扱い</th></tr></thead>
+<tbody>
+<tr><td><strong>翻訳単位をまたぐインライン化</strong></td><td><code>call</code> が消え、第 11 章で見た最適化の連鎖が始まる</td><td>第 20 章で確認</td></tr>
+<tr><td><strong>関数属性の伝播</strong></td><td>第 7 章で見た <code>memory(none)</code> や <code>willreturn</code> といった性質が、翻訳単位を越えて伝わる。インライン化されなくても効く</td><td>第 20 章</td></tr>
+<tr><td><strong>未使用コードの削除</strong></td><td>どこからも呼ばれない関数、使われないグローバル変数を消せる</td><td>第 20 章</td></tr>
+<tr><td><strong>仮想関数の解決</strong></td><td>「この基底クラスの実装は全部でこれだけ」と結論できる</td><td>第 21 章</td></tr>
+</tbody>
+</table>
+
+<div class="box tip">
+<span class="t">二番目は見落とされがちです</span>
+<p>インライン化されなくても、「この関数はメモリに触らない」と分かれば、呼び出しの前後でレジスタを退避する必要が減り、呼び出しをループの外に出せる場合もあります。<strong>LTO の効果は <code>call</code> が消えることだけではありません。</strong> 第 20 章で <code>call</code> の数を数えるとき、この点を忘れないでください。</p>
+</div>
+
+<h2>16.5 Full LTO と ThinLTO</h2>
+
+<p>LLVM の LTO には二つの方式があります。詳しくは第 18 章で扱いますが、見取り図だけ先に示します。</p>
+
+<table>
+<thead><tr><th></th><th>Full LTO（<code>-flto</code>）</th><th>ThinLTO（<code>-flto=thin</code>）</th></tr></thead>
+<tbody>
+<tr><td>やり方</td><td>全ビットコードを<strong>一つの巨大なモジュールに統合</strong>してから最適化</td><td>各モジュールの<strong>要約</strong>を作り、必要なものだけを取り込んで並列に最適化</td></tr>
+<tr><td>最適化の深さ</td><td>深い。全体を見渡せる</td><td>やや浅い。取り込む範囲を絞るため</td></tr>
+<tr><td>リンク時間</td><td>長い。並列化しにくい</td><td>短い。コア数に応じて並列化できる</td></tr>
+<tr><td>メモリ</td><td>大量に必要。大規模プロジェクトでは破綻することがある</td><td>抑えられる</td></tr>
+<tr><td>キャッシュ</td><td>なし</td><td>あり。再リンクが速い</td></tr>
+</tbody>
+</table>
+
+<p><strong>実務ではまず ThinLTO を選びます。</strong> Full LTO は小〜中規模のプロジェクトか、最後の一押しを求めるときの選択肢です。本書では第 17 章で Full LTO、第 19 章で ThinLTO を扱い、第 20 章で両方の効果を比較します。</p>
+
+<h2>16.6 最適化はいつ走るのか</h2>
+
+<p>LTO を有効にしても、コンパイル時にまったく何もしないわけではありません。</p>
+
+<table>
+<thead><tr><th>段階</th><th>行われること</th></tr></thead>
+<tbody>
+<tr><td>コンパイル時</td><td>構文解析、意味解析、そして<strong>翻訳単位内で完結する最適化の一部</strong>。結果を IR のまま <code>.obj</code> に書き出す</td></tr>
+<tr><td>リンク時</td><td>IR を集め、<strong>関数間の最適化を含む本番のパイプライン</strong>を走らせ、機械語を生成する</td></tr>
+</tbody>
+</table>
+
+<p>この分担には実務上の意味があります。<strong>第 10 章で作った最適化レコードは、コンパイル時のものです。</strong> LTO を有効にすると、面白い部分はリンク時に移動してしまうため、コンパイル時のレコードを見ても変化がほとんど現れません。</p>
+
+<p>実際、LogLab で確認すると次のようになります。</p>
+
+<pre><code>コンパイル時レコードの件数（全 5 ファイル合計）
+  LTO なし   : 2223 件
+  ThinLTO    : 1460 件
+  Full LTO   : 1672 件</code></pre>
+
+<p>件数が<strong>減っています</strong>。コンパイル時のパイプラインが途中で打ち切られているためです。「LTO を有効にしたらレコードが減った、効果が無いのでは」と誤解しないでください。<strong>リンク時のリマークを別に取る必要があります。</strong> その方法は第 20 章で扱います。</p>
+
+<h2>16.7 まとめ</h2>
+
+<ul>
+<li>翻訳単位の壁とは、「他の <code>.cpp</code> の関数の中身が見えない」という制約である</li>
+<li>LTO は <code>.obj</code> に機械語ではなく <strong>LLVM IR（ビットコード）</strong>を書き、最適化と機械語生成をリンク時に行う</li>
+<li><code>.obj</code> は COFF ですらなくなる。<strong><code>lld-link</code> が必須</strong>で、<code>link.exe</code> ではリンクできない</li>
+<li>LTO が可能にするのは、TU をまたぐインライン化・関数属性の伝播・未使用コードの削除・仮想関数の解決の四つ</li>
+<li>Full LTO は深いが重い、ThinLTO は速く並列化できる。実務ではまず ThinLTO</li>
+<li>LTO を有効にすると<strong>コンパイル時のレコードは減る</strong>。評価はリンク時のリマークで行う</li>
+</ul>
+
+<p class="next"><strong>次章では</strong>、まず Full LTO を実際に有効にします。設定はオプション一つですが、確認すべきことがいくつかあります。<code>.obj</code> が本当にビットコードになったか、リンカは <code>lld-link</code> か、そしてチェックサムは変わっていないか。最小構成の例で、<code>call</code> 命令が実際に消えるところまで確認します。</p>
+
+</div>
+</body>
+</html>

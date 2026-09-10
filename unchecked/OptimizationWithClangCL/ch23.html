@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第23章 LTO の代償 — Clang最適化入門</title>
+<style>
+:root{
+  --ink:#1b1d21; --sub:#5c626b; --line:#dfe3e8; --bg:#fff;
+  --code-bg:#f5f7f9; --code-ink:#22262b; --accent:#2f5d8a;
+  --note-bg:#eef4fa; --note-line:#4a80b5;
+  --warn-bg:#fdf4ec; --warn-line:#c07830;
+  --tip-bg:#eef7f1; --tip-line:#4a8c5f;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Meiryo",system-ui,sans-serif;
+  font-size:16px; line-height:1.9; text-align:justify;
+}
+.book{max-width:46rem; margin:0 auto; padding:3rem 1.25rem 6rem}
+.chapno{font-size:.82rem; letter-spacing:.18em; color:var(--accent); font-weight:700; margin:0 0 .4rem}
+h1{font-size:1.85rem; line-height:1.45; margin:0 0 .6rem; letter-spacing:.01em}
+.lead{color:var(--sub); font-size:1.02rem; margin:0 0 2.5rem; padding-bottom:2rem; border-bottom:2px solid var(--line)}
+h2{font-size:1.32rem; margin:3.2rem 0 1rem; padding-bottom:.45rem; border-bottom:1px solid var(--line); letter-spacing:.01em}
+h3{font-size:1.08rem; margin:2.2rem 0 .7rem; color:#2c3239}
+h4{font-size:.98rem; margin:1.6rem 0 .5rem; color:#3a4048}
+p{margin:0 0 1.1rem}
+ul,ol{margin:0 0 1.2rem; padding-left:1.5rem}
+li{margin:.4rem 0}
+code{
+  font-family:"Cascadia Mono","Consolas","SF Mono",monospace;
+  font-size:.88em; background:var(--code-bg); padding:.12em .38em;
+  border-radius:3px; border:1px solid var(--line); word-break:break-all;
+}
+pre{
+  background:var(--code-bg); color:var(--code-ink); border:1px solid var(--line);
+  border-left:3px solid var(--accent); border-radius:4px;
+  padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.6;
+}
+pre code{background:none; border:none; padding:0; font-size:.85rem; word-break:normal}
+.cap{font-size:.83rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+.box{border-radius:4px; padding:.95rem 1.15rem; margin:1.6rem 0; font-size:.95rem}
+.box p:last-child{margin-bottom:0}
+.box .t{font-weight:700; font-size:.86rem; letter-spacing:.06em; display:block; margin-bottom:.4rem}
+.note{background:var(--note-bg); border-left:4px solid var(--note-line)}
+.note .t{color:var(--note-line)}
+.warn{background:var(--warn-bg); border-left:4px solid var(--warn-line)}
+.warn .t{color:var(--warn-line)}
+.tip{background:var(--tip-bg); border-left:4px solid var(--tip-line)}
+.tip .t{color:var(--tip-line)}
+table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+th{background:var(--code-bg); font-weight:700}
+figure{margin:2rem 0}
+figure svg{display:block; width:100%; height:auto}
+figcaption{font-size:.83rem; color:var(--sub); text-align:center; margin-top:.7rem}
+.goal{border:1px solid var(--line); border-top:3px solid var(--accent); border-radius:4px; padding:1.1rem 1.3rem; margin:0 0 2.4rem; background:#fbfcfd}
+.goal h2{margin:0 0 .6rem; font-size:1rem; border:none; padding:0; letter-spacing:.06em}
+.goal ul{margin-bottom:0}
+.next{margin-top:3.5rem; padding-top:1.4rem; border-top:2px solid var(--line); color:var(--sub); font-size:.95rem}
+.next strong{color:var(--ink)}
+.chk{list-style:none; padding-left:0}
+.chk li{padding-left:1.7rem; position:relative}
+.chk li::before{content:"\2610"; position:absolute; left:.2rem; color:var(--accent); font-size:1.05rem}
+.path{font-size:.93rem; color:var(--sub); background:var(--code-bg); border:1px solid var(--line); border-radius:3px; padding:.5rem .8rem; margin:0 0 1.2rem}
+.partend{margin-top:3rem; padding:1.2rem 1.4rem; border:2px solid var(--accent); border-radius:5px; background:#fbfcfd}
+.partend h3{margin-top:0; color:var(--accent)}
+.real{border-left-color:var(--tip-line)}
+@media (prefers-color-scheme:dark){
+  :root{
+    --ink:#e6e8ea; --sub:#a2a9b2; --line:#333940; --bg:#16181b;
+    --code-bg:#1e2126; --code-ink:#dfe3e8; --accent:#7fb0dd;
+    --note-bg:#1b2530; --note-line:#5f96c9;
+    --warn-bg:#2b2118; --warn-line:#d09154;
+    --tip-bg:#182619; --tip-line:#6aad7d;
+  }
+  h3{color:#d5d9dd} h4{color:#c3c9cf}
+  .goal,.partend{background:#1a1d21}
+}
+</style>
+</head>
+<body>
+<div class="book">
+
+<p class="chapno">第 23 章</p>
+<h1>LTO の代償<br>— デバッグ情報・ビルド時間・メモリと、失敗時の切り分け</h1>
+<p class="lead">ここまで LTO の効果を見てきました。この章では支払うものを整理します。導入するかどうかは、効果と代償を並べて初めて判断できます。あわせて「LTO を入れたら壊れた」ときの切り分け方も扱います。</p>
+
+<div class="goal">
+<h2>この章のゴール</h2>
+<ul>
+<li>ビルド時間がどこに移動するのかを知る</li>
+<li>増分ビルドとデバッグへの影響を理解する</li>
+<li>LTO 特有の失敗パターンと切り分け手順を身につける</li>
+<li>導入するかどうかの判断基準を持つ</li>
+</ul>
+</div>
+
+<h2>23.1 ビルド時間は「移動する」</h2>
+
+<p>LogLab（5 翻訳単位）で、コンパイルとリンクの時間を分けて測りました。</p>
+
+<table>
+<thead><tr><th>ビルド</th><th>コンパイル合計</th><th>リンク</th><th><code>.obj</code> の合計サイズ</th></tr></thead>
+<tbody>
+<tr><td>LTO なし</td><td>5.07 秒</td><td>0.06 秒</td><td>568 KB</td></tr>
+<tr><td>ThinLTO</td><td>4.87 秒</td><td>0.24 秒（<strong>4 倍</strong>）</td><td>600 KB</td></tr>
+<tr><td>Full LTO</td><td>4.81 秒</td><td>0.34 秒（<strong>5.7 倍</strong>）</td><td>612 KB</td></tr>
+</tbody>
+</table>
+<p class="cap">実測の一例</p>
+
+<p>興味深いのは<strong>コンパイルがわずかに速くなっている</strong>ことです。LTO ではコンパイル時に機械語を生成しないので、その分の仕事が減っています。減った仕事はリンクに移動し、そこで数倍に膨らんでいます。</p>
+
+<p>LogLab は小さいので絶対値はどうでもよい水準ですが、比率は規模に応じて効いてきます。数千の翻訳単位を持つプロジェクトでは、リンクだけで数分から数十分になることも珍しくありません。</p>
+
+<h3>23.1.1 メモリ</h3>
+
+<p>Full LTO の最大の弱点はメモリです。全ビットコードを一つのモジュールに統合するため、必要なメモリはプロジェクトの規模にほぼ比例します。大規模プロジェクトで「リンカが落ちる」「マシンがスワップし始める」という報告の多くは、これが原因です。</p>
+
+<p>ThinLTO はモジュール単位で処理するのでメモリ使用量を抑えられます。<strong>大規模プロジェクトで LTO を使うなら、選択肢は実質 ThinLTO 一択</strong>です。</p>
+
+<h2>23.2 増分ビルドが効かない</h2>
+
+<p>第 19 章でも触れましたが、改めて整理します。</p>
+
+<table>
+<thead><tr><th></th><th>LTO なし</th><th>LTO あり</th></tr></thead>
+<tbody>
+<tr><td>1 ファイル変更</td><td>その <code>.obj</code> のみ再生成 → 軽いリンク</td><td>その <code>.obj</code> のみ再生成 → <strong>全体を再最適化</strong></td></tr>
+<tr><td>体感</td><td>数秒</td><td>プロジェクト全体の規模に比例</td></tr>
+</tbody>
+</table>
+
+<p>対策は二つです。</p>
+
+<ul>
+<li><strong>ThinLTO キャッシュ</strong>（第 19 章）。変更していないモジュールのバックエンド処理を省ける</li>
+<li><strong>構成を分ける</strong>。日常の開発は LTO なし、性能検証とリリースだけ LTO（第 39 章）</li>
+</ul>
+
+<h2>23.3 デバッグへの影響</h2>
+
+<h4>スタックトレースから関数が消える</h4>
+<p>翻訳単位をまたいでインライン化されるので、クラッシュダンプのスタックに <code>parse_line</code> が現れず、<code>main</code> だけになる、ということが起こります。第 14 章で扱ったインラインサイト情報（<code>S_INLINESITE</code>）は LTO でも生成されるので、対応したツールなら展開できます。</p>
+
+<h4>ステップ実行がさらに飛ぶ</h4>
+<p>もともと最適化されたコードのステップ実行は行が飛びますが、LTO ではその範囲が翻訳単位を越えます。第 8 章で書いたとおり、逆アセンブルウィンドウで命令単位に追うのが確実です。</p>
+
+<h4>PDB は普通に作られる</h4>
+<p>第 14 章のとおり、PDB を作るのは <code>lld-link</code> です。LTO でもこの流れは変わりません。<code>/DEBUG</code> を付けていれば PDB は生成され、プロファイラもシンボルを解決できます。</p>
+
+<h2>23.4 LTO 特有の失敗</h2>
+
+<h3>23.4.1 リンクが通らない</h3>
+
+<table>
+<thead><tr><th>症状</th><th>原因と対処</th></tr></thead>
+<tbody>
+<tr><td>オブジェクトファイルとして読めないと言われる</td><td>リンカが <code>link.exe</code> になっている。<code>UseLldLink</code> を確認（第 3 章）</td></tr>
+<tr><td>未定義シンボルが急に出る</td><td>LTO によって未使用と判断され削除されたコードが、実は必要だった。インラインアセンブラや、リンカスクリプト経由でしか参照されないシンボルで起きる</td></tr>
+<tr><td>リンクが終わらない・メモリを使い果たす</td><td>Full LTO の規模的な限界。ThinLTO に切り替える</td></tr>
+</tbody>
+</table>
+
+<h3>23.4.2 動作が変わる — チェックサムが命綱</h3>
+
+<div class="box warn">
+<span class="t">LTO は未定義動作を顕在化させます</span>
+<p>LTO はプログラムの意味を変えません。<strong>意味が定義されている限りは。</strong> 未定義動作を含むコードは、最適化の条件が変わると挙動が変わります。LTO は最適化の視野を大きく広げるので、それまで表面化していなかった問題が一気に出ることがあります。</p>
+<p>典型的なのは、初期化されていない変数、寿命の切れたオブジェクトへの参照、strict aliasing 違反、そして<strong>ODR 違反</strong>です。</p>
+</div>
+
+<h4>ODR 違反は警告なしに通ります</h4>
+
+<p>実際に試してみました。同じ名前の <code>struct</code> を、二つの翻訳単位で異なるメンバで定義した——明白な ODR 違反のプログラムです。</p>
+
+<pre><code>// a.cpp
+struct Cfg { int a; int b; };
+
+// b.cpp
+struct Cfg { int a; int b; int c; };   // メンバが違う</code></pre>
+
+<p>Full LTO でビルドしたところ、<strong>警告もエラーも出ず、リンクは成功しました。</strong></p>
+
+<p>LTO は ODR 違反を検出する仕組みではありません。両方の定義が IR に載り、どちらかが採用され、静かに壊れたプログラムができあがります。しかも「壊れ方」は最適化の判断次第で変わるので、再現性が低い厄介なバグになります。</p>
+
+<div class="box tip">
+<span class="t">だからチェックサムを用意しました</span>
+<p>第 4 章で LogLab にチェックサムを組み込んだのは、この瞬間のためです。LTO を有効にしてチェックサムが変わったら、<strong>それは LTO のバグではなく、あなたのコードに未定義動作がある合図</strong>だと考えるのが妥当です。</p>
+<p>最適化オプションを追加するたびに結果を検証する仕組みがあるかどうか。それが、LTO を安心して使えるかどうかを分けます。</p>
+</div>
+
+<h3>23.4.3 切り分けの手順</h3>
+
+<ol>
+<li><strong>LTO を外して直るか</strong>を確認する。直らなければ LTO は無関係</li>
+<li>Full LTO なら ThinLTO で、ThinLTO なら Full LTO で試す。片方だけで起きるなら最適化の深さの問題</li>
+<li><code>/opt:lldlto=1</code> や <code>0</code> でリンク時の最適化レベルを下げてみる</li>
+<li>一部のファイルだけ LTO を外して範囲を狭める（ビットコードとネイティブは混在できる、第 22 章）</li>
+<li>サニタイザ（UBSan / ASan）を LTO 無しでかけて、未定義動作を探す</li>
+</ol>
+
+<h3>23.4.4 <code>/lldsavetemps</code> で途中を見る</h3>
+
+<p>リンク時に何が起きているのかを直接見たいときは、中間結果を保存できます。</p>
+
+<pre><code>/lldsavetemps</code></pre>
+
+<p>ThinLTO の場合、モジュールごとに次のファイルが出力されます。</p>
+
+<pre><code>tokenizer.obj.0.preopt.bc        &lt;- 入力のビットコード
+tokenizer.obj.1.promote.bc       &lt;- シンボルの昇格
+tokenizer.obj.2.internalize.bc   &lt;- 内部化（外から見えないシンボルを internal に）
+tokenizer.obj.3.import.bc        &lt;- 他モジュールからの取り込み後
+tokenizer.obj.4.opt.bc           &lt;- 最適化後
+tokenizer.obj.5.precodegen.bc    &lt;- 機械語生成の直前</code></pre>
+
+<p>第 18 章で説明した ThinLTO の三段階が、そのままファイル名になっています。<code>llvm-dis</code> でテキストの IR に戻せば、どの段階で何が起きたかを追えます。</p>
+
+<pre><code>llvm-dis tokenizer.obj.3.import.bc -o import.ll
+llvm-dis tokenizer.obj.4.opt.bc    -o opt.ll</code></pre>
+
+<p><code>3.import</code> と <code>4.opt</code> を比べれば、リンク時の最適化が何をしたかが分かります。深追いする場面は多くありませんが、「取り込まれているはずの関数が入っていない」といった疑いを確かめるときには決定的な手段になります。</p>
+
+<h2>23.5 導入するかどうかの判断</h2>
+
+<table>
+<thead><tr><th>状況</th><th>判断</th></tr></thead>
+<tbody>
+<tr><td>翻訳単位が多く、小さな関数を跨いで呼び合う</td><td><strong>試す価値が大きい</strong></td></tr>
+<tr><td>ホットな処理が一つの翻訳単位に閉じている</td><td>効果は限定的（LogLab がこれ）</td></tr>
+<tr><td>大規模で、リンク時間が許容できる</td><td>ThinLTO ＋ キャッシュ</td></tr>
+<tr><td>中小規模で、最後の一押しが欲しい</td><td>Full LTO も選択肢</td></tr>
+<tr><td>DLL 境界にホットな処理がある</td><td>LTO の前に構成の見直し（第 22 章）</td></tr>
+<tr><td>結果を検証する手段が無い</td><td><strong>まずそれを作る。</strong> 話はそれから</td></tr>
+</tbody>
+</table>
+
+<div class="box note">
+<span class="t">最後の行が本書の立場です</span>
+<p>チェックサムでも、回帰テストでも、出力の比較でも構いません。「最適化オプションを変えても結果が同じ」を機械的に確認できる仕組みが無いまま LTO を入れるのは、勧められません。効果が測れないだけでなく、壊れたことにも気づけないからです。</p>
+</div>
+
+<h2>23.6 ハンズオン</h2>
+
+<ol>
+<li>LogLab のコンパイル時間とリンク時間を、LTO なし／ThinLTO／Full LTO で測る</li>
+<li>リンカーの追加のオプションに <code>/lldsavetemps</code> を設定してリビルドする</li>
+<li>出力された <code>.bc</code> ファイルの名前を眺め、第 18 章の三段階と対応づける</li>
+<li><code>llvm-dis</code> で <code>3.import.bc</code> と <code>4.opt.bc</code> をテキストにして、<code>main</code> の中身を比べる</li>
+<li><code>/lldsavetemps</code> は外しておく（ファイルが大量に出るため）</li>
+</ol>
+
+<h2>23.7 まとめ</h2>
+
+<ul>
+<li>LTO はビルド時間を<strong>コンパイルからリンクへ移す</strong>。実測ではリンクが 4〜5.7 倍になった</li>
+<li>Full LTO のメモリ使用量は規模に比例する。大規模プロジェクトでは ThinLTO 一択</li>
+<li>増分ビルドのコストが上がる。ThinLTO キャッシュと構成の分離で緩和する</li>
+<li>PDB は普通に生成される。ただしスタックトレースやステップ実行は読みにくくなる</li>
+<li><strong>LTO は ODR 違反を検出しない。</strong> 警告なしにリンクが通り、静かに壊れる</li>
+<li>結果が変わったら、LTO のバグではなく<strong>自分のコードの未定義動作</strong>を疑う</li>
+<li>切り分けは「LTO を外す → 方式を変える → レベルを下げる → 範囲を狭める → サニタイザ」の順</li>
+<li><code>/lldsavetemps</code> でリンク時最適化の各段階を <code>.bc</code> として取り出せる</li>
+</ul>
+
+<p class="next"><strong>次章で第 4 部を締めくくります。</strong> MSVC にも <code>/GL</code> と <code>/LTCG</code> という同じ目的の機能があります。何が同じで何が違うのか。既存の MSVC プロジェクトを ClangCL に移すとき、設定をどう読み替えればよいのか。そして、PGO との組み合わせ方がどう違うのか——これは第 5 部への橋渡しになります。</p>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第11章 インライン化としきい値 — Clang最適化入門</title>
+<style>
+:root{
+  --ink:#1b1d21; --sub:#5c626b; --line:#dfe3e8; --bg:#fff;
+  --code-bg:#f5f7f9; --code-ink:#22262b; --accent:#2f5d8a;
+  --note-bg:#eef4fa; --note-line:#4a80b5;
+  --warn-bg:#fdf4ec; --warn-line:#c07830;
+  --tip-bg:#eef7f1; --tip-line:#4a8c5f;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Meiryo",system-ui,sans-serif;
+  font-size:16px; line-height:1.9; text-align:justify;
+}
+.book{max-width:46rem; margin:0 auto; padding:3rem 1.25rem 6rem}
+.chapno{font-size:.82rem; letter-spacing:.18em; color:var(--accent); font-weight:700; margin:0 0 .4rem}
+h1{font-size:1.85rem; line-height:1.45; margin:0 0 .6rem; letter-spacing:.01em}
+.lead{color:var(--sub); font-size:1.02rem; margin:0 0 2.5rem; padding-bottom:2rem; border-bottom:2px solid var(--line)}
+h2{font-size:1.32rem; margin:3.2rem 0 1rem; padding-bottom:.45rem; border-bottom:1px solid var(--line); letter-spacing:.01em}
+h3{font-size:1.08rem; margin:2.2rem 0 .7rem; color:#2c3239}
+h4{font-size:.98rem; margin:1.6rem 0 .5rem; color:#3a4048}
+p{margin:0 0 1.1rem}
+ul,ol{margin:0 0 1.2rem; padding-left:1.5rem}
+li{margin:.4rem 0}
+code{
+  font-family:"Cascadia Mono","Consolas","SF Mono",monospace;
+  font-size:.88em; background:var(--code-bg); padding:.12em .38em;
+  border-radius:3px; border:1px solid var(--line); word-break:break-all;
+}
+pre{
+  background:var(--code-bg); color:var(--code-ink); border:1px solid var(--line);
+  border-left:3px solid var(--accent); border-radius:4px;
+  padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.6;
+}
+pre code{background:none; border:none; padding:0; font-size:.85rem; word-break:normal}
+.cap{font-size:.83rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+.box{border-radius:4px; padding:.95rem 1.15rem; margin:1.6rem 0; font-size:.95rem}
+.box p:last-child{margin-bottom:0}
+.box .t{font-weight:700; font-size:.86rem; letter-spacing:.06em; display:block; margin-bottom:.4rem}
+.note{background:var(--note-bg); border-left:4px solid var(--note-line)}
+.note .t{color:var(--note-line)}
+.warn{background:var(--warn-bg); border-left:4px solid var(--warn-line)}
+.warn .t{color:var(--warn-line)}
+.tip{background:var(--tip-bg); border-left:4px solid var(--tip-line)}
+.tip .t{color:var(--tip-line)}
+table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+th{background:var(--code-bg); font-weight:700}
+figure{margin:2rem 0}
+figure svg{display:block; width:100%; height:auto}
+figcaption{font-size:.83rem; color:var(--sub); text-align:center; margin-top:.7rem}
+.goal{border:1px solid var(--line); border-top:3px solid var(--accent); border-radius:4px; padding:1.1rem 1.3rem; margin:0 0 2.4rem; background:#fbfcfd}
+.goal h2{margin:0 0 .6rem; font-size:1rem; border:none; padding:0; letter-spacing:.06em}
+.goal ul{margin-bottom:0}
+.next{margin-top:3.5rem; padding-top:1.4rem; border-top:2px solid var(--line); color:var(--sub); font-size:.95rem}
+.next strong{color:var(--ink)}
+.chk{list-style:none; padding-left:0}
+.chk li{padding-left:1.7rem; position:relative}
+.chk li::before{content:"\2610"; position:absolute; left:.2rem; color:var(--accent); font-size:1.05rem}
+.path{font-size:.93rem; color:var(--sub); background:var(--code-bg); border:1px solid var(--line); border-radius:3px; padding:.5rem .8rem; margin:0 0 1.2rem}
+.partend{margin-top:3rem; padding:1.2rem 1.4rem; border:2px solid var(--accent); border-radius:5px; background:#fbfcfd}
+.partend h3{margin-top:0; color:var(--accent)}
+.real{border-left-color:var(--tip-line)}
+@media (prefers-color-scheme:dark){
+  :root{
+    --ink:#e6e8ea; --sub:#a2a9b2; --line:#333940; --bg:#16181b;
+    --code-bg:#1e2126; --code-ink:#dfe3e8; --accent:#7fb0dd;
+    --note-bg:#1b2530; --note-line:#5f96c9;
+    --warn-bg:#2b2118; --warn-line:#d09154;
+    --tip-bg:#182619; --tip-line:#6aad7d;
+  }
+  h3{color:#d5d9dd} h4{color:#c3c9cf}
+  .goal,.partend{background:#1a1d21}
+}
+</style>
+</head>
+<body>
+<div class="book">
+
+<p class="chapno">第 11 章</p>
+<h1>インライン化としきい値<br>— <code>-mllvm -inline-threshold</code> の効果と副作用</h1>
+<p class="lead">インライン化は本書で最も重要な最適化です。LTO も PGO も、突き詰めれば「インライナにより良い判断をさせる」ための仕組みだと言えます。この章ではその判断の仕組みを解剖し、手動でしきい値を動かして何が起きるかを実測します。そして<strong>なぜそれが最後の手段なのか</strong>を確認します。</p>
+
+<div class="goal">
+<h2>この章のゴール</h2>
+<ul>
+<li>インライン化が「最適化の入り口」と呼ばれる理由を理解する</li>
+<li><code>cost</code> と <code>threshold</code> のモデルを読めるようになる</li>
+<li>しきい値を変えたときの実際の効果を測る</li>
+<li>しきい値の手動調整が抱える問題を理解する</li>
+</ul>
+</div>
+
+<h2>11.1 インライン化は何のためにあるのか</h2>
+
+<p>「関数呼び出しのオーバーヘッドを無くすため」——これは正しいのですが、副次的な効果にすぎません。本当の価値は別のところにあります。</p>
+
+<p><strong>インライン化は、呼び出し先のコードを呼び出し元の文脈に持ち込みます。</strong> すると、それまで不可能だった最適化が一気に可能になります。</p>
+
+<pre><code>// 別の場所で定義されている
+int scale(int v, int factor, bool clamp) {
+    int r = v * factor;
+    if (clamp) {
+        if (r &gt; 1000) r = 1000;
+        if (r &lt; -1000) r = -1000;
+    }
+    return r;
+}
+
+// 呼び出し側
+int total = 0;
+for (int i = 0; i &lt; n; ++i) {
+    total += scale(data[i], 2, false);   // factor も clamp も定数
+}</code></pre>
+
+<p><code>scale()</code> が呼び出しのままなら、<code>clamp</code> が <code>false</code> であることをコンパイラは活かせません。毎回引数を積み、分岐を評価します。</p>
+
+<p>インライン化されると、話が変わります。</p>
+
+<ol>
+<li><code>factor = 2</code>、<code>clamp = false</code> が定数として伝播する</li>
+<li><code>if (clamp)</code> の中身がまるごと<strong>デッドコードとして削除される</strong></li>
+<li>残るのは <code>data[i] * 2</code> だけ</li>
+<li>それがループ本体に溶け込み、<strong>ベクトル化の対象になる</strong></li>
+</ol>
+
+<p>呼び出しコスト数サイクルの節約ではなく、ループ全体が SIMD 化されるかどうかの差になりました。これが「入り口」と呼ばれる所以です。第 7 章で見たパイプラインが、インライン化のたびに掃除のパス（<code>instcombine</code>、<code>simplifycfg</code>）を挟んでいるのは、まさにこの連鎖を回すためです。</p>
+
+<div class="box note">
+<span class="t">だから翻訳単位の壁が痛い</span>
+<p>上の例で <code>scale()</code> が別の <code>.cpp</code> にあれば、この連鎖は一つも起きません。第 9 章のリマークでいう <code>function definition is not available</code> です。LTO が価値を持つのは、呼び出しコストを削るからではなく、<strong>この連鎖の入り口を開けるから</strong>です。</p>
+</div>
+
+<h2>11.2 <code>cost</code> と <code>threshold</code></h2>
+
+<p>インライナの判断は、第 9 章で見たとおり単純な比較です。</p>
+
+<pre><code>cost ≤ threshold  ならば展開する</code></pre>
+
+<h3>11.2.1 <code>cost</code> — 展開したときの見積もり</h3>
+
+<p><code>cost</code> は「この呼び出し箇所で展開したら、コードがどれだけ増えるか」の見積もりです。関数の大きさだけで決まるのではなく、<strong>その呼び出し箇所に固有の値</strong>である点が重要です。</p>
+
+<p>先ほどの例なら、<code>clamp = false</code> が渡される呼び出し箇所では「展開すると <code>if</code> の中身が消える」と見積もられ、<code>cost</code> は小さくなります。同じ関数でも、<code>clamp</code> が変数である呼び出し箇所では <code>cost</code> は大きくなります。</p>
+
+<p><code>cost</code> は<strong>負にもなります</strong>。第 9 章で見た例がそうでした。</p>
+
+<pre><code>with (cost=-30, threshold=337)</code></pre>
+
+<p>これは「展開したほうがコードが小さくなる」という意味です。呼び出し命令、引数の設定、スタックフレームの出し入れが消える分が、本体を複製するコストを上回っています。小さな関数ではよくあることです。</p>
+
+<h3>11.2.2 <code>threshold</code> — 呼び出し箇所ごとの許容上限</h3>
+
+<p><code>threshold</code> も呼び出し箇所ごとに変わります。基準値から出発して、状況に応じて上下します。</p>
+
+<table>
+<thead><tr><th>threshold を上げる要因</th><th>理由</th></tr></thead>
+<tbody>
+<tr><td>関数が <code>inline</code> 指定されている</td><td>プログラマが展開を望んでいるヒントとみなす</td></tr>
+<tr><td>呼び出し元が小さい</td><td>展開しても全体が肥大しない</td></tr>
+<tr><td>引数に定数が渡っている</td><td>展開後に簡約が進む見込みがある</td></tr>
+<tr><td><strong>その呼び出し箇所がホットだと分かっている</strong></td><td><strong>PGO のプロファイルがある場合。第 32 章</strong></td></tr>
+<tr><td><code>-O3</code> を指定している</td><td>速度優先の姿勢</td></tr>
+</tbody>
+</table>
+
+<table>
+<thead><tr><th>threshold を下げる要因</th><th>理由</th></tr></thead>
+<tbody>
+<tr><td><code>-Os</code> / <code>-Oz</code>（＝ clang-cl の <code>/O1</code>）</td><td>サイズ優先</td></tr>
+<tr><td><strong>その呼び出し箇所がコールドだと分かっている</strong></td><td><strong>PGO のプロファイルがある場合</strong></td></tr>
+</tbody>
+</table>
+
+<p>実測すると、<code>-inline-threshold=225</code> を指定したときにリマークが表示する値は <code>337</code> でした。<code>100</code> を指定すれば <code>150</code>、<code>1000</code> なら <code>1500</code>。この呼び出し箇所では基準値の 1.5 倍のボーナスが乗っていたことになります。</p>
+
+<div class="box warn">
+<span class="t">係数を暗記しないでください</span>
+<p>ボーナスの倍率も基準値も、LLVM の内部実装であり、バージョンによって変わります。覚えるべきは数値ではなく<strong>構造</strong>です。すなわち「しきい値は一律ではなく、呼び出し箇所ごとの状況で決まる」ということ。そしてその状況判断の材料として最も強力なものが、次章以降で扱う<strong>実行時プロファイル</strong>だということです。</p>
+</div>
+
+<h2>11.3 しきい値を動かしてみる</h2>
+
+<p>基準値は <code>-mllvm</code> 経由で変更できます。</p>
+
+<pre><code>-mllvm -inline-threshold=500</code></pre>
+
+<p>LogLab で、値を変えながらコードサイズと実行時間を測った結果です。</p>
+
+<table>
+<thead><tr><th>threshold</th><th>コードサイズ</th><th>実行時間（3 回の最短）</th><th>checksum</th></tr></thead>
+<tbody>
+<tr><td>0</td><td>9,847 B</td><td>803 ms</td><td>一致</td></tr>
+<tr><td>50</td><td>8,422 B</td><td>619 ms</td><td>一致</td></tr>
+<tr><td><strong>225（既定）</strong></td><td><strong>8,103 B</strong></td><td><strong>470 ms</strong></td><td>一致</td></tr>
+<tr><td>1000</td><td>8,247 B</td><td>483 ms</td><td>一致</td></tr>
+<tr><td>5000</td><td>8,247 B</td><td>463 ms</td><td>一致</td></tr>
+</tbody>
+</table>
+<p class="cap">実測の一例。絶対値は環境に強く依存します</p>
+
+<p>この表から三つのことが読み取れます。</p>
+
+<h4>1. 既定値がほぼ最適だった</h4>
+<p>225 から 5000 まで 20 倍以上動かしても、実行時間はほとんど変わりません。<strong>上げても得はしない</strong>のです。LLVM の既定値は、多数の実プログラムに対するチューニングの結果であり、素人が思いつきで動かして勝てるものではありません。</p>
+
+<h4>2. 下げると明確に悪化する</h4>
+<p>0 にすると 1.7 倍遅くなりました。インライン化が実際に効いていることの裏返しです。<code>-mllvm -inline-threshold=0</code> は「インライン化の寄与を測る」ための道具として使えます。</p>
+
+<h4>3. インライン化しないほうがコードは大きい</h4>
+<p>これが直感に反する点でしょう。<code>threshold=0</code> のとき、コードサイズは既定値より<strong>2 割ほど大きく</strong>なっています。展開しないと、呼び出し規約に従って引数をレジスタに並べ、スタックを調整し、戻り値を受け取るコードが呼び出し箇所ごとに必要になるからです。<code>cost</code> が負になるという話の、実物での確認になります。</p>
+
+<h2>11.4 <code>/Ob</code> との関係</h2>
+
+<p>第 6 章で見た <code>/Ob</code> は、しきい値より上位の制御です。</p>
+
+<table>
+<thead><tr><th>設定</th><th>挙動</th><th>使いどころ</th></tr></thead>
+<tbody>
+<tr><td><code>/Ob0</code></td><td>展開しない</td><td>切り分け。デバッグ</td></tr>
+<tr><td><code>/Ob1</code></td><td><code>inline</code> 指定のあるものだけ</td><td>—</td></tr>
+<tr><td><code>/Ob2</code></td><td>コンパイラの判断（Release 既定）</td><td>通常はこれ</td></tr>
+<tr><td><code>/Ob3</code></td><td>より積極的</td><td>試す価値はあるが、上表と同じく効果は限定的</td></tr>
+</tbody>
+</table>
+
+<h2>11.5 属性で個別に指示する</h2>
+
+<p>全体のしきい値を動かすより、特定の関数を名指しするほうが副作用は小さくなります。</p>
+
+<table>
+<thead><tr><th>書き方</th><th>意味</th></tr></thead>
+<tbody>
+<tr><td><code>__forceinline</code></td><td>必ず展開する（MSVC 互換。clang-cl でも有効）</td></tr>
+<tr><td><code>[[clang::always_inline]]</code></td><td>同上（Clang の属性構文）</td></tr>
+<tr><td><code>__declspec(noinline)</code></td><td>展開を禁止する</td></tr>
+<tr><td><code>[[clang::noinline]]</code></td><td>同上</td></tr>
+</tbody>
+</table>
+
+<p>これらを付けると、リマークは <code>cost=always</code> / <code>cost=never</code> を表示し、コスト計算そのものが行われなくなります。</p>
+
+<div class="box warn">
+<span class="t"><code>inline</code> キーワードは最適化の指示ではありません</span>
+<p>C++ の <code>inline</code> は、複数の翻訳単位に同じ定義があってもよい（ODR 違反にしない）ための言語機能です。「展開してほしい」というヒントとしても扱われますが、それは副次的な扱いにすぎません。<code>inline</code> を付けても展開される保証はなく、付けなくても展開されます。展開を強制したいなら <code>__forceinline</code> を使ってください。</p>
+</div>
+
+<div class="box tip">
+<span class="t"><code>__declspec(noinline)</code> は調査に便利です</span>
+<p>「この関数がホットスポットのはずなのに、プロファイラに出てこない」というとき、原因はたいていインライン化です。展開されて呼び出し元に溶けてしまい、独立した関数として計測できなくなっています。一時的に <code>__declspec(noinline)</code> を付けると、プロファイラから見えるようになります。第 3 部で計測を始めたら、この手を思い出してください。</p>
+</div>
+
+<h2>11.6 上げたときに起きること</h2>
+
+<p>実測では効果がありませんでしたが、しきい値を上げると何が起きうるのかは知っておくべきです。</p>
+
+<table>
+<thead><tr><th>副作用</th><th>内容</th></tr></thead>
+<tbody>
+<tr><td>命令キャッシュの圧迫</td><td>コードが膨らむとキャッシュミスが増え、<strong>かえって遅くなる</strong>。大きなプログラムほど顕著</td></tr>
+<tr><td>レジスタ不足</td><td>展開で生存変数が増えるとスタックへの退避（スピル）が発生する</td></tr>
+<tr><td>ビルド時間の増大</td><td>展開後のコードに対して全パスが動くため、コンパイル時間が伸びる</td></tr>
+<tr><td>デバッグの困難化</td><td>スタックトレースから関数が消える</td></tr>
+<tr><td>再現性の低下</td><td><code>-mllvm</code> は非公式オプション。LLVM を更新すると挙動が変わりうる</td></tr>
+</tbody>
+</table>
+
+<p>最初の項目が本質的です。<strong>インライン化は「速くなるか遅くなるか」が測ってみないと分からない最適化</strong>です。小さなベンチマークでは命令キャッシュに全部載るので常に速くなり、実アプリでは載らないので遅くなる、という食い違いも普通に起こります。</p>
+
+<h2>11.7 なぜ手動調整は最後の手段なのか</h2>
+
+<p>ここまでの話を一つにまとめます。<code>-mllvm -inline-threshold=N</code> には、原理的な問題が二つあります。</p>
+
+<h4>問題 1 — 全部に一律に効く</h4>
+<p>しきい値は翻訳単位内のすべての呼び出し箇所に同じように適用されます。しかし実際に上げたいのは、たいてい<strong>ホットループの中の数箇所だけ</strong>です。それ以外の何百もの箇所まで巻き込んで展開すると、得た分をキャッシュミスで失います。</p>
+
+<h4>問題 2 — 判断材料が足りない</h4>
+<p>そもそも「どの呼び出し箇所がホットか」をコンパイラは知りません。知らないから一律のしきい値で妥協しているのであって、しきい値の数字をいじってもその根本は変わりません。</p>
+
+<div class="box tip">
+<span class="t">PGO はこの二つを同時に解決します</span>
+<p>プロファイルがあれば、インライナは呼び出し箇所ごとに「ここは何回通った」を知ることができます。ホットな箇所ではしきい値を大きく引き上げ（実装上は数千規模の別のしきい値が使われます）、コールドな箇所では逆に引き下げる。<strong>一律ではなく、箇所ごとに、実測に基づいて。</strong></p>
+<p>これが、本書がしきい値の手動調整に一章しか割かない理由です。同じ目的をより正確に達成する方法が、第 5 部にあります。</p>
+</div>
+
+<h2>11.8 ハンズオン</h2>
+
+<ol>
+<li>LogLab の <strong>追加のオプション</strong> に <code>-mllvm -inline-threshold=0</code> を書いてビルドし、実行時間とチェックサムを記録する</li>
+<li>チェックサムが <code>0x0e8685105a08f105</code> のまま変わらないことを確認する（変わったらどこかがおかしい）</li>
+<li>値を 50、1000、5000 と変えて同じことを繰り返す</li>
+<li>それぞれの <code>.exe</code> のサイズも記録する</li>
+<li><code>-mllvm -inline-threshold=0</code> のときに <code>/clang:-Rpass-missed=inline</code> を併用し、<code>too costly to inline (cost=..., threshold=0)</code> が大量に出ることを確認する</li>
+<li>すべて消して <code>/O2</code> の素の状態に戻す</li>
+</ol>
+
+<p>3 番で「上げても速くならない」ことを自分の目で確認しておくのが、この章のいちばんの収穫です。</p>
+
+<h2>11.9 まとめ</h2>
+
+<ul>
+<li>インライン化の価値は呼び出しコストの削減ではなく、<strong>定数伝播・デッドコード削除・ベクトル化の連鎖を開くこと</strong></li>
+<li>判定は <code>cost ≤ threshold</code>。どちらも<strong>呼び出し箇所ごと</strong>に決まる</li>
+<li><code>cost</code> は負にもなる。展開したほうが小さくなる場合があるため</li>
+<li>実測では、既定のしきい値がほぼ最適だった。<strong>上げても得しない、下げると明確に損をする</strong></li>
+<li>インライン化しないほうがコードは大きくなる</li>
+<li><code>inline</code> キーワードは ODR のための言語機能。展開の強制は <code>__forceinline</code></li>
+<li>しきい値の手動調整は「全箇所に一律」「判断材料が無い」という原理的な弱点を持つ。それを解決するのが PGO</li>
+</ul>
+
+<div class="partend">
+<h3>第 2 部を終えて</h3>
+<p>ここまでで、最適化の中身を観察する道具が揃いました。オプションの正しい渡し方（第 6 章）、パイプラインの構造（第 7 章）、生成コードの読み方（第 8 章）、コンパイラ自身による説明（第 9・10 章）、そしてインライン化の判断モデル（第 11 章）。</p>
+<p>手元には三つのベースラインがあるはずです。<code>baseline_O2_calls.txt</code>（<code>call</code> 命令の一覧）、<code>records_O2.txt</code>（最適化レコードの集計）、そして LogLab の実行時間とチェックサム。これらが、第 4 部以降で「何が変わったか」を語るための基準になります。</p>
+<p>ただし、まだ一つ足りません。<strong>時間を正しく測る方法</strong>です。ここまで「実行時間」と気軽に書いてきましたが、1 回の実行時間を比べて「速くなった」と言うのは、第 1 章で戒めたことそのものです。第 3 部では、Windows 上で信頼できる計測を行うための道具と作法を扱います。</p>
+</div>
+
+<p class="next"><strong>次章から第 3 部</strong>に入ります。まず PIX for Windows を導入し、LogLab のどこに時間が費やされているのかを実際に見ます。「<code>parse_line</code> が重いはずだ」という予想が正しいのかどうか、ここで初めて確かめることになります。</p>
+
+</div>
+</body>
+</html>

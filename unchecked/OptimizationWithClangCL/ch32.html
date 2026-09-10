@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第32章 PGO は何を変えたか — Clang最適化入門</title>
+<style>
+:root{
+  --ink:#1b1d21; --sub:#5c626b; --line:#dfe3e8; --bg:#fff;
+  --code-bg:#f5f7f9; --code-ink:#22262b; --accent:#2f5d8a;
+  --note-bg:#eef4fa; --note-line:#4a80b5;
+  --warn-bg:#fdf4ec; --warn-line:#c07830;
+  --tip-bg:#eef7f1; --tip-line:#4a8c5f;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Meiryo",system-ui,sans-serif;
+  font-size:16px; line-height:1.9; text-align:justify;
+}
+.book{max-width:46rem; margin:0 auto; padding:3rem 1.25rem 6rem}
+.chapno{font-size:.82rem; letter-spacing:.18em; color:var(--accent); font-weight:700; margin:0 0 .4rem}
+h1{font-size:1.85rem; line-height:1.45; margin:0 0 .6rem; letter-spacing:.01em}
+.lead{color:var(--sub); font-size:1.02rem; margin:0 0 2.5rem; padding-bottom:2rem; border-bottom:2px solid var(--line)}
+h2{font-size:1.32rem; margin:3.2rem 0 1rem; padding-bottom:.45rem; border-bottom:1px solid var(--line); letter-spacing:.01em}
+h3{font-size:1.08rem; margin:2.2rem 0 .7rem; color:#2c3239}
+h4{font-size:.98rem; margin:1.6rem 0 .5rem; color:#3a4048}
+p{margin:0 0 1.1rem}
+ul,ol{margin:0 0 1.2rem; padding-left:1.5rem}
+li{margin:.4rem 0}
+code{
+  font-family:"Cascadia Mono","Consolas","SF Mono",monospace;
+  font-size:.88em; background:var(--code-bg); padding:.12em .38em;
+  border-radius:3px; border:1px solid var(--line); word-break:break-all;
+}
+pre{
+  background:var(--code-bg); color:var(--code-ink); border:1px solid var(--line);
+  border-left:3px solid var(--accent); border-radius:4px;
+  padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.6;
+}
+pre code{background:none; border:none; padding:0; font-size:.85rem; word-break:normal}
+.cap{font-size:.83rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+.box{border-radius:4px; padding:.95rem 1.15rem; margin:1.6rem 0; font-size:.95rem}
+.box p:last-child{margin-bottom:0}
+.box .t{font-weight:700; font-size:.86rem; letter-spacing:.06em; display:block; margin-bottom:.4rem}
+.note{background:var(--note-bg); border-left:4px solid var(--note-line)}
+.note .t{color:var(--note-line)}
+.warn{background:var(--warn-bg); border-left:4px solid var(--warn-line)}
+.warn .t{color:var(--warn-line)}
+.tip{background:var(--tip-bg); border-left:4px solid var(--tip-line)}
+.tip .t{color:var(--tip-line)}
+table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+th{background:var(--code-bg); font-weight:700}
+figure{margin:2rem 0}
+figure svg{display:block; width:100%; height:auto}
+figcaption{font-size:.83rem; color:var(--sub); text-align:center; margin-top:.7rem}
+.goal{border:1px solid var(--line); border-top:3px solid var(--accent); border-radius:4px; padding:1.1rem 1.3rem; margin:0 0 2.4rem; background:#fbfcfd}
+.goal h2{margin:0 0 .6rem; font-size:1rem; border:none; padding:0; letter-spacing:.06em}
+.goal ul{margin-bottom:0}
+.next{margin-top:3.5rem; padding-top:1.4rem; border-top:2px solid var(--line); color:var(--sub); font-size:.95rem}
+.next strong{color:var(--ink)}
+.chk{list-style:none; padding-left:0}
+.chk li{padding-left:1.7rem; position:relative}
+.chk li::before{content:"\2610"; position:absolute; left:.2rem; color:var(--accent); font-size:1.05rem}
+.path{font-size:.93rem; color:var(--sub); background:var(--code-bg); border:1px solid var(--line); border-radius:3px; padding:.5rem .8rem; margin:0 0 1.2rem}
+.partend{margin-top:3rem; padding:1.2rem 1.4rem; border:2px solid var(--accent); border-radius:5px; background:#fbfcfd}
+.partend h3{margin-top:0; color:var(--accent)}
+.real{border-left-color:var(--tip-line)}
+@media (prefers-color-scheme:dark){
+  :root{
+    --ink:#e6e8ea; --sub:#a2a9b2; --line:#333940; --bg:#16181b;
+    --code-bg:#1e2126; --code-ink:#dfe3e8; --accent:#7fb0dd;
+    --note-bg:#1b2530; --note-line:#5f96c9;
+    --warn-bg:#2b2118; --warn-line:#d09154;
+    --tip-bg:#182619; --tip-line:#6aad7d;
+  }
+  h3{color:#d5d9dd} h4{color:#c3c9cf}
+  .goal,.partend{background:#1a1d21}
+}
+</style>
+</head>
+<body>
+<div class="book">
+
+<p class="chapno">第 32 章</p>
+<h1>PGO は何を変えたか<br>— 分岐レイアウト、ホット/コールド分割、インライン判断</h1>
+<p class="lead">前章で見たとおり、実行時間への効果は環境に左右されました。しかし<strong>コンパイラの判断の変化は決定的で、環境によりません</strong>。何が変わったのか。最適化レコードを突き合わせると、直感に反する事実が出てきます。<strong>PGO はインライン化を減らしていました。</strong></p>
+
+<div class="goal">
+<h2>この章のゴール</h2>
+<ul>
+<li>PGO の前後で最適化レコードを比較する</li>
+<li>しきい値が呼び出し箇所ごとに変わったことを確認する</li>
+<li>第 4 章で仕込んだ伏線を回収する</li>
+<li>判断の変化を根拠に、効果の理由を説明できるようになる</li>
+</ul>
+</div>
+
+<h2>32.1 比較の方法</h2>
+
+<p>第 10 章で作った集計スクリプトを使い、PGO 有り／無しで最適化レコードを比べます。</p>
+
+<pre><code>:: PGO 無し
+clang-cl /c /O2 /std:c++23 /Iinclude ^
+    /clang:-fsave-optimization-record src\*.cpp
+
+:: PGO 有り
+clang-cl /c /O2 /std:c++23 /Iinclude ^
+    /clang:-fprofile-use=app.profdata ^
+    /clang:-fsave-optimization-record src\*.cpp</code></pre>
+
+<h2>32.2 予想と結果</h2>
+
+<p>まず、直感的な予想を立ててみましょう。「ホットな箇所が分かるのだから、そこを積極的にインライン化するはずだ」——多くの人がそう考えます。結果はこうでした。</p>
+
+<table>
+<thead><tr><th>レコード</th><th>PGO 無し</th><th>PGO 有り</th></tr></thead>
+<tbody>
+<tr><td><code>!Passed inline Inlined</code></td><td>639</td><td><strong>614</strong>（減少）</td></tr>
+<tr><td><code>!Missed inline TooCostly</code></td><td>31</td><td><strong>93</strong>（3 倍）</td></tr>
+<tr><td><code>!Missed inline NoDefinition</code></td><td>59</td><td>204</td></tr>
+<tr><td><code>!Analysis pgo-instrumentation bfi-verify</code></td><td>0</td><td>46（新規）</td></tr>
+</tbody>
+</table>
+<p class="cap">実測の一例（全 5 翻訳単位の合計）</p>
+
+<p><strong>インライン化は 639 件から 614 件に減り、「コストが高すぎる」という拒否が 31 件から 93 件へ 3 倍になりました。</strong></p>
+
+<h2>32.3 しきい値が動いた</h2>
+
+<p>理由は、インライン化のしきい値の分布を見ると一目で分かります。第 11 章で「<code>threshold</code> は呼び出し箇所ごとに決まる」と書いた、その値です。</p>
+
+<table>
+<thead><tr><th>threshold</th><th>PGO 無し</th><th>PGO 有り</th></tr></thead>
+<tbody>
+<tr><td>45</td><td>15</td><td>28</td></tr>
+<tr><td><strong>75</strong></td><td>0</td><td><strong>172</strong></td></tr>
+<tr><td><strong>112</strong></td><td>0</td><td><strong>416</strong></td></tr>
+<tr><td>187</td><td>0</td><td>12</td></tr>
+<tr><td>225</td><td><strong>173</strong></td><td>1</td></tr>
+<tr><td>325</td><td>19</td><td>31</td></tr>
+<tr><td><strong>337</strong></td><td><strong>414</strong></td><td>0</td></tr>
+<tr><td>487</td><td>47</td><td>46</td></tr>
+</tbody>
+</table>
+<p class="cap">実測の一例</p>
+
+<p>きれいな移動が起きています。</p>
+
+<ul>
+<li><strong>337 が 414 件 → 0 件。</strong> 代わりに <strong>112 が 416 件</strong></li>
+<li><strong>225 が 173 件 → 1 件。</strong> 代わりに <strong>75 が 172 件</strong></li>
+<li>しきい値 45（コールド用）も 15 件から 28 件に増加</li>
+</ul>
+
+<p>337 の約 3 分の 1 が 112、225 の 3 分の 1 が 75。<strong>PGO は、ほぼすべての呼び出し箇所でしきい値を 3 分の 1 に絞りました。</strong> そして<strong>しきい値が上がった箇所は一つもありませんでした。</strong></p>
+
+<div class="box note">
+<span class="t">なぜ全部下がったのか</span>
+<p>LogLab で最もホットな基本ブロックの通過回数は 1 億 1600 万回でした（第 30 章）。それに比べれば、他のほとんどの場所は「相対的にコールド」です。プロファイルを得たコンパイラは、その相対関係に基づいてしきい値を割り当てます。</p>
+<p>つまり PGO がやったのは、<strong>「本当にホットな一点を除いて、あとは全部コールド扱いにする」</strong>という大胆な絞り込みでした。プロファイルが無いときの一律 225／337 は、この題材に対しては「全体的に甘すぎた」ということになります。</p>
+</div>
+
+<h2>32.4 伏線の回収 — <code>handle_error</code></h2>
+
+<p>第 4 章で、私たちは <code>Stats::add()</code> のこの分岐に <code>[[unlikely]]</code> を<strong>意図的に書きませんでした</strong>。</p>
+
+<pre><code>// 1000 行に 3 行程度しか通らない経路。
+// ここに [[unlikely]] は意図的に書かない（第 32 章で PGO に見つけさせる）。
+if (r.level == Level::Error) {
+    handle_error(r);
+}</code></pre>
+
+<p>第 30 章の <code>llvm-cov</code> で、この分岐が 74,200 回中 258 回（0.348%）しか成立しないことを確認しました。では、そのプロファイルを渡されたコンパイラは何をしたか。</p>
+
+<pre><code>PGO 無し:  !Passed  Inlined    cost=95  threshold=225   ← 展開された
+PGO 有り:  !Missed  TooCostly  cost=85  threshold=75    ← 拒否された</code></pre>
+
+<p><strong><code>handle_error</code> のインライン化が拒否されました。</strong></p>
+
+<p>コストは 95 から 85 へわずかに下がっているのに、しきい値が 225 から 75 に絞られたため、判定が逆転しています。</p>
+
+<div class="box tip">
+<span class="t">これが効果の正体（の一部）です</span>
+<p><code>handle_error</code> は「稀だが重い」処理でした。文字を 1 バイトずつ走査するループを二つ含んでいます。これが <code>Stats::add()</code> に展開されると、<strong>1000 回に 3 回しか使われないコードが、ホットな関数の本体を膨らませます。</strong></p>
+<p>命令キャッシュに載るのは実行されるコードだけではありません。展開された <code>handle_error</code> の本体も、<code>Stats::add()</code> の一部としてキャッシュラインを占有します。第 11 章で「インライン化は測ってみないと分からない」と書いた、その悪い側が起きていたわけです。</p>
+<p>PGO はそれを見抜いて、展開をやめさせました。この改善が実行時間に現れるかどうかは、その CPU の命令キャッシュに余裕があるかどうかで決まります（第 31 章）。</p>
+</div>
+
+<h3>32.4.1 コードの配置も変わった</h3>
+
+<p>実行ファイル内での関数の位置を比べると、こうなっていました。</p>
+
+<table>
+<thead><tr><th>ビルド</th><th><code>Stats::add</code></th><th><code>Stats::handle_error</code></th></tr></thead>
+<tbody>
+<tr><td>PGO 無し</td><td>0x3900</td><td>0x3af0（<strong>すぐ後ろ</strong>）</td></tr>
+<tr><td>PGO 有り</td><td>0x3420</td><td>0x2ac0（<strong>約 2.4 KB 離れている</strong>）</td></tr>
+</tbody>
+</table>
+
+<p>PGO 無しでは <code>handle_error</code> が <code>Stats::add</code> の直後に置かれており、同じ領域に居ます。PGO 有りでは離れた場所に移されました。ホットなコードどうしを近くに集める配置になっています。</p>
+
+<h2>32.5 他に何が拒否されたか</h2>
+
+<p><code>tokenizer.cpp</code> でも拒否が起きていました。</p>
+
+<pre><code>[PGO で拒否] cost=150 threshold=75  std::string_view::find(...)
+[PGO で拒否] cost=140 threshold=75  std::string_view::find(...)
+[PGO で拒否] cost=100 threshold=75  loglab::(匿名)::next_field(...)
+[PGO で拒否] cost=100 threshold=75  loglab::(匿名)::next_field(...)
+[PGO で拒否] cost=100 threshold=75  loglab::(匿名)::next_field(...)</code></pre>
+
+<p><code>next_field</code> は <code>parse_line</code> の中から 4 回呼ばれます。PGO 無しでは全部が展開され、<code>parse_line</code> が大きく膨らんでいました。PGO 有りでは、そのうち 3 箇所が拒否されています。</p>
+
+<div class="box warn">
+<span class="t">「インライン化＝善」ではありません</span>
+<p>第 11 章の実測で、しきい値を上げても速くならないことは確認していました。今回はその先です。<strong>環境 A では、しきい値を下げたほうが速くなりました。</strong></p>
+<p>小さな関数を呼び出す形のまま残すと、コードサイズが抑えられ、ホットループが命令キャッシュに収まりやすくなります。呼び出しのコストはありますが、それを上回る得があった、ということです。</p>
+<p>ただしこれは LogLab という題材での結果です。別のコードでは逆になることもあります。だから測るのです。</p>
+</div>
+
+<h2>32.6 数字で見た全体像</h2>
+
+<table>
+<thead><tr><th>指標</th><th>PGO 無し</th><th>PGO 有り</th></tr></thead>
+<tbody>
+<tr><td><code>.text</code> サイズ</td><td>8,103 B</td><td>8,312 B</td></tr>
+<tr><td><code>call</code> 命令の総数</td><td>100</td><td>104</td></tr>
+<tr><td>間接呼び出し</td><td>8</td><td>9</td></tr>
+<tr><td>実行時間</td><td>基準</td><td>環境 A で 6.5〜9.0% 速い／環境 B では差なし（第 31 章）</td></tr>
+</tbody>
+</table>
+
+<p>興味深いことに、<code>.text</code> はわずかに<strong>大きく</strong>なり、<code>call</code> 命令は<strong>増えて</strong>います。第 20 章の LTO では逆でした（<code>call</code> が減り、<code>.text</code> も減った）。にもかかわらず、環境 A で速くなったのは PGO のほうです。</p>
+
+<div class="box tip">
+<span class="t">機械語の指標は目的ではありません</span>
+<p>第 8 章で <code>call</code> 命令を数える手順を用意し、第 20 章でそれを使いました。しかし <code>call</code> が減ること自体が目的ではありません。あれは「LTO が働いたことの証拠」として数えたのです。</p>
+<p>PGO の効果は別の形で現れます。<strong>命令の総数ではなく、ホットな経路にどれだけコードが詰まっているか。</strong> 全体が少し大きくなっても、ホットループが小さくなれば速くなります。指標は最適化の種類ごとに選ぶ必要がある、ということです。</p>
+</div>
+
+<h2>32.7 間接呼び出しについて</h2>
+
+<p>第 21 章で、<code>Filter::accept()</code> の間接呼び出しはデバーチャライズできないと結論しました。実装が三つあるためです。</p>
+
+<p>PGO には、実装が複数あっても使える手があります。<strong>間接呼び出しの投機的展開</strong>（indirect call promotion）です。「この呼び出しの 90% は <code>LevelFilter::accept</code> に行く」と分かれば、次のような形に書き換えられます。</p>
+
+<pre><code>if (呼び先 == LevelFilter::accept) {
+    ... LevelFilter::accept の本体をインライン展開 ...
+} else {
+    呼び先を間接呼び出し;         // 残りの 10%
+}</code></pre>
+
+<p>第 30 章で見たプロファイルには、この判断のための情報（<code>IndirectCall profile</code>）が含まれていました。</p>
+
+<p>ただし LogLab では、機械語上の間接呼び出しは 8 個から 9 個へと、むしろ増えています。三つのフィルタが順に呼ばれる構造なので、特定の呼び先に強く偏っているわけではないためです。<strong>この最適化が効くのは「ほぼ一つの実装に集中している」場合</strong>で、その点では第 21 章のデバーチャライズと条件が似ています。</p>
+
+<h2>32.8 手で <code>[[unlikely]]</code> を書く場合との比較</h2>
+
+<p>ここまで見てきた効果の一部は、属性を手で書いても得られます。</p>
+
+<pre><code>if (r.level == Level::Error) [[unlikely]] {
+    handle_error(r);
+}</code></pre>
+
+<table>
+<thead><tr><th></th><th>手で書く</th><th>PGO</th></tr></thead>
+<tbody>
+<tr><td>正確さ</td><td>書いた人の想像</td><td>実測</td></tr>
+<tr><td>対象</td><td>書いた箇所だけ</td><td><strong>全箇所</strong></td></tr>
+<tr><td>粒度</td><td>ホット／コールドの二値</td><td>回数そのもの</td></tr>
+<tr><td>コードの変更</td><td>必要</td><td>不要</td></tr>
+<tr><td>保守</td><td>コードが変われば見直しが要る</td><td>プロファイルを取り直す（第 34 章）</td></tr>
+<tr><td>ビルドの手間</td><td>なし</td><td>三段階</td></tr>
+</tbody>
+</table>
+
+<p>第 32 章の実測では、しきい値が変わった箇所が 600 以上ありました。これを手で書くのは現実的ではありません。一方、PGO の仕組みを持ち込めない事情があるなら、最もホットな数箇所に属性を書くのは十分に有効な手です。</p>
+
+<div class="box note">
+<span class="t">両立もできます</span>
+<p><code>[[likely]]</code> / <code>[[unlikely]]</code> とプロファイルが食い違った場合、Clang はプロファイルを優先します。属性は「プロファイルが無いときの保険」として機能するので、両方書いておくのは合理的です。</p>
+</div>
+
+<h2>32.9 まとめ — 何が起きたのか</h2>
+
+<p>説明を一つにまとめます。</p>
+
+<blockquote style="border-left:3px solid var(--accent); padding-left:1rem; margin:1.5rem 0; color:var(--sub)">
+LogLab の実行時間の大半は <code>parse_line</code> とその内部に集中している。プロファイルの無いコンパイラは、この一点集中を知らず、一律のしきい値で全体をインライン展開していた。その結果、稀にしか通らない <code>handle_error</code> のような重いコードまでホットな関数に取り込まれ、ホットループが必要以上に膨らんでいた。<br><br>
+PGO はこの集中を数字で示し、コンパイラはしきい値を 3 分の 1 に絞った。600 以上の呼び出し箇所で判断が変わり、<code>handle_error</code> を含む複数の展開が取りやめになった。<strong>ここまでは決定的な事実で、どの環境でも同じ結果になる。</strong><br><br>
+その結果ホットな経路のコードが小さくなった。それが実行時間に現れるかどうかは、命令キャッシュに余裕があるかどうか——つまり CPU 次第である。環境 A では 6.5〜9.0% の短縮として現れ、環境 B では現れなかった（第 31 章 31.3.2 節）。
+</blockquote>
+
+<h2>32.10 ハンズオン</h2>
+
+<ol>
+<li>PGO 有り／無しで最適化レコードを生成する</li>
+<li>第 10 章の <code>summarize.py</code> で件数を比較する</li>
+<li><code>Inlined</code> が減り、<code>TooCostly</code> が増えていることを確認する</li>
+<li><code>Threshold</code> の値を集計し、分布が移動していることを確認する</li>
+<li><code>stats.opt.yaml</code> で <code>handle_error</code> のレコードを探し、判定が逆転していることを確認する</li>
+<li><code>llvm-objdump --syms</code> で <code>Stats::add</code> と <code>handle_error</code> の位置関係を比べる</li>
+</ol>
+
+<h2>32.11 まとめ</h2>
+
+<ul>
+<li><strong>PGO はインライン化を減らした。</strong> 639 件 → 614 件、拒否は 31 件 → 93 件</li>
+<li>しきい値が呼び出し箇所ごとに <strong>3 分の 1 に絞られた</strong>（337→112、225→75）。上がった箇所は一つも無かった</li>
+<li>第 4 章で仕込んだ <code>handle_error</code> の展開が、<code>cost=85 / threshold=75</code> で<strong>拒否された</strong></li>
+<li>コードの配置も変わり、コールドな関数がホットな関数から離された</li>
+<li><code>.text</code> と <code>call</code> の数は<strong>増えた</strong>のに速くなった。指標は最適化の種類ごとに選ぶ</li>
+<li>間接呼び出しの投機的展開は、呼び先が一つに偏っているときに効く。LogLab では偏りが足りなかった</li>
+<li><strong>ここで見た判断の変化はすべて決定的</strong>である。実行時間に現れるかどうかとは別の話（第 31 章）</li>
+<li>手で <code>[[unlikely]]</code> を書くのは有効だが、600 箇所を手で書くことはできない</li>
+</ul>
+
+<p class="next"><strong>次章では</strong>、マルチスレッドのプログラムで計装するときの問題を扱います。カウンタの更新は複数スレッドから同時に起こりえます。それを正確にする <code>-fprofile-update=atomic</code> というオプションがありますが、実測したところ<strong>計装ビルドが 7 倍以上遅くなりました</strong>。</p>
+
+</div>
+</body>
+</html>

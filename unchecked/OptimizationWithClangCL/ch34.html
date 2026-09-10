@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第34章 プロファイルの陳腐化 — Clang最適化入門</title>
+<style>
+:root{
+  --ink:#1b1d21; --sub:#5c626b; --line:#dfe3e8; --bg:#fff;
+  --code-bg:#f5f7f9; --code-ink:#22262b; --accent:#2f5d8a;
+  --note-bg:#eef4fa; --note-line:#4a80b5;
+  --warn-bg:#fdf4ec; --warn-line:#c07830;
+  --tip-bg:#eef7f1; --tip-line:#4a8c5f;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Meiryo",system-ui,sans-serif;
+  font-size:16px; line-height:1.9; text-align:justify;
+}
+.book{max-width:46rem; margin:0 auto; padding:3rem 1.25rem 6rem}
+.chapno{font-size:.82rem; letter-spacing:.18em; color:var(--accent); font-weight:700; margin:0 0 .4rem}
+h1{font-size:1.85rem; line-height:1.45; margin:0 0 .6rem; letter-spacing:.01em}
+.lead{color:var(--sub); font-size:1.02rem; margin:0 0 2.5rem; padding-bottom:2rem; border-bottom:2px solid var(--line)}
+h2{font-size:1.32rem; margin:3.2rem 0 1rem; padding-bottom:.45rem; border-bottom:1px solid var(--line); letter-spacing:.01em}
+h3{font-size:1.08rem; margin:2.2rem 0 .7rem; color:#2c3239}
+h4{font-size:.98rem; margin:1.6rem 0 .5rem; color:#3a4048}
+p{margin:0 0 1.1rem}
+ul,ol{margin:0 0 1.2rem; padding-left:1.5rem}
+li{margin:.4rem 0}
+code{
+  font-family:"Cascadia Mono","Consolas","SF Mono",monospace;
+  font-size:.88em; background:var(--code-bg); padding:.12em .38em;
+  border-radius:3px; border:1px solid var(--line); word-break:break-all;
+}
+pre{
+  background:var(--code-bg); color:var(--code-ink); border:1px solid var(--line);
+  border-left:3px solid var(--accent); border-radius:4px;
+  padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.6;
+}
+pre code{background:none; border:none; padding:0; font-size:.85rem; word-break:normal}
+.cap{font-size:.83rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+.box{border-radius:4px; padding:.95rem 1.15rem; margin:1.6rem 0; font-size:.95rem}
+.box p:last-child{margin-bottom:0}
+.box .t{font-weight:700; font-size:.86rem; letter-spacing:.06em; display:block; margin-bottom:.4rem}
+.note{background:var(--note-bg); border-left:4px solid var(--note-line)}
+.note .t{color:var(--note-line)}
+.warn{background:var(--warn-bg); border-left:4px solid var(--warn-line)}
+.warn .t{color:var(--warn-line)}
+.tip{background:var(--tip-bg); border-left:4px solid var(--tip-line)}
+.tip .t{color:var(--tip-line)}
+table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+th{background:var(--code-bg); font-weight:700}
+figure{margin:2rem 0}
+figure svg{display:block; width:100%; height:auto}
+figcaption{font-size:.83rem; color:var(--sub); text-align:center; margin-top:.7rem}
+.goal{border:1px solid var(--line); border-top:3px solid var(--accent); border-radius:4px; padding:1.1rem 1.3rem; margin:0 0 2.4rem; background:#fbfcfd}
+.goal h2{margin:0 0 .6rem; font-size:1rem; border:none; padding:0; letter-spacing:.06em}
+.goal ul{margin-bottom:0}
+.next{margin-top:3.5rem; padding-top:1.4rem; border-top:2px solid var(--line); color:var(--sub); font-size:.95rem}
+.next strong{color:var(--ink)}
+.chk{list-style:none; padding-left:0}
+.chk li{padding-left:1.7rem; position:relative}
+.chk li::before{content:"\2610"; position:absolute; left:.2rem; color:var(--accent); font-size:1.05rem}
+.path{font-size:.93rem; color:var(--sub); background:var(--code-bg); border:1px solid var(--line); border-radius:3px; padding:.5rem .8rem; margin:0 0 1.2rem}
+.partend{margin-top:3rem; padding:1.2rem 1.4rem; border:2px solid var(--accent); border-radius:5px; background:#fbfcfd}
+.partend h3{margin-top:0; color:var(--accent)}
+.real{border-left-color:var(--tip-line)}
+@media (prefers-color-scheme:dark){
+  :root{
+    --ink:#e6e8ea; --sub:#a2a9b2; --line:#333940; --bg:#16181b;
+    --code-bg:#1e2126; --code-ink:#dfe3e8; --accent:#7fb0dd;
+    --note-bg:#1b2530; --note-line:#5f96c9;
+    --warn-bg:#2b2118; --warn-line:#d09154;
+    --tip-bg:#182619; --tip-line:#6aad7d;
+  }
+  h3{color:#d5d9dd} h4{color:#c3c9cf}
+  .goal,.partend{background:#1a1d21}
+}
+</style>
+</head>
+<body>
+<div class="book">
+
+<p class="chapno">第 34 章</p>
+<h1>プロファイルの陳腐化<br>— ソース変更への追従と警告の読み方</h1>
+<p class="lead">プロファイルは、ある時点のソースコードに結び付いた記録です。コードを直せば、その記録は少しずつ現実と食い違っていきます。Clang はこれを検出できますが、<strong>警告の名前が計装方式によって違う</strong>という罠があります。</p>
+
+<div class="goal">
+<h2>この章のゴール</h2>
+<ul>
+<li>プロファイルとソースがどう結び付いているかを理解する</li>
+<li>陳腐化したときに何が起きるかを実測で確認する</li>
+<li>二つの警告オプションを正しく使い分ける</li>
+<li>プロファイルの運用方針を決める</li>
+</ul>
+</div>
+
+<h2>34.1 関数ハッシュによる照合</h2>
+
+<p>第 29 章でプロファイルをテキスト形式にしたとき、こういう項目がありました。</p>
+
+<pre><code>_ZN6loglab10parse_lineESt17basic_string_viewIcSt11char_traitsIcEERNS_6RecordE
+# Func Hash:
+547674798947670709
+# Num Counters:
+25</code></pre>
+
+<p><strong><code>Func Hash</code></strong> は、その関数の制御フロー構造から計算された値です。分岐が増えれば変わり、ループが増えても変わります。</p>
+
+<p><code>-fprofile-use</code> でコンパイルするとき、Clang は今まさにコンパイルしている関数のハッシュを計算し、プロファイル内のハッシュと突き合わせます。</p>
+
+<table>
+<thead><tr><th>照合結果</th><th>Clang の動作</th></tr></thead>
+<tbody>
+<tr><td>一致</td><td>カウンタを使う</td></tr>
+<tr><td>不一致</td><td><strong>その関数のプロファイルを捨てる</strong>。警告を出す</td></tr>
+<tr><td>プロファイルに無い</td><td>プロファイル無しとして扱う。<strong>警告は出ない</strong></td></tr>
+</tbody>
+</table>
+
+<p>三行目が厄介です。関数を新しく追加した場合と、トレーニングで一度も通らなかった場合が区別できません。</p>
+
+<h2>34.2 実測 — 一行足すとどうなるか</h2>
+
+<p><code>Stats::add()</code> に分岐を一つ追加してみます。</p>
+
+<pre><code>void Stats::add(const Record&amp; r)
+{
+    ++accepted_;
+    if (r.code &gt; 100000) { hash_ ^= 1; }   // ← 追加した行
+    ...</code></pre>
+
+<p>プロファイルはそのままで、<code>-fprofile-use</code> でコンパイルします。</p>
+
+<pre><code>warning: src/stats.cpp: function control flow change detected (hash mismatch)
+  _ZN6loglab5Stats3addERKNS_6RecordE Hash = 238984482720105921
+  up to 1983640 count discarded [-Wbackend-plugin]</code></pre>
+
+<p>読み取れることは三つあります。</p>
+
+<ul>
+<li>関数名が明示される（<code>Stats::add</code>）</li>
+<li>「制御フローの変化を検出した」——ハッシュの不一致</li>
+<li><strong><code>up to 1983640 count discarded</code></strong>——約 198 万回ぶんの記録が捨てられた</li>
+</ul>
+
+<p>この関数は、以後プロファイル無しとして扱われます。第 32 章で見た「しきい値の絞り込み」も、この関数には適用されません。</p>
+
+<h2>34.3 警告オプションの罠</h2>
+
+<p>ここが本章で最も実用的な部分です。上の警告に付いている名前を見てください。</p>
+
+<pre><code>[-Wbackend-plugin]</code></pre>
+
+<p><code>-Wprofile-instr-out-of-date</code> ではありません。実は、<strong>計装方式によって警告の出どころが違います</strong>。</p>
+
+<table>
+<thead><tr><th>計装方式</th><th>使うオプション</th><th>警告の名前</th><th>メッセージ</th></tr></thead>
+<tbody>
+<tr><td><strong>IR レベル</strong>（本書の PGO）</td><td><code>-fprofile-use=</code></td><td><strong><code>-Wbackend-plugin</code></strong></td><td>関数ごとに 1 件ずつ、ハッシュ値と捨てた回数つき</td></tr>
+<tr><td>フロントエンド</td><td><code>-fprofile-instr-use=</code></td><td><code>-Wprofile-instr-out-of-date</code></td><td>ファイル単位で要約</td></tr>
+</tbody>
+</table>
+
+<p>フロントエンド計装の場合はこうなります。</p>
+
+<pre><code>warning: profile data may be out of date: of 7 functions, 1 has mismatched data
+  that will be ignored [-Wprofile-instr-out-of-date]</code></pre>
+
+<div class="box warn">
+<span class="t">「警告を有効にしたのに出ない」の原因</span>
+<p>PGO の解説記事の多くは <code>-Wprofile-instr-out-of-date</code> を紹介しています。しかし本書の方式（IR レベル計装）では、そのオプションを付けても何も変わりません。<strong>すでに <code>-Wbackend-plugin</code> として既定で有効</strong>だからです。</p>
+<p>逆に言えば、IR レベル計装では黙って無視されることはありません。ビルドログを見れば必ず警告が出ています。埋もれて気づかないだけです。</p>
+</div>
+
+<h3>34.3.1 エラーにする</h3>
+
+<p>CI で確実に気づきたいなら、警告をエラーに昇格させます。</p>
+
+<pre><code>/clang:-Werror=backend-plugin</code></pre>
+
+<p>実際にビルドすると、こうなります。</p>
+
+<pre><code>error: src/stats.cpp: function control flow change detected (hash mismatch)
+  _ZN6loglab5Stats3addERKNS_6RecordE Hash = 238984482720105921
+  up to 1983640 count discarded [-Werror,-Wbackend-plugin]</code></pre>
+
+<p>逆に、意図的に古いプロファイルを使い続けたい場面では黙らせられます。</p>
+
+<pre><code>/clang:-Wno-backend-plugin</code></pre>
+
+<div class="box warn">
+<span class="t"><code>-Wno-backend-plugin</code> は乱暴です</span>
+<p>この警告グループには、プロファイル以外のバックエンドからの診断も含まれます。まとめて黙らせることになるので、常用は勧められません。「プロファイルの陳腐化は承知のうえで、いまはビルドを通したい」という一時的な用途に留めてください。</p>
+</div>
+
+<h2>34.4 どこまでの変更が許されるか</h2>
+
+<p>ハッシュは制御フローの構造から計算されるので、変更の種類によって影響が違います。</p>
+
+<table>
+<thead><tr><th>変更</th><th>ハッシュ</th><th>影響</th></tr></thead>
+<tbody>
+<tr><td>コメントの追加・変更</td><td>変わらない</td><td>なし</td></tr>
+<tr><td>変数名の変更</td><td>変わらない</td><td>なし</td></tr>
+<tr><td>式の中身の変更（分岐を増やさない）</td><td>変わらない</td><td>なし</td></tr>
+<tr><td><strong><code>if</code> / ループ / <code>&amp;&amp;</code> / <code>?:</code> の追加</strong></td><td><strong>変わる</strong></td><td>その関数のプロファイルが失われる</td></tr>
+<tr><td>関数の分割</td><td>両方変わる</td><td>両方失われる</td></tr>
+<tr><td>関数名の変更</td><td>照合できない</td><td>プロファイル無し扱い（警告も出ない）</td></tr>
+<tr><td>他の関数の変更</td><td>—</td><td>この関数には影響しない</td></tr>
+</tbody>
+</table>
+
+<div class="box tip">
+<span class="t">影響は関数単位に閉じます</span>
+<p>一つの関数を書き換えても、失われるのはその関数のプロファイルだけです。ファイル全体、ましてプロジェクト全体が無効になるわけではありません。</p>
+<p>つまり<strong>プロファイルは、ゆっくり劣化していきます</strong>。ある日突然使えなくなるのではなく、変更した関数から順に効果を失っていく。これが運用を考えるうえでの基本的な性質です。</p>
+</div>
+
+<h2>34.5 運用をどうするか</h2>
+
+<h3>34.5.1 プロファイルをどこに置くか</h3>
+
+<table>
+<thead><tr><th>方針</th><th>利点</th><th>欠点</th></tr></thead>
+<tbody>
+<tr><td>毎回トレーニングから作る</td><td>常に最新。陳腐化しない</td><td>ビルドに時間がかかる。トレーニング環境が必要</td></tr>
+<tr><td>リポジトリにコミットする</td><td>誰でも同じ結果になる。ビルドが速い</td><td>バイナリファイルが履歴に残る。更新の運用が要る</td></tr>
+<tr><td>成果物置き場に保管する</td><td>リポジトリが汚れない</td><td>取得の仕組みが要る</td></tr>
+</tbody>
+</table>
+
+<p>中規模までのプロジェクトなら、二番目が扱いやすい選択です。第 29 章の <code>-sparse</code> でサイズを削っておくと、履歴への負担が減ります。</p>
+
+<h3>34.5.2 いつ取り直すか</h3>
+
+<p>「毎回」が理想ですが、コストと釣り合わないことも多いはずです。実用的な判断材料を挙げます。</p>
+
+<ul>
+<li><strong>警告の件数を数える。</strong> ビルドログの <code>hash mismatch</code> の行を数え、一定数を超えたら取り直す</li>
+<li><strong>捨てられたカウント数を見る。</strong> 警告には <code>up to N count discarded</code> が出ます。この合計が大きければ、影響も大きい</li>
+<li><strong>ホットな関数が含まれているか</strong>を見る。第 30 章の <code>--topn</code> で上位に来ていた関数が陳腐化していたら、優先度は高い</li>
+</ul>
+
+<pre><code>:: 陳腐化した関数の数を数える
+msbuild ... 2&gt;&amp;1 | findstr /C:"hash mismatch" | find /c /v ""</code></pre>
+
+<div class="box note">
+<span class="t">CI に組み込むなら</span>
+<p>第 41 章で扱いますが、方針だけ先に書いておきます。</p>
+<ul>
+<li>通常のビルドでは、保管してあるプロファイルを使う</li>
+<li>陳腐化した関数の数が閾値を超えたら、警告として報告する</li>
+<li>定期的（週次など）にトレーニングを実行してプロファイルを更新する</li>
+<li>リリース前には必ず取り直す</li>
+</ul>
+</div>
+
+<h2>34.6 プロファイルに無い関数</h2>
+
+<p>34.1 節の表の三行目、「プロファイルに無い」ケースです。警告が出ないため、気づきにくい問題です。</p>
+
+<p>原因は二つあります。</p>
+
+<table>
+<thead><tr><th>原因</th><th>望ましいか</th><th>対処</th></tr></thead>
+<tbody>
+<tr><td>関数を新しく追加した</td><td>—</td><td>次のトレーニングで拾われる</td></tr>
+<tr><td><strong>トレーニングでその関数を一度も通らなかった</strong></td><td>場合による</td><td>本当にコールドならそれで正しい。ホットなはずなら<strong>トレーニングの不備</strong></td></tr>
+</tbody>
+</table>
+
+<p>後者を検出したいなら、第 30 章の方法が使えます。<code>llvm-profdata show --topn</code> の顔ぶれと、第 12・13 章のプロファイラの結果を突き合わせる。プロファイラで上位に出ている関数がプロファイルに無ければ、トレーニングが本番を代表していません。</p>
+
+<h2>34.7 ハンズオン</h2>
+
+<ol>
+<li><code>src\stats.cpp</code> の <code>Stats::add()</code> に <code>if</code> を一行追加する</li>
+<li><code>-fprofile-use</code> のままビルドし、<code>hash mismatch</code> の警告が出ることを確認する</li>
+<li>警告に含まれる「捨てられたカウント数」を読む</li>
+<li><code>/clang:-Werror=backend-plugin</code> を付けて、エラーになることを確認する</li>
+<li>コメントだけを追加した場合は警告が出ないことを確認する</li>
+<li>追加した行を元に戻し、警告が消えることを確認する</li>
+<li>（余裕があれば）陳腐化したまま性能を測り、効果がどれだけ落ちるかを見る</li>
+</ol>
+
+<h2>34.8 まとめ</h2>
+
+<ul>
+<li>プロファイルは関数ごとの<strong>制御フローのハッシュ</strong>でソースと結び付いている</li>
+<li>ハッシュが変わると、<strong>その関数のプロファイルだけ</strong>が捨てられる。影響は関数単位に閉じる</li>
+<li>実測では、<code>if</code> を一行足しただけで約 198 万回ぶんの記録が破棄された</li>
+<li><strong>IR レベル計装の警告は <code>-Wbackend-plugin</code></strong>。<code>-Wprofile-instr-out-of-date</code> はフロントエンド計装用</li>
+<li>CI では <code>/clang:-Werror=backend-plugin</code> で確実に気づけるようにする</li>
+<li>制御フローを変えない編集（コメント、変数名、式の中身）ではハッシュは変わらない</li>
+<li>プロファイルは<strong>ゆっくり劣化する</strong>。警告の件数と捨てられたカウント数で取り直しを判断する</li>
+<li>「プロファイルに無い関数」は警告が出ない。トレーニングの不備を疑う手段は第 30 章の照合</li>
+</ul>
+
+<div class="partend">
+<h3>第 5 部を終えて</h3>
+<p>PGO について、次のことが分かりました。</p>
+<ul>
+<li>三段階の手順——計装ビルド、トレーニング、最適化ビルド（第 26・27・31 章）</li>
+<li>計装ビルドは <code>.text</code> が 4.2 倍、実行時間が 1.9 倍になる（第 26 章）</li>
+<li>トレーニングの品質がすべてを決める。<strong>不適切なトレーニングは性能を悪化させる</strong>（第 28 章）</li>
+<li>プロファイルは <code>llvm-profdata</code> で読める。トレーニングの妥当性を事前に判断できる（第 30 章）</li>
+<li>実行時間への効果は<strong>環境に依存した</strong>。環境 A で 6.5〜9.0% 短縮、環境 B ではノイズ床以下（第 31 章）</li>
+<li>その正体は、しきい値が 3 分の 1 に絞られ、<strong>インライン化が減った</strong>こと（第 32 章）</li>
+<li><code>atomic</code> なカウンタは高くつく。既定で十分（第 33 章）</li>
+<li>プロファイルは関数単位でゆっくり劣化する（第 34 章）</li>
+</ul>
+<p>第 4 部で LTO の判断がほとんど変わらず、第 5 部で PGO が 600 以上の判断を変えた——同じ題材、同じ手順で。この対比が示しているのは、<strong>最適化には「効く場所」があり、それはコードの性質で決まる</strong>ということです。そして第 31 章では、その判断の変化が実行時間に現れるかどうかが<strong>ハードウェア次第</strong>であることも見ました。手当たり次第にオプションを足すのではなく、どこに効くのかを理解し、自分の環境で測って選ぶ。第 1 章から一貫して主張してきたことが、実測として形になりました。</p>
+<p>ただし、PGO にもまだ届いていない領域があります。第 32 章で見たとおり、プロファイルは「この関数のこの分岐は 0.348%」という情報を持っていますが、<strong>「どこから呼ばれたときに 0.348% なのか」は区別していません</strong>。インライン展開された後の姿では、呼び出し元ごとに違う偏りを持つはずのコードが、平均された一つのプロファイルで最適化されています。</p>
+<p>その最後の隙間を埋めるのが、次の第 6 部です。</p>
+</div>
+
+<p class="next"><strong>次章から第 6 部（CSPGO）です。</strong> まず、いま述べた「文脈の欠落」がどういう問題なのかを具体的に見ます。そのうえで、プロファイルをもう一周取る二段構えの手順を扱います。第 4 部で見た lld-link の <code>/lto-cs-profile-generate</code> というオプションが、そこで登場します。</p>
+
+</div>
+</body>
+</html>

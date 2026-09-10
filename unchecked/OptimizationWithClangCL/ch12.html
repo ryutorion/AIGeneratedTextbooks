@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第12章 PIX for Windows で CPU 時間を取る — Clang最適化入門</title>
+<style>
+:root{
+  --ink:#1b1d21; --sub:#5c626b; --line:#dfe3e8; --bg:#fff;
+  --code-bg:#f5f7f9; --code-ink:#22262b; --accent:#2f5d8a;
+  --note-bg:#eef4fa; --note-line:#4a80b5;
+  --warn-bg:#fdf4ec; --warn-line:#c07830;
+  --tip-bg:#eef7f1; --tip-line:#4a8c5f;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Meiryo",system-ui,sans-serif;
+  font-size:16px; line-height:1.9; text-align:justify;
+}
+.book{max-width:46rem; margin:0 auto; padding:3rem 1.25rem 6rem}
+.chapno{font-size:.82rem; letter-spacing:.18em; color:var(--accent); font-weight:700; margin:0 0 .4rem}
+h1{font-size:1.85rem; line-height:1.45; margin:0 0 .6rem; letter-spacing:.01em}
+.lead{color:var(--sub); font-size:1.02rem; margin:0 0 2.5rem; padding-bottom:2rem; border-bottom:2px solid var(--line)}
+h2{font-size:1.32rem; margin:3.2rem 0 1rem; padding-bottom:.45rem; border-bottom:1px solid var(--line); letter-spacing:.01em}
+h3{font-size:1.08rem; margin:2.2rem 0 .7rem; color:#2c3239}
+h4{font-size:.98rem; margin:1.6rem 0 .5rem; color:#3a4048}
+p{margin:0 0 1.1rem}
+ul,ol{margin:0 0 1.2rem; padding-left:1.5rem}
+li{margin:.4rem 0}
+code{
+  font-family:"Cascadia Mono","Consolas","SF Mono",monospace;
+  font-size:.88em; background:var(--code-bg); padding:.12em .38em;
+  border-radius:3px; border:1px solid var(--line); word-break:break-all;
+}
+pre{
+  background:var(--code-bg); color:var(--code-ink); border:1px solid var(--line);
+  border-left:3px solid var(--accent); border-radius:4px;
+  padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.6;
+}
+pre code{background:none; border:none; padding:0; font-size:.85rem; word-break:normal}
+.cap{font-size:.83rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+.box{border-radius:4px; padding:.95rem 1.15rem; margin:1.6rem 0; font-size:.95rem}
+.box p:last-child{margin-bottom:0}
+.box .t{font-weight:700; font-size:.86rem; letter-spacing:.06em; display:block; margin-bottom:.4rem}
+.note{background:var(--note-bg); border-left:4px solid var(--note-line)}
+.note .t{color:var(--note-line)}
+.warn{background:var(--warn-bg); border-left:4px solid var(--warn-line)}
+.warn .t{color:var(--warn-line)}
+.tip{background:var(--tip-bg); border-left:4px solid var(--tip-line)}
+.tip .t{color:var(--tip-line)}
+table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+th{background:var(--code-bg); font-weight:700}
+figure{margin:2rem 0}
+figure svg{display:block; width:100%; height:auto}
+figcaption{font-size:.83rem; color:var(--sub); text-align:center; margin-top:.7rem}
+.goal{border:1px solid var(--line); border-top:3px solid var(--accent); border-radius:4px; padding:1.1rem 1.3rem; margin:0 0 2.4rem; background:#fbfcfd}
+.goal h2{margin:0 0 .6rem; font-size:1rem; border:none; padding:0; letter-spacing:.06em}
+.goal ul{margin-bottom:0}
+.next{margin-top:3.5rem; padding-top:1.4rem; border-top:2px solid var(--line); color:var(--sub); font-size:.95rem}
+.next strong{color:var(--ink)}
+.chk{list-style:none; padding-left:0}
+.chk li{padding-left:1.7rem; position:relative}
+.chk li::before{content:"\2610"; position:absolute; left:.2rem; color:var(--accent); font-size:1.05rem}
+.path{font-size:.93rem; color:var(--sub); background:var(--code-bg); border:1px solid var(--line); border-radius:3px; padding:.5rem .8rem; margin:0 0 1.2rem}
+.partend{margin-top:3rem; padding:1.2rem 1.4rem; border:2px solid var(--accent); border-radius:5px; background:#fbfcfd}
+.partend h3{margin-top:0; color:var(--accent)}
+.real{border-left-color:var(--tip-line)}
+@media (prefers-color-scheme:dark){
+  :root{
+    --ink:#e6e8ea; --sub:#a2a9b2; --line:#333940; --bg:#16181b;
+    --code-bg:#1e2126; --code-ink:#dfe3e8; --accent:#7fb0dd;
+    --note-bg:#1b2530; --note-line:#5f96c9;
+    --warn-bg:#2b2118; --warn-line:#d09154;
+    --tip-bg:#182619; --tip-line:#6aad7d;
+  }
+  h3{color:#d5d9dd} h4{color:#c3c9cf}
+  .goal,.partend{background:#1a1d21}
+}
+</style>
+</head>
+<body>
+<div class="book">
+
+<p class="chapno">第 12 章</p>
+<h1>PIX for Windows で CPU 時間を取る</h1>
+<p class="lead">ここから第 3 部です。第 2 部で「最適化の中身を観察する」道具を揃えました。次は「時間を測る」道具です。まずは PIX for Windows のタイミングキャプチャで、LogLab のどこに時間が費やされているのかを見てみます。</p>
+
+<div class="goal">
+<h2>この章のゴール</h2>
+<ul>
+<li>サンプリングプロファイラの原理と限界を理解する</li>
+<li>PIX for Windows を導入し、タイミングキャプチャを取る</li>
+<li>コールスタックの集計からホットスポットを特定する</li>
+<li>「<code>parse_line</code> が重いはずだ」という予想を検証する</li>
+</ul>
+</div>
+
+<h2>12.1 サンプリングプロファイラとは何か</h2>
+
+<p>本章と次章で使うのは、どちらも<strong>サンプリング型</strong>のプロファイラです。仕組みは驚くほど単純です。</p>
+
+<p>一定間隔（Windows では既定で 1 ミリ秒）ごとにタイマ割り込みをかけ、そのとき動いていたスレッドの<strong>コールスタックを写真に撮る</strong>。それだけです。1 秒間の実行なら 1000 枚の写真が集まります。そのうち 300 枚に <code>parse_line</code> が写っていれば、「実行時間のおよそ 30% を <code>parse_line</code> の中で過ごした」と推定できます。</p>
+
+<figure>
+<svg viewBox="0 0 720 260" role="img" aria-label="サンプリングプロファイラの原理。一定間隔でコールスタックを記録し、出現頻度から時間配分を推定する">
+  <text x="20" y="26" font-size="12.5" font-weight="700" fill="#2f5d8a" font-family="sans-serif">1 ミリ秒ごとにコールスタックを記録する</text>
+
+  <line x1="40" y1="120" x2="680" y2="120" stroke="#5c626b" stroke-width="1.5"/>
+  <text x="40" y="146" font-size="10.5" fill="#5c626b" font-family="sans-serif">時間 →</text>
+
+  <g font-family="sans-serif" font-size="9.5" text-anchor="middle">
+    <line x1="80"  y1="112" x2="80"  y2="128" stroke="#2f5d8a" stroke-width="2"/>
+    <line x1="160" y1="112" x2="160" y2="128" stroke="#2f5d8a" stroke-width="2"/>
+    <line x1="240" y1="112" x2="240" y2="128" stroke="#2f5d8a" stroke-width="2"/>
+    <line x1="320" y1="112" x2="320" y2="128" stroke="#2f5d8a" stroke-width="2"/>
+    <line x1="400" y1="112" x2="400" y2="128" stroke="#2f5d8a" stroke-width="2"/>
+    <line x1="480" y1="112" x2="480" y2="128" stroke="#2f5d8a" stroke-width="2"/>
+    <line x1="560" y1="112" x2="560" y2="128" stroke="#2f5d8a" stroke-width="2"/>
+    <line x1="640" y1="112" x2="640" y2="128" stroke="#2f5d8a" stroke-width="2"/>
+  </g>
+
+  <g font-family="monospace" font-size="9.5" text-anchor="middle" fill="#1b1d21">
+    <text x="80"  y="100">parse</text>
+    <text x="160" y="100">parse</text>
+    <text x="240" y="100">accept</text>
+    <text x="320" y="100">parse</text>
+    <text x="400" y="100">add</text>
+    <text x="480" y="100">parse</text>
+    <text x="560" y="100">parse</text>
+    <text x="640" y="100">accept</text>
+  </g>
+
+  <rect x="40" y="168" width="300" height="72" rx="4" fill="#eef7f1" stroke="#4a8c5f"/>
+  <text x="58" y="190" font-size="11.5" font-weight="700" fill="#4a8c5f" font-family="sans-serif">集計すると</text>
+  <text x="58" y="211" font-size="11" font-family="monospace" fill="#1b1d21">parse   5/8 = 62.5%</text>
+  <text x="58" y="229" font-size="11" font-family="monospace" fill="#1b1d21">accept  2/8 = 25.0%   add 1/8 = 12.5%</text>
+
+  <rect x="368" y="168" width="312" height="72" rx="4" fill="#fdf4ec" stroke="#c07830"/>
+  <text x="386" y="190" font-size="11.5" font-weight="700" fill="#c07830" font-family="sans-serif">写らないもの</text>
+  <text x="386" y="211" font-size="11" fill="#5c626b" font-family="sans-serif">サンプルとサンプルの間に起きたことは記録されない。</text>
+  <text x="386" y="229" font-size="11" fill="#5c626b" font-family="sans-serif">1 ミリ秒より短い事象は運任せになる。</text>
+</svg>
+<figcaption>図 12-1　サンプリングプロファイラの原理</figcaption>
+</figure>
+
+<p>ここから二つの性質が出てきます。</p>
+
+<ul>
+<li><strong>これは計測ではなく統計です。</strong> サンプル数が少なければ誤差が大きくなります。1 回の実行が 10 ミリ秒しかなければ、サンプルは 10 個しか集まりません</li>
+<li><strong>短い事象は写りません。</strong> 100 マイクロ秒で終わる処理は、1 ミリ秒間隔のサンプリングには 10 回に 1 回しか写りません</li>
+</ul>
+
+<p>第 4 章で LogLab の実行時間を「500 ミリ秒から 2 秒」に調整するよう書いたのは、この理由からです。数百から数千のサンプルが集まれば、統計として意味のある結果になります。</p>
+
+<h2>12.2 PIX for Windows の導入</h2>
+
+<p>PIX は Microsoft が提供する Windows 向けのパフォーマンス解析ツールです。公式サイト（<code>devblogs.microsoft.com/pix</code>）からインストーラを入手できます。Visual Studio とは別に配布されているので、個別にダウンロードが必要です。</p>
+
+<p>PIX には複数のキャプチャ種別がありますが、本書で使うのは<strong>タイミングキャプチャ（Timing Capture）</strong>です。CPU の時間配分を見るのがこの機能です。</p>
+
+<h3>12.2.1 タイミングキャプチャで取れるもの</h3>
+
+<table>
+<thead><tr><th>オプション</th><th>内容</th></tr></thead>
+<tbody>
+<tr><td><strong>CPU Samples</strong></td><td>サンプリングによる CPU 時間の配分。サンプル間隔は設定可能。<strong>本書で主に使うのはこれ</strong></td></tr>
+<tr><td>Callstacks on Context Switches</td><td>スレッドが切り替わるたびにコールスタックを記録する</td></tr>
+<tr><td>File Accesses</td><td>ファイル入出力の記録</td></tr>
+<tr><td>Custom Allocators</td><td><code>VirtualAlloc</code> / <code>HeapAlloc</code> などのメモリ確保の記録</td></tr>
+<tr><td>Page Fault Events</td><td>ページフォルトの記録</td></tr>
+</tbody>
+</table>
+
+<p>記録モードは二つあります。</p>
+
+<table>
+<thead><tr><th>モード</th><th>挙動</th><th>向いている場面</th></tr></thead>
+<tbody>
+<tr><td>Sequential</td><td>開始から停止までのすべてを記録する</td><td>LogLab のように短時間で終わる処理</td></tr>
+<tr><td>Circular</td><td>固定サイズのバッファに記録し、直近の数秒だけを残す</td><td>長時間動くアプリの、問題が起きた瞬間を捕まえる</td></tr>
+</tbody>
+</table>
+
+<h2>12.3 キャプチャを取る</h2>
+
+<ol>
+<li>PIX を起動し、左側の <strong>Connection</strong> ビューを開く</li>
+<li>対象のマシン（通常は <code>localhost</code>）に接続する</li>
+<li>プロセスを起動するか、動作中のプロセスにアタッチする
+  <ul><li>起動する場合は実行ファイルのパスと引数を指定する</li>
+  <li><strong>GPU キャプチャ用のオプションは外しておく</strong>（CPU の解析には不要で、余計なフックが入ります）</li></ul></li>
+<li><strong>Start Timing Capture</strong> をクリックする</li>
+<li>対象の処理が終わったら <strong>Stop Timing Capture</strong>（またはアプリの終了）で停止する</li>
+</ol>
+
+<div class="box warn">
+<span class="t">LogLab のようなコンソールアプリについて</span>
+<p>PIX は本来、Direct3D 12 を使うゲームタイトルの解析を主目的に設計されたツールです。タイミングキャプチャ自体は ETW（次章で扱う Windows の標準的なトレース機構）を土台にしているため、原理的にはグラフィックスを使わないプロセスでも成立します。しかし<strong>コンソールアプリがプロセス一覧に現れるかどうかは PIX のバージョンに依存します。</strong></p>
+<p>まずは実際にアタッチできるか試してください。うまくいかない場合は、次の二つの道があります。</p>
+<ul>
+<li><strong>第 13 章の WPR / WPA を使う。</strong> こちらは Windows 標準の仕組みで、どんなプロセスでも確実に採れます。得られる情報も解析の考え方も本質的に同じです</li>
+<li>LogLab に WinPixEventRuntime を組み込み、<code>PIXBeginEvent</code> / <code>PIXEndEvent</code> で区間に名前を付ける。PIX のタイムラインに自分の区間が並ぶようになり、格段に読みやすくなります。ただし外部ライブラリへの依存が増えます</li>
+</ul>
+<p>本書は「どちらでも進められる」ように書いてあります。第 4 部以降で「プロファイラで確認する」と書いたときは、お使いのほうを使ってください。</p>
+</div>
+
+<h2>12.4 何を見るのか</h2>
+
+<p>キャプチャが取れたら、見るべき順番は決まっています。</p>
+
+<h3>12.4.1 まずスレッドのタイムライン</h3>
+
+<p>LogLab は単一スレッドなので、一本の帯が実行時間いっぱいに伸びているはずです。ここで確認したいのは次の点です。</p>
+
+<ul>
+<li>帯が<strong>途切れていないか</strong>。途切れていればスレッドが待たされている（ページフォルト、I/O、他プロセスに CPU を奪われた）</li>
+<li>計測区間の前後に、想定外の時間が入っていないか（<code>generate_lines()</code> は計測対象外にしたはずですが、実際どうか）</li>
+</ul>
+
+<h3>12.4.2 次にコールスタックの集計</h3>
+
+<p>CPU サンプルを関数ごとに集計したビューを開きます。ここで見るのは二種類の数字です。</p>
+
+<table>
+<thead><tr><th>種別</th><th>意味</th></tr></thead>
+<tbody>
+<tr><td><strong>排他時間</strong>（self / exclusive）</td><td>その関数自身の中でサンプルが取られた回数。<strong>実際に命令を実行していた時間</strong></td></tr>
+<tr><td><strong>包括時間</strong>（total / inclusive）</td><td>その関数と、そこから呼ばれた関数すべてを合わせた回数</td></tr>
+</tbody>
+</table>
+
+<p>最適化の対象を探すときは<strong>排他時間</strong>を見ます。包括時間で並べると <code>main</code> が 100% で一位になるだけで、何の情報にもなりません。</p>
+
+<h3>12.4.3 予想を検証する</h3>
+
+<p>第 4 章で LogLab を設計したとき、私たちは「<code>parse_line</code> が最もホットなはずだ」と書きました。実際にそうなっているでしょうか。</p>
+
+<p>期待される並びは、おおよそ次のようなものです。</p>
+
+<ol>
+<li><code>parse_line</code> と、そこにインライン化された <code>next_field</code> / <code>parse_uint</code> — 文字を 1 バイトずつ見る処理なので最も重い</li>
+<li><code>Filter::accept()</code> の各実装 — 仮想呼び出しが行数ぶん発生する</li>
+<li><code>Stats::add</code> — ハッシュの更新</li>
+<li><code>handle_error</code> — ほとんど出てこないはず（全体の 0.3% の行しか通らない）</li>
+</ol>
+
+<div class="box tip">
+<span class="t">予想と違ったら、それが収穫です</span>
+<p>プロファイルの価値は「予想が当たること」ではなく「予想が外れることが分かること」にあります。もし <code>Stats::add</code> が想定より重ければ、ハッシュの計算が思ったよりコストが高いということです。もし <code>std::string_view::find</code> のような標準ライブラリの関数が上位に来たら、<code>parse_line</code> の中の <code>find(" code=")</code> が効いているということです。</p>
+<p>いずれにせよ、<strong>それが第 4 部以降で「どこが速くなったか」を見る場所</strong>になります。</p>
+</div>
+
+<h2>12.5 サンプリングの限界 — インライン化された関数は見えない</h2>
+
+<p>プロファイルを見て「あるはずの関数が出てこない」ということがよく起こります。原因はたいてい<strong>インライン化</strong>です。</p>
+
+<p>LogLab の <code>next_field()</code> は <code>parse_line()</code> の中に展開されているので、独立した関数としては存在しません。サンプリングの写真には <code>parse_line</code> としか写らないのです。</p>
+
+<p>対処は二つあります。</p>
+
+<table>
+<thead><tr><th>方法</th><th>内容</th><th>注意</th></tr></thead>
+<tbody>
+<tr><td>インラインフレーム情報を使う</td><td>PDB には「この命令はもともとどの関数だったか」という情報（インラインサイト情報）が入っている。対応したプロファイラなら展開して表示できる</td><td>ツール側の対応が必要。第 14 章で扱う</td></tr>
+<tr><td>一時的に展開を止める</td><td>第 11 章で触れた <code>__declspec(noinline)</code> を調べたい関数に付ける</td><td><strong>それ自体が性能を変える</strong>。あくまで調査用で、その状態の数字を「本当の性能」として扱わない</td></tr>
+</tbody>
+</table>
+
+<div class="box warn">
+<span class="t">調査のための改変は、必ず元に戻す</span>
+<p><code>__declspec(noinline)</code> を付けたまま最適化の効果を測ると、まったく無意味な比較になります。第 11 章の実測で見たとおり、インライン化の有無は 1.7 倍の差を生みます。調査用の改変はコミットせず、測るときは必ず外してください。</p>
+</div>
+
+<h2>12.6 ハンズオン</h2>
+
+<ol>
+<li>LogLab を Release / x64 でビルドする（<code>/Zi</code> と <code>/DEBUG</code> が有効なことを確認）</li>
+<li>PIX でタイミングキャプチャを取る。取れなければ第 13 章に進み、そちらで同じことを行う</li>
+<li>CPU サンプルを<strong>排他時間</strong>で並べ替える</li>
+<li>上位 5 関数とその割合をメモする ← <strong>これが第 3 部の成果物のひとつ</strong></li>
+<li><code>handle_error</code> が上位に来ていないことを確認する</li>
+<li>計測区間の外（<code>generate_lines()</code>）にどれだけ時間がかかっているかも見ておく</li>
+</ol>
+
+<h2>12.7 まとめ</h2>
+
+<ul>
+<li>サンプリングプロファイラは一定間隔でコールスタックを撮る。<strong>計測ではなく統計</strong>である</li>
+<li>1 ミリ秒より短い事象は写らない。だから題材の実行時間を十分長くしてある</li>
+<li>PIX のタイミングキャプチャで CPU サンプルとコールスタックが取れる</li>
+<li>PIX は D3D12 タイトル向けの設計。コンソールアプリで使えなければ第 13 章の WPR / WPA を使う</li>
+<li>最適化対象を探すときは<strong>排他時間</strong>で並べる。包括時間では <code>main</code> が一位になるだけ</li>
+<li>インライン化された関数はプロファイルに現れない。これは第 14 章のシンボルの話につながる</li>
+</ul>
+
+<p class="next"><strong>次章では</strong>、Windows 標準の ETW と Windows Performance Analyzer を扱います。コマンドライン一つでトレースを採れるので、自動化にも向いています。PIX が使えなかった場合の代替であると同時に、CI に組み込むときの本命でもあります（第 41 章）。</p>
+
+</div>
+</body>
+</html>

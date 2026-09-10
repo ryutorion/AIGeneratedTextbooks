@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第28章 トレーニングワークロードの設計 — Clang最適化入門</title>
+<style>
+:root{
+  --ink:#1b1d21; --sub:#5c626b; --line:#dfe3e8; --bg:#fff;
+  --code-bg:#f5f7f9; --code-ink:#22262b; --accent:#2f5d8a;
+  --note-bg:#eef4fa; --note-line:#4a80b5;
+  --warn-bg:#fdf4ec; --warn-line:#c07830;
+  --tip-bg:#eef7f1; --tip-line:#4a8c5f;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Meiryo",system-ui,sans-serif;
+  font-size:16px; line-height:1.9; text-align:justify;
+}
+.book{max-width:46rem; margin:0 auto; padding:3rem 1.25rem 6rem}
+.chapno{font-size:.82rem; letter-spacing:.18em; color:var(--accent); font-weight:700; margin:0 0 .4rem}
+h1{font-size:1.85rem; line-height:1.45; margin:0 0 .6rem; letter-spacing:.01em}
+.lead{color:var(--sub); font-size:1.02rem; margin:0 0 2.5rem; padding-bottom:2rem; border-bottom:2px solid var(--line)}
+h2{font-size:1.32rem; margin:3.2rem 0 1rem; padding-bottom:.45rem; border-bottom:1px solid var(--line); letter-spacing:.01em}
+h3{font-size:1.08rem; margin:2.2rem 0 .7rem; color:#2c3239}
+h4{font-size:.98rem; margin:1.6rem 0 .5rem; color:#3a4048}
+p{margin:0 0 1.1rem}
+ul,ol{margin:0 0 1.2rem; padding-left:1.5rem}
+li{margin:.4rem 0}
+code{
+  font-family:"Cascadia Mono","Consolas","SF Mono",monospace;
+  font-size:.88em; background:var(--code-bg); padding:.12em .38em;
+  border-radius:3px; border:1px solid var(--line); word-break:break-all;
+}
+pre{
+  background:var(--code-bg); color:var(--code-ink); border:1px solid var(--line);
+  border-left:3px solid var(--accent); border-radius:4px;
+  padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.6;
+}
+pre code{background:none; border:none; padding:0; font-size:.85rem; word-break:normal}
+.cap{font-size:.83rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+.box{border-radius:4px; padding:.95rem 1.15rem; margin:1.6rem 0; font-size:.95rem}
+.box p:last-child{margin-bottom:0}
+.box .t{font-weight:700; font-size:.86rem; letter-spacing:.06em; display:block; margin-bottom:.4rem}
+.note{background:var(--note-bg); border-left:4px solid var(--note-line)}
+.note .t{color:var(--note-line)}
+.warn{background:var(--warn-bg); border-left:4px solid var(--warn-line)}
+.warn .t{color:var(--warn-line)}
+.tip{background:var(--tip-bg); border-left:4px solid var(--tip-line)}
+.tip .t{color:var(--tip-line)}
+table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+th{background:var(--code-bg); font-weight:700}
+figure{margin:2rem 0}
+figure svg{display:block; width:100%; height:auto}
+figcaption{font-size:.83rem; color:var(--sub); text-align:center; margin-top:.7rem}
+.goal{border:1px solid var(--line); border-top:3px solid var(--accent); border-radius:4px; padding:1.1rem 1.3rem; margin:0 0 2.4rem; background:#fbfcfd}
+.goal h2{margin:0 0 .6rem; font-size:1rem; border:none; padding:0; letter-spacing:.06em}
+.goal ul{margin-bottom:0}
+.next{margin-top:3.5rem; padding-top:1.4rem; border-top:2px solid var(--line); color:var(--sub); font-size:.95rem}
+.next strong{color:var(--ink)}
+.chk{list-style:none; padding-left:0}
+.chk li{padding-left:1.7rem; position:relative}
+.chk li::before{content:"\2610"; position:absolute; left:.2rem; color:var(--accent); font-size:1.05rem}
+.path{font-size:.93rem; color:var(--sub); background:var(--code-bg); border:1px solid var(--line); border-radius:3px; padding:.5rem .8rem; margin:0 0 1.2rem}
+.partend{margin-top:3rem; padding:1.2rem 1.4rem; border:2px solid var(--accent); border-radius:5px; background:#fbfcfd}
+.partend h3{margin-top:0; color:var(--accent)}
+.real{border-left-color:var(--tip-line)}
+@media (prefers-color-scheme:dark){
+  :root{
+    --ink:#e6e8ea; --sub:#a2a9b2; --line:#333940; --bg:#16181b;
+    --code-bg:#1e2126; --code-ink:#dfe3e8; --accent:#7fb0dd;
+    --note-bg:#1b2530; --note-line:#5f96c9;
+    --warn-bg:#2b2118; --warn-line:#d09154;
+    --tip-bg:#182619; --tip-line:#6aad7d;
+  }
+  h3{color:#d5d9dd} h4{color:#c3c9cf}
+  .goal,.partend{background:#1a1d21}
+}
+</style>
+</head>
+<body>
+<div class="book">
+
+<p class="chapno">第 28 章</p>
+<h1>トレーニングワークロードの設計<br>— 「代表的な実行」とは何か</h1>
+<p class="lead">PGO の品質は、プロファイルの品質で決まります。そしてプロファイルの品質は、何を実行したかで決まります。この章では、トレーニングを間違えると PGO が<strong>性能を悪化させる</strong>ことを実測で確かめます。</p>
+
+<div class="goal">
+<h2>この章のゴール</h2>
+<ul>
+<li>「代表的」の意味を定義する</li>
+<li>カバレッジと代表性の違いを理解する</li>
+<li>不適切なトレーニングの影響を実測で知る</li>
+<li>LogLab のトレーニングを設計する</li>
+</ul>
+</div>
+
+<h2>28.1 コンパイラは記録を信じます</h2>
+
+<p>PGO の仕組みには、疑いという概念がありません。プロファイルに「この分岐は 100% 成立した」と書いてあれば、コンパイラはそれを事実として扱い、成立しない側の経路をコールドとして扱います。</p>
+
+<p>そのトレーニングが本番の 1% しか代表していなくても、コンパイラには区別がつきません。<strong>間違ったプロファイルは、間違った最適化を確実に引き起こします。</strong></p>
+
+<h2>28.2 実測 — トレーニングを変えると何が起きるか</h2>
+
+<p>LogLab で、三種類のトレーニングからプロファイルを作り、それぞれで最適化ビルドを行いました。評価は本番相当のワークロード（20 万行 × 30 反復）です。</p>
+
+<table>
+<thead><tr><th>トレーニング</th><th>本番との近さ</th><th>実行時間（基準ビルド比）</th></tr></thead>
+<tbody>
+<tr><td>20 万行 × 10 反復</td><td>本番相当</td><td><strong>−6.5% 〜 −9.0%（速い）</strong></td></tr>
+<tr><td>2 千行 × 2 反復</td><td>小さいが分布は同じ</td><td>−7.0%（速い）</td></tr>
+<tr><td>100 行 × 1 反復</td><td>極端に小さい</td><td><strong>−0.5% 〜 +5.1%（ばらつき、多くは遅い）</strong></td></tr>
+</tbody>
+</table>
+<p class="cap">環境 A での実測。各行とも交互実行・最小値比較、複数回試行。ノイズ床は 0.4%<br>（この効果の大きさは環境に依存します。第 31 章 31.3.2 節を参照）</p>
+
+<p>読み取れることが二つあります。</p>
+
+<h4>1. 規模より分布</h4>
+<p>2 千行のトレーニングでも、20 万行のときとほぼ同じ効果が出ました。LogLab の入力は乱数で生成されており、2 千行でもレベルの出現比率（INFO 60%、ERROR 0.3%）はほぼ再現されるからです。<strong>必要なのは長時間の実行ではなく、正しい分布です。</strong></p>
+
+<h4>2. 小さすぎると効果が消え、悪化しうる</h4>
+<p>100 行 × 1 反復では、効果が消えただけでなく、多くの試行で<strong>基準ビルドより遅く</strong>なりました。数値がばらついたので「確実に何 % 遅い」とは言えませんが、少なくとも「PGO を入れたのに得をしていない」ことは確かです。</p>
+
+<div class="box warn">
+<span class="t">PGO は入れれば速くなるものではありません</span>
+<p>100 行の実行では、ERROR 行が 1 行も出ないことすらあります。すると「<code>handle_error</code> は一度も呼ばれない完全なデッドコード」というプロファイルができあがります。コンパイラはそれを信じて最適化し、本番で <code>handle_error</code> が呼ばれるたびに割を食うことになります。</p>
+</div>
+
+<h2>28.3 「代表的」の条件</h2>
+
+<p>トレーニングワークロードが満たすべき条件を整理します。</p>
+
+<table>
+<thead><tr><th>#</th><th>条件</th><th>なぜ</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>本番と<strong>同じ分岐の偏り</strong>を持つ</td><td>これが PGO の情報の本体</td></tr>
+<tr><td>2</td><td>本番でホットな経路を<strong>実際に通る</strong></td><td>通らない経路はコールド扱いになる</td></tr>
+<tr><td>3</td><td>統計として意味のある回数を通る</td><td>1 回や 2 回では偏りが表現できない</td></tr>
+<tr><td>4</td><td>本番でコールドな経路を<strong>過剰に通らない</strong></td><td>逆方向の誤りも同じくらい害がある</td></tr>
+<tr><td>5</td><td>再現できる</td><td>プロファイルを作り直せる必要がある</td></tr>
+</tbody>
+</table>
+
+<h3>28.3.1 カバレッジとは別物です</h3>
+
+<p>ここを混同すると失敗します。</p>
+
+<table>
+<thead><tr><th></th><th>コードカバレッジ</th><th>PGO のトレーニング</th></tr></thead>
+<tbody>
+<tr><td>目標</td><td>すべての行を<strong>一度は</strong>通る</td><td>本番と<strong>同じ割合で</strong>通る</td></tr>
+<tr><td>エラー処理</td><td>必ず通したい</td><td>本番どおり、めったに通らないほうがよい</td></tr>
+<tr><td>異常系</td><td>網羅すべき</td><td>網羅すると<strong>害になる</strong></td></tr>
+</tbody>
+</table>
+
+<p>カバレッジ 100% を目指したトレーニングは、PGO にとっては最悪に近い入力です。すべての例外経路、すべてのエラー処理が均等に通ったプロファイルは、「どこもホットでない」という情報しか持ちません。</p>
+
+<h2>28.4 テストスイートを使ってよいか</h2>
+
+<p>「既存のテストを流せばいいのでは」と考えるのは自然ですが、注意が必要です。</p>
+
+<table>
+<thead><tr><th>テストの種類</th><th>トレーニングとしての適性</th></tr></thead>
+<tbody>
+<tr><td>ユニットテスト</td><td><strong>不向き。</strong> 異常系を網羅し、各ケースを 1 回ずつ通る。分布が本番と正反対</td></tr>
+<tr><td>結合テスト</td><td>ものによる。本番に近いシナリオなら使える</td></tr>
+<tr><td>ベンチマーク / 負荷試験</td><td><strong>向いている。</strong> 本番の典型的な処理を大量に回すため</td></tr>
+<tr><td>実運用のリプレイ</td><td><strong>最良。</strong> 記録した実際の入力を再生する</td></tr>
+</tbody>
+</table>
+
+<div class="box tip">
+<span class="t">現実的な落とし所</span>
+<p>多くのプロジェクトでは、性能検証用のベンチマークシナリオがすでにあるはずです。それをそのままトレーニングに使うのが最も手間が少なく、かつ理にかなっています。「性能を測るために代表的だと判断したワークロード」は、そのまま「最適化のために代表的なワークロード」だからです。</p>
+</div>
+
+<h2>28.5 起動時とピーク時の食い違い</h2>
+
+<p>実務でよくある難問です。アプリケーションには、性質の異なる局面があります。</p>
+
+<ul>
+<li>起動処理（設定読み込み、初期化）——一度だけ通る</li>
+<li>定常処理（本来の仕事）——延々と通る</li>
+<li>終了処理——一度だけ</li>
+</ul>
+
+<p>起動を含めてトレーニングすると、起動処理がそれなりにホットなものとして記録されます。定常処理を長く回せば相対的に薄まりますが、「起動を速くしたい」という要求と「定常処理を速くしたい」という要求は競合します。</p>
+
+<p>対処の考え方は二つです。</p>
+
+<table>
+<thead><tr><th>方針</th><th>やり方</th></tr></thead>
+<tbody>
+<tr><td>優先するほうに寄せる</td><td>定常処理を十分長く回し、起動を相対的に無視できるようにする</td></tr>
+<tr><td>重みを付けて混ぜる</td><td>起動中心のトレーニングと定常中心のトレーニングを別々に採り、<code>llvm-profdata merge</code> の重み付け機能で配合する（第 29 章）</td></tr>
+</tbody>
+</table>
+
+<h2>28.6 LogLab のトレーニング設計</h2>
+
+<p>本書の題材に当てはめます。LogLab の構造は次のようになっていました。</p>
+
+<ul>
+<li><code>generate_lines()</code>——起動時に一度だけ（計測区間外）</li>
+<li>解析ループ——延々と回る（計測区間）</li>
+<li><code>report()</code>——最後に一度だけ</li>
+</ul>
+
+<p>したがって、解析ループを十分に回すトレーニングであれば、起動と終了は自然に薄まります。第 27 章のリスト 27-1 で三種類の入力を用意したのは、次の意図です。</p>
+
+<table>
+<thead><tr><th>実行</th><th>意図</th></tr></thead>
+<tbody>
+<tr><td><code>200000 10</code></td><td>本番相当。これが主役</td></tr>
+<tr><td><code>20000 20</code></td><td>入力サイズが違っても分布は同じことを確認する意味も兼ねる</td></tr>
+<tr><td><code>500000 4</code></td><td>より大きな入力。メモリの使われ方が変わる</td></tr>
+</tbody>
+</table>
+
+<div class="box note">
+<span class="t">乱数のシードは固定のままでよいのか</span>
+<p>LogLab はシードを固定しているので、どの実行も同じログ行の並びを処理します。実際のアプリなら、入力のバリエーションを持たせるべきところです。</p>
+<p>ただし本書では、<strong>checksum による検証を成立させるため</strong>にシードを固定しています。トレーニングの多様性より、最適化で結果が壊れていないことを確認できるほうを優先しました。実務では、入力を変えつつ結果の妥当性を別の方法で検証することになります。</p>
+</div>
+
+<h2>28.7 トレーニングが十分かを確かめる</h2>
+
+<p>「このトレーニングで足りているか」を事前に判断する完全な方法はありませんが、次の目安が使えます。</p>
+
+<ol>
+<li><strong>プロファイルどうしを比べる。</strong> トレーニングの規模を変えて二つ作り、<code>llvm-profdata overlap</code>（第 30 章）で比較する。規模を増やしても分布が変わらなくなったら、そこが飽和点</li>
+<li><strong>ホットな関数の顔ぶれを確認する。</strong> <code>llvm-profdata show --topn</code> で上位の関数を見て、第 12・13 章のプロファイラの結果と一致するかを確かめる</li>
+<li><strong>最終的には測る。</strong> トレーニングを変えて最適化ビルドを作り、実行時間を比べる。本章の実測がまさにこれです</li>
+</ol>
+
+<p>実際、極小トレーニングと本番相当トレーニングのプロファイルを <code>overlap</code> で比較すると、次のようになりました。</p>
+
+<pre><code>Edge profile overlap: 76.536%
+IndirectCall profile overlap: 50.000%</code></pre>
+
+<p>分岐の分布が 4 分の 1 ほど食い違っており、間接呼び出しに至っては半分しか一致していません。<strong>この数字を見た時点で、そのトレーニングは信用できないと判断できます。</strong></p>
+
+<h2>28.8 ハンズオン</h2>
+
+<ol>
+<li>第 27 章の <code>train.cmd</code> でプロファイルを採る</li>
+<li>別に、極端に小さいトレーニング（<code>ClangOptLab.exe 100 1</code>）のプロファイルも採る</li>
+<li>両方から最適化ビルドを作る（作り方は第 31 章。先に読んでも構いません）</li>
+<li>基準ビルドに対して、それぞれの実行時間を比較する</li>
+<li>小さいほうで効果が消える、あるいは悪化することを確認する</li>
+</ol>
+
+<h2>28.9 まとめ</h2>
+
+<ul>
+<li>コンパイラはプロファイルを<strong>疑わない</strong>。間違った記録は間違った最適化を確実に生む</li>
+<li>環境 A の実測では、本番相当のトレーニングで <strong>6.5〜9.0% 高速化</strong>、極小トレーニングでは効果が消え、多くの試行で<strong>基準より遅く</strong>なった（効果の大きさ自体は環境依存。第 31 章）</li>
+<li>必要なのは実行時間の長さではなく<strong>分布の正しさ</strong>。2 千行でも分布が同じなら十分だった</li>
+<li><strong>カバレッジと代表性は別物。</strong> 全経路を均等に通ったプロファイルは PGO にとって有害</li>
+<li>ユニットテストはトレーニングに不向き。ベンチマークや実運用のリプレイが向いている</li>
+<li>起動処理と定常処理の食い違いは、回す量か <code>merge</code> の重み付けで調整する</li>
+<li>妥当性の確認には <code>overlap</code> と <code>show --topn</code>、そして最終的には実測</li>
+</ul>
+
+<p class="next"><strong>次章では</strong>、集めた <code>.profraw</code> を <code>llvm-profdata merge</code> でまとめます。単なる形式変換ではなく、複数のトレーニングを重み付けして配合する機能もあります。本章で触れた「起動と定常のバランス」は、ここで調整することになります。</p>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第24章 MSVC の /GL・/LTCG との比較 — Clang最適化入門</title>
+<style>
+:root{
+  --ink:#1b1d21; --sub:#5c626b; --line:#dfe3e8; --bg:#fff;
+  --code-bg:#f5f7f9; --code-ink:#22262b; --accent:#2f5d8a;
+  --note-bg:#eef4fa; --note-line:#4a80b5;
+  --warn-bg:#fdf4ec; --warn-line:#c07830;
+  --tip-bg:#eef7f1; --tip-line:#4a8c5f;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Meiryo",system-ui,sans-serif;
+  font-size:16px; line-height:1.9; text-align:justify;
+}
+.book{max-width:46rem; margin:0 auto; padding:3rem 1.25rem 6rem}
+.chapno{font-size:.82rem; letter-spacing:.18em; color:var(--accent); font-weight:700; margin:0 0 .4rem}
+h1{font-size:1.85rem; line-height:1.45; margin:0 0 .6rem; letter-spacing:.01em}
+.lead{color:var(--sub); font-size:1.02rem; margin:0 0 2.5rem; padding-bottom:2rem; border-bottom:2px solid var(--line)}
+h2{font-size:1.32rem; margin:3.2rem 0 1rem; padding-bottom:.45rem; border-bottom:1px solid var(--line); letter-spacing:.01em}
+h3{font-size:1.08rem; margin:2.2rem 0 .7rem; color:#2c3239}
+h4{font-size:.98rem; margin:1.6rem 0 .5rem; color:#3a4048}
+p{margin:0 0 1.1rem}
+ul,ol{margin:0 0 1.2rem; padding-left:1.5rem}
+li{margin:.4rem 0}
+code{
+  font-family:"Cascadia Mono","Consolas","SF Mono",monospace;
+  font-size:.88em; background:var(--code-bg); padding:.12em .38em;
+  border-radius:3px; border:1px solid var(--line); word-break:break-all;
+}
+pre{
+  background:var(--code-bg); color:var(--code-ink); border:1px solid var(--line);
+  border-left:3px solid var(--accent); border-radius:4px;
+  padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.6;
+}
+pre code{background:none; border:none; padding:0; font-size:.85rem; word-break:normal}
+.cap{font-size:.83rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+.box{border-radius:4px; padding:.95rem 1.15rem; margin:1.6rem 0; font-size:.95rem}
+.box p:last-child{margin-bottom:0}
+.box .t{font-weight:700; font-size:.86rem; letter-spacing:.06em; display:block; margin-bottom:.4rem}
+.note{background:var(--note-bg); border-left:4px solid var(--note-line)}
+.note .t{color:var(--note-line)}
+.warn{background:var(--warn-bg); border-left:4px solid var(--warn-line)}
+.warn .t{color:var(--warn-line)}
+.tip{background:var(--tip-bg); border-left:4px solid var(--tip-line)}
+.tip .t{color:var(--tip-line)}
+table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+th{background:var(--code-bg); font-weight:700}
+figure{margin:2rem 0}
+figure svg{display:block; width:100%; height:auto}
+figcaption{font-size:.83rem; color:var(--sub); text-align:center; margin-top:.7rem}
+.goal{border:1px solid var(--line); border-top:3px solid var(--accent); border-radius:4px; padding:1.1rem 1.3rem; margin:0 0 2.4rem; background:#fbfcfd}
+.goal h2{margin:0 0 .6rem; font-size:1rem; border:none; padding:0; letter-spacing:.06em}
+.goal ul{margin-bottom:0}
+.next{margin-top:3.5rem; padding-top:1.4rem; border-top:2px solid var(--line); color:var(--sub); font-size:.95rem}
+.next strong{color:var(--ink)}
+.chk{list-style:none; padding-left:0}
+.chk li{padding-left:1.7rem; position:relative}
+.chk li::before{content:"\2610"; position:absolute; left:.2rem; color:var(--accent); font-size:1.05rem}
+.path{font-size:.93rem; color:var(--sub); background:var(--code-bg); border:1px solid var(--line); border-radius:3px; padding:.5rem .8rem; margin:0 0 1.2rem}
+.partend{margin-top:3rem; padding:1.2rem 1.4rem; border:2px solid var(--accent); border-radius:5px; background:#fbfcfd}
+.partend h3{margin-top:0; color:var(--accent)}
+.real{border-left-color:var(--tip-line)}
+@media (prefers-color-scheme:dark){
+  :root{
+    --ink:#e6e8ea; --sub:#a2a9b2; --line:#333940; --bg:#16181b;
+    --code-bg:#1e2126; --code-ink:#dfe3e8; --accent:#7fb0dd;
+    --note-bg:#1b2530; --note-line:#5f96c9;
+    --warn-bg:#2b2118; --warn-line:#d09154;
+    --tip-bg:#182619; --tip-line:#6aad7d;
+  }
+  h3{color:#d5d9dd} h4{color:#c3c9cf}
+  .goal,.partend{background:#1a1d21}
+}
+</style>
+</head>
+<body>
+<div class="book">
+
+<p class="chapno">第 24 章</p>
+<h1>MSVC の <code>/GL</code>・<code>/LTCG</code> との比較<br>— 何が同じで何が違うか</h1>
+<p class="lead">MSVC にも、翻訳単位をまたいで最適化する仕組みがあります。目的は同じでも、設計と使い勝手には違いがあります。既存プロジェクトの移行時に迷わないよう、対応関係を整理して第 4 部を締めくくります。</p>
+
+<div class="goal">
+<h2>この章のゴール</h2>
+<ul>
+<li>MSVC と Clang のオプション対応を把握する</li>
+<li>仕組みの違いを理解する</li>
+<li>移行時に注意すべき点を知る</li>
+<li>PGO との組み合わせ方の違いを知り、第 5 部への見通しを持つ</li>
+</ul>
+</div>
+
+<h2>24.1 対応表</h2>
+
+<table>
+<thead><tr><th>やりたいこと</th><th>MSVC</th><th>ClangCL</th></tr></thead>
+<tbody>
+<tr><td>翻訳単位をまたぐ最適化（コンパイル側）</td><td><code>/GL</code></td><td><code>/clang:-flto</code> または <code>/clang:-flto=thin</code></td></tr>
+<tr><td>同（リンク側）</td><td><code>/LTCG</code></td><td>（不要。<code>lld-link</code> が自動的に処理する）</td></tr>
+<tr><td>増分的な再リンク</td><td><code>/LTCG:incremental</code></td><td><code>/lldltocache:&lt;dir&gt;</code>（ThinLTO のみ）</td></tr>
+<tr><td>リンク時の最適化レベル</td><td>—</td><td><code>/opt:lldlto=&lt;0-3&gt;</code></td></tr>
+<tr><td>並列度</td><td>—</td><td><code>/opt:lldltojobs=&lt;N&gt;</code></td></tr>
+<tr><td>仮想関数のデバーチャライズ</td><td>（<code>/GL</code> に含まれる）</td><td><code>/clang:-fwhole-program-vtables</code></td></tr>
+<tr><td>ライブラリアン</td><td><code>lib.exe</code>（<code>/GL</code> の <code>.obj</code> も扱える）</td><td><code>llvm-lib</code></td></tr>
+</tbody>
+</table>
+
+<div class="box note">
+<span class="t"><code>/LTCG</code> にあたるリンカオプションは不要です</span>
+<p>MSVC では <code>/GL</code> でコンパイルした <code>.obj</code> をリンクするときに <code>/LTCG</code> を指定する必要があり、忘れると警告が出ます（リンカが自動で有効にして再リンクします）。</p>
+<p>lld-link は入力がビットコードかどうかを自分で判別するので、対応するオプションは要りません。「片方だけ設定して噛み合わない」という MSVC でありがちな事故は起きません。</p>
+</div>
+
+<h2>24.2 仕組みの違い</h2>
+
+<table>
+<thead><tr><th></th><th>MSVC <code>/GL</code> + <code>/LTCG</code></th><th>LLVM LTO</th></tr></thead>
+<tbody>
+<tr><td><code>.obj</code> の中身</td><td>独自の中間形式。COFF の体裁は保っている</td><td><strong>LLVM ビットコード。COFF ですらない</strong></td></tr>
+<tr><td>方式の選択</td><td>一種類</td><td>Full と Thin の二種類</td></tr>
+<tr><td>並列化</td><td>限定的</td><td>ThinLTO は本質的に並列</td></tr>
+<tr><td>キャッシュ</td><td><code>/LTCG:incremental</code></td><td>ThinLTO キャッシュ</td></tr>
+<tr><td>他のツールで中身を見る</td><td>困難</td><td><code>llvm-dis</code> でテキスト IR にできる（第 23 章）</td></tr>
+<tr><td>最適化の判断を観察する</td><td>限定的</td><td><code>/mllvm:-pass-remarks=</code>（第 20 章）</td></tr>
+</tbody>
+</table>
+
+<p>最後の二行が、第 1 章で「Clang を選ぶ理由は速さではなく見えること」と書いた内容そのものです。<code>/GL</code> でリンクした結果がなぜそうなったのかを追う手段は、MSVC では多くありません。</p>
+
+<div class="box warn">
+<span class="t">どちらが速いかは一般化できません</span>
+<p>「Clang の LTO は MSVC の <code>/LTCG</code> より優れている」といった主張を本書はしません。生成コードの速さはコードの性質と CPU に依存し、どちらが勝つかは題材によって変わります。第 20 章で見たとおり、そもそも<strong>差が測れないこともある</strong>のです。</p>
+<p>比較したいのであれば、第 15 章の手順で自分のコードを測ってください。それが唯一の答えです。</p>
+</div>
+
+<h2>24.3 既存プロジェクトを移行するとき</h2>
+
+<p>MSVC でビルドしているプロジェクトを ClangCL に移すときの手順です。</p>
+
+<h4>1. まず LTO 抜きで移行する</h4>
+<p>ツールセットを <code>LLVM (clang-cl)</code> に切り替え、<code>/GL</code> と <code>/LTCG</code> を<strong>外した状態</strong>でビルドが通り、テストが通ることを確認します。ここで問題が出れば、それは LTO とは無関係の移行の問題です。切り分けを混ぜないでください。</p>
+
+<h4>2. リンカを確認する</h4>
+<p>第 3 章のとおり、<code>UseLldLink</code> が <code>true</code> であること。MSVC 時代の設定で <code>link.exe</code> を強制していないこと。</p>
+
+<h4>3. <code>/GL</code> の代わりに <code>/clang:-flto=thin</code> を入れる</h4>
+<p>まず ThinLTO から試すのが安全です。ビルド時間とメモリの影響が小さいためです。</p>
+
+<h4>4. 検証する</h4>
+<p>テストを通し、第 4 章のチェックサムに相当する検証を行います。第 23 章のとおり、ここで結果が変われば未定義動作の疑いです。</p>
+
+<h4>5. 効果を測る</h4>
+<p>第 15 章の手順で。差が測れなければ、第 20 章の書き方で報告します。</p>
+
+<h3>24.3.1 読み替えの注意点</h3>
+
+<table>
+<thead><tr><th>MSVC での設定</th><th>ClangCL でどうするか</th></tr></thead>
+<tbody>
+<tr><td><code>/GL</code> をプロジェクト全体に</td><td><code>/clang:-flto=thin</code> を同じ範囲に</td></tr>
+<tr><td><code>/LTCG</code> をリンカに</td><td>不要。書いても害はないが意味もない</td></tr>
+<tr><td><code>/LTCG:incremental</code></td><td><code>/lldltocache:&lt;dir&gt;</code> に置き換える</td></tr>
+<tr><td><code>/GL</code> と <code>/ZI</code>（編集して続行）の併用</td><td>ClangCL では <code>/ZI</code> 相当が無い。<code>/Z7</code> か <code>/Zi</code> を使う（第 14 章）</td></tr>
+<tr><td><code>/LTCG</code> 使用時の <code>lib.exe</code></td><td><code>llvm-lib</code>（ClangCL の既定）</td></tr>
+</tbody>
+</table>
+
+<h2>24.4 PGO との組み合わせ方の違い</h2>
+
+<p>ここが第 5 部への橋渡しです。両者は PGO の作法がまったく異なります。</p>
+
+<table>
+<thead><tr><th></th><th>MSVC</th><th>ClangCL</th></tr></thead>
+<tbody>
+<tr><td>計装ビルド</td><td><code>/GENPROFILE</code>（リンカ側）</td><td><code>/clang:-fprofile-generate</code>（コンパイラ側）</td></tr>
+<tr><td>プロファイルの形式</td><td><code>.pgc</code> / <code>.pgd</code></td><td><code>.profraw</code> / <code>.profdata</code></td></tr>
+<tr><td>プロファイルの統合</td><td><code>pgomgr</code></td><td><code>llvm-profdata merge</code></td></tr>
+<tr><td>プロファイルの中身を読む</td><td>限定的</td><td><code>llvm-profdata show</code> / <code>llvm-cov</code></td></tr>
+<tr><td>最適化ビルド</td><td><code>/USEPROFILE</code></td><td><code>/clang:-fprofile-use=&lt;file&gt;</code></td></tr>
+<tr><td>LTO との関係</td><td><strong><code>/LTCG</code> が前提</strong></td><td>独立。LTO 無しでも PGO は使える</td></tr>
+<tr><td>文脈を考慮した二段階 PGO</td><td>—</td><td><code>-fcs-profile-generate</code>（CSPGO）</td></tr>
+</tbody>
+</table>
+
+<p>下から二行目が重要です。<strong>MSVC の PGO は <code>/LTCG</code> とセット</strong>で、リンク時最適化の枠組みの中で実現されています。Clang では PGO はコンパイラ側の機能で、LTO とは独立しています。LTO 無しで PGO だけ使うこともできますし、両方を組み合わせることもできます。</p>
+
+<div class="box tip">
+<span class="t">本書の構成が分かれている理由</span>
+<p>第 5 部（PGO）は、第 4 部（LTO）を読まなくても成立します。両者は独立した仕組みだからです。そのうえで、組み合わせたときに何が起きるかを第 38 章で扱います。第 18 章で触れた「PGO があると ThinLTO の取り込み精度が上がる」という話が、そこで回収されます。</p>
+</div>
+
+<h2>24.5 まとめ</h2>
+
+<ul>
+<li><code>/GL</code> ≒ <code>/clang:-flto</code>。<strong><code>/LTCG</code> に相当するリンカオプションは不要</strong></li>
+<li><code>/LTCG:incremental</code> ≒ ThinLTO キャッシュ（<code>/lldltocache</code>）</li>
+<li>LLVM の LTO は <code>.obj</code> がビットコードになる点、Full と Thin を選べる点、中身を観察できる点が異なる</li>
+<li>速さの優劣は一般化できない。自分のコードで測ること</li>
+<li>移行は「LTO 抜きで移行 → リンカ確認 → ThinLTO 追加 → 検証 → 測定」の順で</li>
+<li>PGO の作法は大きく異なる。<strong>MSVC は <code>/LTCG</code> が前提、Clang は LTO と独立</strong></li>
+</ul>
+
+<div class="partend">
+<h3>第 4 部を終えて</h3>
+<p>LTO について、次のことが分かりました。</p>
+<ul>
+<li><code>.obj</code> にビットコードを入れ、最適化をリンク時に行う仕組みであること（第 16 章）</li>
+<li>有効化は <code>/clang:-flto</code> か <code>/clang:-flto=thin</code>。<code>lld-link</code> が必須（第 17・19 章）</li>
+<li>Full は深く重い、Thin は速く並列化できる。規模が判断基準（第 18 章）</li>
+<li>LogLab では Full LTO が <code>parse_line</code> を含む 5 関数をインライン化し、<code>call</code> が半減した。<strong>ただし実行時間の差はノイズ床を超えなかった</strong>（第 20 章）</li>
+<li>デバーチャライズが効くのは実装が事実上一つのときだけ（第 21 章）</li>
+<li>静的ライブラリの壁は越えられるが、DLL の壁は越えられない（第 22 章）</li>
+<li>ビルド時間はリンクに移動し、ODR 違反は警告なしに通る（第 23 章）</li>
+</ul>
+<p>効果が時間に現れなかったことを、失敗と受け取る必要はありません。私たちは「LTO が何をしたか」を機械語とリマークの両方で確認し、「なぜ時間に出なかったか」まで説明できる状態にいます。第 1 章で掲げた目標は、この形です。</p>
+<p>そして第 20 章の考察で挙げた理由——ホットな処理が翻訳単位内に閉じており、呼び出しコストの削減幅が小さい——は、裏を返せば「LTO では手が届かない領域がある」ということでもあります。<strong>その領域に届く道具が、次の第 5 部にあります。</strong></p>
+</div>
+
+<p class="next"><strong>次章から第 5 部（PGO）です。</strong> LTO がコンパイラに与えたのは「より広い視野」でした。PGO が与えるのは「実際に何が起きたかという事実」です。LogLab の <code>Filter::accept()</code> はどこへ行っているのか、<code>handle_error</code> は本当に稀なのか——コンパイラがずっと推測でしかなかったことを、実測で教えます。</p>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第37章 CSPGO の効果検証 — Clang最適化入門</title>
+<style>
+:root{
+  --ink:#1b1d21; --sub:#5c626b; --line:#dfe3e8; --bg:#fff;
+  --code-bg:#f5f7f9; --code-ink:#22262b; --accent:#2f5d8a;
+  --note-bg:#eef4fa; --note-line:#4a80b5;
+  --warn-bg:#fdf4ec; --warn-line:#c07830;
+  --tip-bg:#eef7f1; --tip-line:#4a8c5f;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Meiryo",system-ui,sans-serif;
+  font-size:16px; line-height:1.9; text-align:justify;
+}
+.book{max-width:46rem; margin:0 auto; padding:3rem 1.25rem 6rem}
+.chapno{font-size:.82rem; letter-spacing:.18em; color:var(--accent); font-weight:700; margin:0 0 .4rem}
+h1{font-size:1.85rem; line-height:1.45; margin:0 0 .6rem; letter-spacing:.01em}
+.lead{color:var(--sub); font-size:1.02rem; margin:0 0 2.5rem; padding-bottom:2rem; border-bottom:2px solid var(--line)}
+h2{font-size:1.32rem; margin:3.2rem 0 1rem; padding-bottom:.45rem; border-bottom:1px solid var(--line); letter-spacing:.01em}
+h3{font-size:1.08rem; margin:2.2rem 0 .7rem; color:#2c3239}
+h4{font-size:.98rem; margin:1.6rem 0 .5rem; color:#3a4048}
+p{margin:0 0 1.1rem}
+ul,ol{margin:0 0 1.2rem; padding-left:1.5rem}
+li{margin:.4rem 0}
+code{
+  font-family:"Cascadia Mono","Consolas","SF Mono",monospace;
+  font-size:.88em; background:var(--code-bg); padding:.12em .38em;
+  border-radius:3px; border:1px solid var(--line); word-break:break-all;
+}
+pre{
+  background:var(--code-bg); color:var(--code-ink); border:1px solid var(--line);
+  border-left:3px solid var(--accent); border-radius:4px;
+  padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.6;
+}
+pre code{background:none; border:none; padding:0; font-size:.85rem; word-break:normal}
+.cap{font-size:.83rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+.box{border-radius:4px; padding:.95rem 1.15rem; margin:1.6rem 0; font-size:.95rem}
+.box p:last-child{margin-bottom:0}
+.box .t{font-weight:700; font-size:.86rem; letter-spacing:.06em; display:block; margin-bottom:.4rem}
+.note{background:var(--note-bg); border-left:4px solid var(--note-line)}
+.note .t{color:var(--note-line)}
+.warn{background:var(--warn-bg); border-left:4px solid var(--warn-line)}
+.warn .t{color:var(--warn-line)}
+.tip{background:var(--tip-bg); border-left:4px solid var(--tip-line)}
+.tip .t{color:var(--tip-line)}
+table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+th{background:var(--code-bg); font-weight:700}
+figure{margin:2rem 0}
+figure svg{display:block; width:100%; height:auto}
+figcaption{font-size:.83rem; color:var(--sub); text-align:center; margin-top:.7rem}
+.goal{border:1px solid var(--line); border-top:3px solid var(--accent); border-radius:4px; padding:1.1rem 1.3rem; margin:0 0 2.4rem; background:#fbfcfd}
+.goal h2{margin:0 0 .6rem; font-size:1rem; border:none; padding:0; letter-spacing:.06em}
+.goal ul{margin-bottom:0}
+.next{margin-top:3.5rem; padding-top:1.4rem; border-top:2px solid var(--line); color:var(--sub); font-size:.95rem}
+.next strong{color:var(--ink)}
+.chk{list-style:none; padding-left:0}
+.chk li{padding-left:1.7rem; position:relative}
+.chk li::before{content:"\2610"; position:absolute; left:.2rem; color:var(--accent); font-size:1.05rem}
+.path{font-size:.93rem; color:var(--sub); background:var(--code-bg); border:1px solid var(--line); border-radius:3px; padding:.5rem .8rem; margin:0 0 1.2rem}
+.partend{margin-top:3rem; padding:1.2rem 1.4rem; border:2px solid var(--accent); border-radius:5px; background:#fbfcfd}
+.partend h3{margin-top:0; color:var(--accent)}
+.real{border-left-color:var(--tip-line)}
+@media (prefers-color-scheme:dark){
+  :root{
+    --ink:#e6e8ea; --sub:#a2a9b2; --line:#333940; --bg:#16181b;
+    --code-bg:#1e2126; --code-ink:#dfe3e8; --accent:#7fb0dd;
+    --note-bg:#1b2530; --note-line:#5f96c9;
+    --warn-bg:#2b2118; --warn-line:#d09154;
+    --tip-bg:#182619; --tip-line:#6aad7d;
+  }
+  h3{color:#d5d9dd} h4{color:#c3c9cf}
+  .goal,.partend{background:#1a1d21}
+}
+</style>
+</head>
+<body>
+<div class="book">
+
+<p class="chapno">第 37 章</p>
+<h1>CSPGO の効果検証<br>— 追加コストに見合うかを判断する</h1>
+<p class="lead">手順を五段階に増やし、トレーニングを二回流しました。その見返りを測ります。LogLab での結果は明快でした——<strong>コンパイラの判断は一つも変わりませんでした。</strong></p>
+
+<div class="goal">
+<h2>この章のゴール</h2>
+<ul>
+<li>CSPGO の効果を、判断と時間の両面から検証する</li>
+<li>効果が無かった理由を説明できるようになる</li>
+<li>CSPGO を導入すべき条件を整理する</li>
+<li>追加コストを見積もる</li>
+</ul>
+</div>
+
+<h2>37.1 コンパイラの判断を比べる</h2>
+
+<p>第 32 章と同じ方法で、最適化レコードを比較します。基準ビルド、PGO、CSPGO の三つです。</p>
+
+<table>
+<thead><tr><th>レコード</th><th>基準（<code>/O2</code>）</th><th>PGO</th><th>CSPGO</th></tr></thead>
+<tbody>
+<tr><td><code>inline Inlined</code></td><td>639</td><td>614</td><td><strong>614</strong></td></tr>
+<tr><td><code>inline TooCostly</code></td><td>31</td><td>93</td><td><strong>93</strong></td></tr>
+<tr><td><code>inline NoDefinition</code></td><td>59</td><td>204</td><td><strong>204</strong></td></tr>
+</tbody>
+</table>
+
+<p>しきい値の分布も見てみます。</p>
+
+<table>
+<thead><tr><th>threshold</th><th>基準</th><th>PGO</th><th>CSPGO</th></tr></thead>
+<tbody>
+<tr><td>45</td><td>15</td><td>28</td><td>28</td></tr>
+<tr><td>75</td><td>0</td><td>172</td><td>172</td></tr>
+<tr><td>112</td><td>0</td><td>416</td><td>416</td></tr>
+<tr><td>187</td><td>0</td><td>12</td><td>12</td></tr>
+<tr><td>225</td><td>173</td><td>1</td><td>1</td></tr>
+<tr><td>325</td><td>19</td><td>31</td><td>31</td></tr>
+<tr><td>337</td><td>414</td><td>0</td><td>0</td></tr>
+<tr><td>487</td><td>47</td><td>46</td><td>46</td></tr>
+</tbody>
+</table>
+<p class="cap">実測。PGO と CSPGO の列が完全に一致している</p>
+
+<p><strong>すべての数字が一致しました。</strong> 一つの違いもありません。</p>
+
+<h2>37.2 実行時間</h2>
+
+<p>念のため測りましたが、結果は予想どおりです。</p>
+
+<table>
+<thead><tr><th>ビルド</th><th>最小値（基準比）</th></tr></thead>
+<tbody>
+<tr><td>基準（空試験）</td><td>&minus;0.02%（ノイズ床）</td></tr>
+<tr><td>PGO</td><td>&minus;0.79%</td></tr>
+<tr><td><strong>CSPGO</strong></td><td><strong>&minus;1.43%</strong></td></tr>
+</tbody>
+</table>
+<p class="cap">環境 B での実測。n=15、交互実行。第 31 章のとおり、この環境では PGO 自体の効果も現れない</p>
+
+<p>CSPGO のほうがわずかに速く見えますが、<strong>生成されたコードが同一である以上、これは測定のばらつきです</strong>。判断が完全に一致しているのですから、差が出るはずがありません。</p>
+
+<div class="box tip">
+<span class="t">この一致自体が、測定の妥当性を裏付けています</span>
+<p>「同じコードを別のバイナリとして測ると 1.4% ほど違って見えることがある」——これは第 15 章で測ったノイズ床の話そのものです。判断が同一だと分かっているケースで実際にそうなったことは、<strong>本書の計測手順が正しく機能している</strong>ことの確認にもなっています。</p>
+<p>裏を返せば、1.4% 程度の差を「効果があった」と報告してはいけない、ということでもあります。</p>
+</div>
+
+<h2>37.3 なぜ効かなかったのか</h2>
+
+<p>第 35 章 35.6 節で予告したとおりですが、改めて整理します。</p>
+
+<h4>1. 呼び出し構造が浅い</h4>
+<p>LogLab の呼び出しは <code>main</code> → <code>parse_line</code> / <code>accept</code> / <code>add</code> という 2 階層程度です。「同じ関数が違う経路から呼ばれる」という状況がほとんどありません。</p>
+
+<h4>2. 同じ関数が、性質の違う文脈から呼ばれていない</h4>
+<p>唯一の候補だった <code>mix()</code> は、<code>Stats::add</code> と <code>handle_error</code> の両方から呼ばれます。しかし <code>mix()</code> は分岐を持たない 3 行の関数です。<strong>文脈を区別しても、区別した先で変えられる判断がありません。</strong></p>
+
+<h4>3. フラグ引数のような分岐を持つ共通関数が無い</h4>
+<p>第 35 章の <code>format(r, verbose)</code> のような、呼び出し元によって挙動が切り替わる関数を LogLab は持っていません。これは設計時の意図ではなく、単にそういうコードだった、ということです。</p>
+
+<div class="box note">
+<span class="t">題材の限界を認める</span>
+<p>第 4 章で LogLab を設計したとき、私たちは「LTO が効く条件」と「PGO が効く条件」は意識しました。しかし「CSPGO が効く条件」は入れませんでした。</p>
+<p>入れることもできたはずです。フラグ引数を持つ共通関数を用意し、二種類の呼び出し元から呼べばよい。ただしそれは、CSPGO の効果を見せるためだけに題材を歪めることになります。<strong>本書は、素直に書いたコードに対して各手法がどう効くかを見る立場を取りました。</strong> その結果が「CSPGO は効かなかった」です。</p>
+</div>
+
+<h2>37.4 CSPGO を導入すべき条件</h2>
+
+<p>効かなかった理由の裏返しが、そのまま条件になります。</p>
+
+<table>
+<thead><tr><th>条件</th><th>LogLab</th></tr></thead>
+<tbody>
+<tr><td>共通のユーティリティ関数が、性質の違う複数の場所から呼ばれる</td><td>該当せず</td></tr>
+<tr><td>その関数が分岐を持つ（フラグ引数、エラー処理、場合分け）</td><td>該当せず</td></tr>
+<tr><td>呼び出し元ごとに分岐の偏りが大きく違う</td><td>該当せず</td></tr>
+<tr><td>その関数がインライン展開される程度に小さい</td><td>一部該当</td></tr>
+<tr><td>呼び出しの階層が深い</td><td>該当せず</td></tr>
+<tr><td>すでに PGO で明確な効果が出ている</td><td>環境 A では該当</td></tr>
+</tbody>
+</table>
+
+<p>最後の行が実務上は重要です。<strong>PGO で効果が出ていないコードに CSPGO を足しても、まず効きません。</strong> CSPGO は PGO の精度を上げる技術であって、PGO が届かない領域に届く技術ではないからです。</p>
+
+<h2>37.5 追加コストの見積もり</h2>
+
+<table>
+<thead><tr><th>項目</th><th>PGO</th><th>CSPGO</th></tr></thead>
+<tbody>
+<tr><td>ビルド回数</td><td>2 回（計装・最適化）</td><td><strong>3 回</strong></td></tr>
+<tr><td>トレーニング実行</td><td>1 セット</td><td><strong>2 セット</strong></td></tr>
+<tr><td>マージ</td><td>1 回</td><td>2 回</td></tr>
+<tr><td>管理するプロファイル</td><td>1 つ</td><td>2 つ（中間と最終）</td></tr>
+<tr><td>陳腐化の管理（第 34 章）</td><td>1 つぶん</td><td>2 つぶん</td></tr>
+<tr><td>失敗しうる箇所</td><td>—</td><td>増える（マージの入力の取り違えなど）</td></tr>
+</tbody>
+</table>
+
+<p>おおむね「PGO の 1.5 倍から 2 倍の手間」と見ておけば大きく外しません。CI に組み込む場合、この差は毎日効いてきます。</p>
+
+<h2>37.6 判断の指針</h2>
+
+<div class="box tip">
+<span class="t">本書の推奨</span>
+<p><strong>まず PGO を導入し、効果を確認し、運用が回るようになってから CSPGO を検討してください。</strong></p>
+<p>そして検討するときは、いきなり本番のパイプラインに入れるのではなく、次の順で確かめます。</p>
+<ol>
+<li>CSPGO ビルドを一度だけ手で作る</li>
+<li><strong>最適化レコードを PGO 版と比較する</strong>（本章の方法）</li>
+<li>判断に違いがあれば、実行時間を測る</li>
+<li>違いが無ければ、そこで打ち切る</li>
+</ol>
+<p>2 番で判断が変わっていなければ、時間を測る意味はありません。<strong>数分で結論が出ます。</strong></p>
+</div>
+
+<h2>37.7 ハンズオン</h2>
+
+<ol>
+<li>第 36 章で作った <code>combined.profdata</code> で最適化レコードを生成する</li>
+<li>第 32 章の方法で PGO 版のレコードと比較する</li>
+<li><code>Inlined</code> / <code>TooCostly</code> の件数が一致することを確認する</li>
+<li>threshold の分布も一致することを確認する</li>
+<li>（判断が変わっていないので）実行時間の測定は省略してよい、と判断できることを確認する</li>
+</ol>
+
+<h2>37.8 まとめ</h2>
+
+<ul>
+<li>LogLab において、CSPGO は<strong>コンパイラの判断を一つも変えなかった</strong>。レコードの件数も threshold の分布も PGO と完全に一致</li>
+<li>実行時間の差（&minus;1.43%）は測定のばらつき。生成コードが同一なので差が出るはずがない</li>
+<li>効かなかった理由は、呼び出し構造が浅く、<strong>性質の違う文脈から呼ばれる分岐付きの共通関数が無い</strong>こと</li>
+<li>CSPGO は PGO の<strong>精度を上げる</strong>技術。PGO が効いていないコードでは効かない</li>
+<li>コストは PGO の 1.5〜2 倍（ビルド 3 回、トレーニング 2 セット、プロファイル 2 つの管理）</li>
+<li>判断は<strong>レコードの比較で数分で付く</strong>。時間を測る前にそこで見切る</li>
+</ul>
+
+<div class="partend">
+<h3>第 6 部を終えて</h3>
+<p>第 6 部は、本書で唯一「効果が確認できなかった」部になりました。しかし、得られたものはあります。</p>
+<ul>
+<li>プロファイルが<strong>呼び出し文脈を区別しない</strong>という構造的な性質を理解した（第 35 章）</li>
+<li>その欠落を埋める仕組みと、五段階の手順を身につけた（第 36 章）</li>
+<li><strong>効くかどうかを数分で判定する方法</strong>を得た（第 37 章）</li>
+</ul>
+<p>最後の項目が実務的にはいちばん価値があります。CSPGO を「試してみないと分からない」ものから、「レコードを比べれば分かる」ものに変えられたからです。</p>
+<p>そして本書全体を通して、同じことが繰り返し起きました。第 21 章のデバーチャライズ、第 20 章の LTO、そして本章の CSPGO——<strong>効かなかった結果が、適用条件を教えてくれた</strong>のです。</p>
+</div>
+
+<p class="next"><strong>次章から第 7 部です。</strong> ここまで LTO、PGO、CSPGO を個別に見てきました。組み合わせるとどうなるのか。適用の順序に決まりはあるのか。そして——第 18 章で予告した「PGO があると ThinLTO の取り込み精度が上がる」という話を、実測で回収します。</p>
+
+</div>
+</body>
+</html>

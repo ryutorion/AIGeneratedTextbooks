@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第19章 ThinLTO を有効にする — Clang最適化入門</title>
+<style>
+:root{
+  --ink:#1b1d21; --sub:#5c626b; --line:#dfe3e8; --bg:#fff;
+  --code-bg:#f5f7f9; --code-ink:#22262b; --accent:#2f5d8a;
+  --note-bg:#eef4fa; --note-line:#4a80b5;
+  --warn-bg:#fdf4ec; --warn-line:#c07830;
+  --tip-bg:#eef7f1; --tip-line:#4a8c5f;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Meiryo",system-ui,sans-serif;
+  font-size:16px; line-height:1.9; text-align:justify;
+}
+.book{max-width:46rem; margin:0 auto; padding:3rem 1.25rem 6rem}
+.chapno{font-size:.82rem; letter-spacing:.18em; color:var(--accent); font-weight:700; margin:0 0 .4rem}
+h1{font-size:1.85rem; line-height:1.45; margin:0 0 .6rem; letter-spacing:.01em}
+.lead{color:var(--sub); font-size:1.02rem; margin:0 0 2.5rem; padding-bottom:2rem; border-bottom:2px solid var(--line)}
+h2{font-size:1.32rem; margin:3.2rem 0 1rem; padding-bottom:.45rem; border-bottom:1px solid var(--line); letter-spacing:.01em}
+h3{font-size:1.08rem; margin:2.2rem 0 .7rem; color:#2c3239}
+h4{font-size:.98rem; margin:1.6rem 0 .5rem; color:#3a4048}
+p{margin:0 0 1.1rem}
+ul,ol{margin:0 0 1.2rem; padding-left:1.5rem}
+li{margin:.4rem 0}
+code{
+  font-family:"Cascadia Mono","Consolas","SF Mono",monospace;
+  font-size:.88em; background:var(--code-bg); padding:.12em .38em;
+  border-radius:3px; border:1px solid var(--line); word-break:break-all;
+}
+pre{
+  background:var(--code-bg); color:var(--code-ink); border:1px solid var(--line);
+  border-left:3px solid var(--accent); border-radius:4px;
+  padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.6;
+}
+pre code{background:none; border:none; padding:0; font-size:.85rem; word-break:normal}
+.cap{font-size:.83rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+.box{border-radius:4px; padding:.95rem 1.15rem; margin:1.6rem 0; font-size:.95rem}
+.box p:last-child{margin-bottom:0}
+.box .t{font-weight:700; font-size:.86rem; letter-spacing:.06em; display:block; margin-bottom:.4rem}
+.note{background:var(--note-bg); border-left:4px solid var(--note-line)}
+.note .t{color:var(--note-line)}
+.warn{background:var(--warn-bg); border-left:4px solid var(--warn-line)}
+.warn .t{color:var(--warn-line)}
+.tip{background:var(--tip-bg); border-left:4px solid var(--tip-line)}
+.tip .t{color:var(--tip-line)}
+table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+th{background:var(--code-bg); font-weight:700}
+figure{margin:2rem 0}
+figure svg{display:block; width:100%; height:auto}
+figcaption{font-size:.83rem; color:var(--sub); text-align:center; margin-top:.7rem}
+.goal{border:1px solid var(--line); border-top:3px solid var(--accent); border-radius:4px; padding:1.1rem 1.3rem; margin:0 0 2.4rem; background:#fbfcfd}
+.goal h2{margin:0 0 .6rem; font-size:1rem; border:none; padding:0; letter-spacing:.06em}
+.goal ul{margin-bottom:0}
+.next{margin-top:3.5rem; padding-top:1.4rem; border-top:2px solid var(--line); color:var(--sub); font-size:.95rem}
+.next strong{color:var(--ink)}
+.chk{list-style:none; padding-left:0}
+.chk li{padding-left:1.7rem; position:relative}
+.chk li::before{content:"\2610"; position:absolute; left:.2rem; color:var(--accent); font-size:1.05rem}
+.path{font-size:.93rem; color:var(--sub); background:var(--code-bg); border:1px solid var(--line); border-radius:3px; padding:.5rem .8rem; margin:0 0 1.2rem}
+.partend{margin-top:3rem; padding:1.2rem 1.4rem; border:2px solid var(--accent); border-radius:5px; background:#fbfcfd}
+.partend h3{margin-top:0; color:var(--accent)}
+.real{border-left-color:var(--tip-line)}
+@media (prefers-color-scheme:dark){
+  :root{
+    --ink:#e6e8ea; --sub:#a2a9b2; --line:#333940; --bg:#16181b;
+    --code-bg:#1e2126; --code-ink:#dfe3e8; --accent:#7fb0dd;
+    --note-bg:#1b2530; --note-line:#5f96c9;
+    --warn-bg:#2b2118; --warn-line:#d09154;
+    --tip-bg:#182619; --tip-line:#6aad7d;
+  }
+  h3{color:#d5d9dd} h4{color:#c3c9cf}
+  .goal,.partend{background:#1a1d21}
+}
+</style>
+</head>
+<body>
+<div class="book">
+
+<p class="chapno">第 19 章</p>
+<h1>ThinLTO を有効にする<br>— 並列度とキャッシュ</h1>
+<p class="lead">オプションは一文字違うだけです。しかし ThinLTO には Full LTO に無い実用的な設定がふたつあります。並列度とキャッシュ。特にキャッシュは、日々のビルドの体感を大きく変えます。</p>
+
+<div class="goal">
+<h2>この章のゴール</h2>
+<ul>
+<li>LogLab で ThinLTO を有効にする</li>
+<li>リンクの並列度を制御する</li>
+<li>ThinLTO キャッシュを設定し、その効果を測る</li>
+<li>MSBuild の増分ビルドとの付き合い方を決める</li>
+</ul>
+</div>
+
+<h2>19.1 有効にする</h2>
+
+<p class="path"><strong>構成プロパティ &gt; C/C++ &gt; コマンド ライン &gt; 追加のオプション</strong></p>
+
+<pre><code>/clang:-flto=thin</code></pre>
+
+<p>前章までの <code>/clang:-flto</code> と置き換えます。両方を書いてはいけません（後から来たほうが勝ちますが、意図が読めない設定になります）。</p>
+
+<p>確認手順は第 17 章と同じです。<code>.obj</code> がビットコードになり、<code>lld-link</code> が使われ、checksum が変わらないこと。</p>
+
+<h2>19.2 並列度</h2>
+
+<p>ThinLTO のバックエンド処理はモジュール単位で独立しているので、並列に走らせられます。</p>
+
+<p class="path"><strong>構成プロパティ &gt; リンカー &gt; コマンド ライン &gt; 追加のオプション</strong></p>
+
+<pre><code>/opt:lldltojobs=8</code></pre>
+
+<table>
+<thead><tr><th>値</th><th>意味</th></tr></thead>
+<tbody>
+<tr><td>指定なし</td><td>利用可能なコア数に応じて自動決定（通常はこれでよい）</td></tr>
+<tr><td><code>&lt;N&gt;</code></td><td>N 並列で処理する</td></tr>
+<tr><td><code>1</code></td><td>直列。切り分けやデバッグ時に使う</td></tr>
+</tbody>
+</table>
+
+<p>実測では、2 コアのマシンで次の差が出ました。</p>
+
+<pre><code>/opt:lldltojobs=1  : 0.35 秒
+/opt:lldltojobs=4  : 0.24 秒</code></pre>
+<p class="cap">実測の一例。LogLab は 5 翻訳単位なので絶対値は小さいですが、比率は規模に応じて効いてきます</p>
+
+<div class="box note">
+<span class="t">MSBuild の並列ビルドと競合します</span>
+<p>Visual Studio は複数のプロジェクトを並列にビルドします。そのそれぞれのリンクが <code>lldltojobs</code> ぶんのスレッドを立てると、マシンのコア数を大きく超える並列度になり、かえって遅くなります。プロジェクトが多いソリューションでは、<code>lldltojobs</code> を明示的に絞るほうが速いことがあります。</p>
+</div>
+
+<h2>19.3 ThinLTO キャッシュ</h2>
+
+<p>ここが ThinLTO の実用的な目玉です。</p>
+
+<p>バックエンド処理はモジュール単位なので、「そのモジュールの IR と、取り込んだものが前回と同じなら、前回の結果を再利用できる」という理屈が成り立ちます。これをキャッシュとして持つのが <code>/lldltocache</code> です。</p>
+
+<p class="path"><strong>リンカー &gt; コマンド ライン &gt; 追加のオプション</strong></p>
+
+<pre><code>/lldltocache:$(ProjectDir)ltocache</code></pre>
+
+<p>指定したフォルダに、次のようなファイルが作られます。</p>
+
+<pre><code>ltocache\
+  llvmcache-7C1862C1EBF181A5DA659DFA79FE79EF2015A470
+  llvmcache-AACCDCDD2F05EB04EE34F38E66F4358EBA05A2FB
+  llvmcache.timestamp</code></pre>
+
+<h3>19.3.1 効果</h3>
+
+<p>同じ内容で 3 回続けてリンクしたときの実測です。</p>
+
+<table>
+<thead><tr><th></th><th>キャッシュなし</th><th>キャッシュあり</th></tr></thead>
+<tbody>
+<tr><td>1 回目</td><td>0.21 秒</td><td>0.22 秒（キャッシュ作成）</td></tr>
+<tr><td>2 回目</td><td>0.20 秒</td><td><strong>0.05 秒</strong></td></tr>
+<tr><td>3 回目</td><td>—</td><td><strong>0.05 秒</strong></td></tr>
+</tbody>
+</table>
+<p class="cap">実測の一例</p>
+
+<p>初回はキャッシュを作るぶんわずかに遅く、2 回目以降は<strong>約 4 分の 1</strong> になりました。1 ファイルだけ直して再リンクする、という日常の作業では、変更していないモジュールがすべてキャッシュに当たるので効果はさらに大きくなります。</p>
+
+<div class="box tip">
+<span class="t">キャッシュの置き場所</span>
+<p>プロジェクトの中間ディレクトリ（<code>x64\Release\</code>）に置くと、リビルドで消えてしまいます。<code>$(ProjectDir)</code> 直下など、クリーンの対象にならない場所を選んでください。バージョン管理には入れないよう <code>.gitignore</code> への追加も忘れずに。</p>
+</div>
+
+<h3>19.3.2 キャッシュの掃除</h3>
+
+<p>放っておくとキャッシュは際限なく増えます。刈り込みの方針を指定できます。</p>
+
+<pre><code>/lldltocachepolicy:cache_size=10%:cache_size_bytes=2g:prune_after=168h:prune_interval=1h</code></pre>
+
+<table>
+<thead><tr><th>キー</th><th>意味</th></tr></thead>
+<tbody>
+<tr><td><code>cache_size=&lt;N&gt;%</code></td><td>ディスク空き容量に対する上限の割合</td></tr>
+<tr><td><code>cache_size_bytes=&lt;N&gt;</code></td><td>バイト数での上限（<code>m</code> / <code>g</code> が使える）</td></tr>
+<tr><td><code>cache_size_files=&lt;N&gt;</code></td><td>ファイル数での上限</td></tr>
+<tr><td><code>prune_after=&lt;N&gt;h</code></td><td>この時間アクセスされていない項目を削除する</td></tr>
+<tr><td><code>prune_interval=&lt;N&gt;h</code></td><td>刈り込みを行う間隔</td></tr>
+</tbody>
+</table>
+
+<p>キーを間違えると、次のようにきちんと教えてくれます。</p>
+
+<pre><code>lld-link: error: /lldltocachepolicy: invalid cache policy: zzz=1: Unknown key: 'zzz'</code></pre>
+
+<h2>19.4 増分ビルドとの関係</h2>
+
+<p>ここは考え方を整理しておく必要があります。</p>
+
+<table>
+<thead><tr><th></th><th>通常のビルド</th><th>LTO のビルド</th></tr></thead>
+<tbody>
+<tr><td>1 ファイル直したとき</td><td>その <code>.obj</code> だけ作り直し、リンクは軽い</td><td>その <code>.obj</code> だけ作り直すが、<strong>リンクで全体を再最適化する</strong></td></tr>
+<tr><td>リンクの重さ</td><td>ほぼ一定</td><td>プロジェクト全体の規模に比例</td></tr>
+</tbody>
+</table>
+
+<p>つまり LTO を有効にすると、<strong>「1 行直してビルド」のコストが跳ね上がります</strong>。ThinLTO キャッシュは、まさにこの問題への回答です。変更していないモジュールのバックエンド処理をまるごと省けるので、再リンクが「変更したモジュールぶん＋最終リンク」に近づきます。</p>
+
+<div class="box warn">
+<span class="t">開発中の構成に LTO を入れるべきか</span>
+<p>本書は学習が目的なので Release 構成に入れて進めますが、実務では次の使い分けが一般的です。</p>
+<ul>
+<li><strong>日常の開発</strong>：LTO なし。ビルドの速さを優先する</li>
+<li><strong>性能検証・リリース</strong>：ThinLTO（＋キャッシュ）または Full LTO</li>
+</ul>
+<p>MSBuild では、Release とは別に「Release-LTO」のような構成を追加するのが素直です。手順は第 39 章で扱います。</p>
+</div>
+
+<h2>19.5 設定のまとめ</h2>
+
+<p>ここまでの設定を一箇所に整理します。</p>
+
+<table>
+<thead><tr><th>場所</th><th>設定</th></tr></thead>
+<tbody>
+<tr><td>C/C++ &gt; 追加のオプション</td><td><code>/clang:-flto=thin</code></td></tr>
+<tr><td>リンカー &gt; 追加のオプション</td><td><code>/lldltocache:$(ProjectDir)ltocache</code></td></tr>
+<tr><td>リンカー &gt; 追加のオプション</td><td><code>/lldltocachepolicy:cache_size_bytes=2g:prune_after=168h</code></td></tr>
+<tr><td>（必要なら）リンカー</td><td><code>/opt:lldltojobs=&lt;N&gt;</code></td></tr>
+<tr><td>C/C++ &gt; 最適化</td><td><code>/O2</code>（変更しない）</td></tr>
+<tr><td>リンカー &gt; デバッグ</td><td><code>/DEBUG</code>（変更しない）</td></tr>
+</tbody>
+</table>
+
+<h2>19.6 ハンズオン</h2>
+
+<ol>
+<li>追加のオプションを <code>/clang:-flto=thin</code> に変えてリビルドする</li>
+<li>checksum が <code>0x0e8685105a08f105</code> のままであることを確認する</li>
+<li>できた <code>.exe</code> と <code>.pdb</code> を <code>builds\lto_thin\</code> に退避する</li>
+<li><code>/lldltocache</code> を設定し、続けて 2 回リビルドしてリンク時間を比べる</li>
+<li>キャッシュフォルダの中身を見る（<code>llvmcache-*</code> が並んでいるはず）</li>
+<li><code>tokenizer.cpp</code> にコメントを 1 行足してリビルドし、キャッシュがどれだけ効くかを見る</li>
+</ol>
+
+<div class="box tip">
+<span class="t">リンク時間の測り方</span>
+<p>MSBuild の出力詳細度を「標準」以上にすると、各タスクの所要時間が出ます。あるいは単純に、ビルド開始から完了までの表示時間を見るだけでも比較には十分です。厳密さより、キャッシュの有無で桁が変わることを体感するのが目的です。</p>
+</div>
+
+<h2>19.7 まとめ</h2>
+
+<ul>
+<li>ThinLTO の有効化は <code>/clang:-flto=thin</code>。Full LTO の指定とは置き換える</li>
+<li>並列度は <code>/opt:lldltojobs=&lt;N&gt;</code>。通常は自動でよいが、並列ビルドと競合するときは絞る</li>
+<li><strong><code>/lldltocache:&lt;dir&gt;</code> でキャッシュを有効にすると、再リンクが実測で約 4 分の 1 になった</strong></li>
+<li>キャッシュはクリーンで消えない場所に置き、<code>/lldltocachepolicy</code> で刈り込みを設定する</li>
+<li>LTO は「1 行直してビルド」のコストを上げる。ThinLTO キャッシュはその緩和策である</li>
+<li>実務では日常の開発と性能検証で構成を分けるのが現実的</li>
+</ul>
+
+<p class="next"><strong>次章は第 4 部の山場です。</strong> LTO を有効にして、実際に何が変わったのか。第 8 章で数えた <code>call</code>、第 10 章で集計したレコード、第 15 章で決めた計測手順——第 2 部・第 3 部で用意したすべての道具を使って評価します。そして結果は、必ずしも気持ちのよいものではありません。</p>
+
+</div>
+</body>
+</html>

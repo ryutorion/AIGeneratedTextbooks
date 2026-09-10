@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第41章 CI/CD への組み込み — Clang最適化入門</title>
+<style>
+:root{
+  --ink:#1b1d21; --sub:#5c626b; --line:#dfe3e8; --bg:#fff;
+  --code-bg:#f5f7f9; --code-ink:#22262b; --accent:#2f5d8a;
+  --note-bg:#eef4fa; --note-line:#4a80b5;
+  --warn-bg:#fdf4ec; --warn-line:#c07830;
+  --tip-bg:#eef7f1; --tip-line:#4a8c5f;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Meiryo",system-ui,sans-serif;
+  font-size:16px; line-height:1.9; text-align:justify;
+}
+.book{max-width:46rem; margin:0 auto; padding:3rem 1.25rem 6rem}
+.chapno{font-size:.82rem; letter-spacing:.18em; color:var(--accent); font-weight:700; margin:0 0 .4rem}
+h1{font-size:1.85rem; line-height:1.45; margin:0 0 .6rem; letter-spacing:.01em}
+.lead{color:var(--sub); font-size:1.02rem; margin:0 0 2.5rem; padding-bottom:2rem; border-bottom:2px solid var(--line)}
+h2{font-size:1.32rem; margin:3.2rem 0 1rem; padding-bottom:.45rem; border-bottom:1px solid var(--line); letter-spacing:.01em}
+h3{font-size:1.08rem; margin:2.2rem 0 .7rem; color:#2c3239}
+h4{font-size:.98rem; margin:1.6rem 0 .5rem; color:#3a4048}
+p{margin:0 0 1.1rem}
+ul,ol{margin:0 0 1.2rem; padding-left:1.5rem}
+li{margin:.4rem 0}
+code{
+  font-family:"Cascadia Mono","Consolas","SF Mono",monospace;
+  font-size:.88em; background:var(--code-bg); padding:.12em .38em;
+  border-radius:3px; border:1px solid var(--line); word-break:break-all;
+}
+pre{
+  background:var(--code-bg); color:var(--code-ink); border:1px solid var(--line);
+  border-left:3px solid var(--accent); border-radius:4px;
+  padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.6;
+}
+pre code{background:none; border:none; padding:0; font-size:.85rem; word-break:normal}
+.cap{font-size:.83rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+.box{border-radius:4px; padding:.95rem 1.15rem; margin:1.6rem 0; font-size:.95rem}
+.box p:last-child{margin-bottom:0}
+.box .t{font-weight:700; font-size:.86rem; letter-spacing:.06em; display:block; margin-bottom:.4rem}
+.note{background:var(--note-bg); border-left:4px solid var(--note-line)}
+.note .t{color:var(--note-line)}
+.warn{background:var(--warn-bg); border-left:4px solid var(--warn-line)}
+.warn .t{color:var(--warn-line)}
+.tip{background:var(--tip-bg); border-left:4px solid var(--tip-line)}
+.tip .t{color:var(--tip-line)}
+table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+th{background:var(--code-bg); font-weight:700}
+figure{margin:2rem 0}
+figure svg{display:block; width:100%; height:auto}
+figcaption{font-size:.83rem; color:var(--sub); text-align:center; margin-top:.7rem}
+.goal{border:1px solid var(--line); border-top:3px solid var(--accent); border-radius:4px; padding:1.1rem 1.3rem; margin:0 0 2.4rem; background:#fbfcfd}
+.goal h2{margin:0 0 .6rem; font-size:1rem; border:none; padding:0; letter-spacing:.06em}
+.goal ul{margin-bottom:0}
+.next{margin-top:3.5rem; padding-top:1.4rem; border-top:2px solid var(--line); color:var(--sub); font-size:.95rem}
+.next strong{color:var(--ink)}
+.chk{list-style:none; padding-left:0}
+.chk li{padding-left:1.7rem; position:relative}
+.chk li::before{content:"\2610"; position:absolute; left:.2rem; color:var(--accent); font-size:1.05rem}
+.path{font-size:.93rem; color:var(--sub); background:var(--code-bg); border:1px solid var(--line); border-radius:3px; padding:.5rem .8rem; margin:0 0 1.2rem}
+.partend{margin-top:3rem; padding:1.2rem 1.4rem; border:2px solid var(--accent); border-radius:5px; background:#fbfcfd}
+.partend h3{margin-top:0; color:var(--accent)}
+.real{border-left-color:var(--tip-line)}
+@media (prefers-color-scheme:dark){
+  :root{
+    --ink:#e6e8ea; --sub:#a2a9b2; --line:#333940; --bg:#16181b;
+    --code-bg:#1e2126; --code-ink:#dfe3e8; --accent:#7fb0dd;
+    --note-bg:#1b2530; --note-line:#5f96c9;
+    --warn-bg:#2b2118; --warn-line:#d09154;
+    --tip-bg:#182619; --tip-line:#6aad7d;
+  }
+  h3{color:#d5d9dd} h4{color:#c3c9cf}
+  .goal,.partend{background:#1a1d21}
+}
+</style>
+</head>
+<body>
+<div class="book">
+
+<p class="chapno">第 41 章</p>
+<h1>CI/CD への組み込み<br>— プロファイルの保管・再現性・フォールバック</h1>
+<p class="lead">手元で回るようになった手順を、自動化された仕組みに載せます。毎回トレーニングを回すのか、プロファイルを保管するのか。そして第 31 章で学んだ「効果は環境に依存する」という教訓を、どう設計に反映するか。</p>
+
+<div class="goal">
+<h2>この章のゴール</h2>
+<ul>
+<li>CI で何を毎回やり、何を定期的にやるかを決める</li>
+<li>プロファイルの保管方法を選ぶ</li>
+<li>陳腐化を自動で検出する</li>
+<li>性能の回帰を検出する仕組みを作る</li>
+</ul>
+</div>
+
+<h2>41.1 二つのパイプライン</h2>
+
+<p>PGO を CI に載せるとき、すべてを毎回やろうとすると破綻します。計装ビルド（1.9 倍遅い）でトレーニングを流し、さらにもう一度ビルドする——これを全コミットでやるのは現実的ではありません。</p>
+
+<p>役割を分けます。</p>
+
+<table>
+<thead><tr><th></th><th>通常のパイプライン</th><th>プロファイル更新パイプライン</th></tr></thead>
+<tbody>
+<tr><td>頻度</td><td>コミットごと</td><td>週次、あるいはリリース前</td></tr>
+<tr><td>やること</td><td>保管してあるプロファイルでビルド</td><td>計装 → トレーニング → マージ → 保管</td></tr>
+<tr><td>所要時間</td><td>通常のビルド ＋ わずか</td><td>長い</td></tr>
+<tr><td>失敗させる条件</td><td>陳腐化が閾値を超えた／プロファイルが無い</td><td>トレーニングが失敗した</td></tr>
+</tbody>
+</table>
+
+<figure>
+<svg viewBox="0 0 720 300" role="img" aria-label="CI の二つのパイプライン。通常ビルドと定期的なプロファイル更新">
+  <defs>
+    <marker id="a41" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
+      <path d="M0,0 L9,4.5 L0,9 z" fill="#5c626b"/>
+    </marker>
+  </defs>
+
+  <rect x="20" y="30" width="680" height="110" rx="5" fill="#eef4fa" stroke="#4a80b5"/>
+  <text x="38" y="54" font-size="12" font-weight="700" fill="#4a80b5" font-family="sans-serif">通常のパイプライン（コミットごと）</text>
+  <rect x="40" y="66" width="120" height="52" rx="3" fill="#fff" stroke="#4a80b5"/>
+  <text x="100" y="88" font-size="10.5" text-anchor="middle" font-family="sans-serif" fill="#1b1d21">プロファイル取得</text>
+  <text x="100" y="105" font-size="9.5" text-anchor="middle" font-family="sans-serif" fill="#5c626b">保管場所から</text>
+  <rect x="196" y="66" width="120" height="52" rx="3" fill="#fff" stroke="#4a80b5"/>
+  <text x="256" y="88" font-size="10.5" text-anchor="middle" font-family="sans-serif" fill="#1b1d21">ビルド</text>
+  <text x="256" y="105" font-size="9.5" text-anchor="middle" font-family="monospace" fill="#5c626b">Release-Opt</text>
+  <rect x="352" y="66" width="120" height="52" rx="3" fill="#fff" stroke="#4a80b5"/>
+  <text x="412" y="88" font-size="10.5" text-anchor="middle" font-family="sans-serif" fill="#1b1d21">陳腐化を確認</text>
+  <text x="412" y="105" font-size="9.5" text-anchor="middle" font-family="monospace" fill="#5c626b">hash mismatch</text>
+  <rect x="508" y="66" width="120" height="52" rx="3" fill="#fff" stroke="#4a80b5"/>
+  <text x="568" y="88" font-size="10.5" text-anchor="middle" font-family="sans-serif" fill="#1b1d21">テスト・計測</text>
+  <text x="568" y="105" font-size="9.5" text-anchor="middle" font-family="sans-serif" fill="#5c626b">回帰の検出</text>
+  <line x1="164" y1="92" x2="192" y2="92" stroke="#5c626b" stroke-width="1.3" marker-end="url(#a41)"/>
+  <line x1="320" y1="92" x2="348" y2="92" stroke="#5c626b" stroke-width="1.3" marker-end="url(#a41)"/>
+  <line x1="476" y1="92" x2="504" y2="92" stroke="#5c626b" stroke-width="1.3" marker-end="url(#a41)"/>
+
+  <rect x="20" y="164" width="680" height="110" rx="5" fill="#eef7f1" stroke="#4a8c5f"/>
+  <text x="38" y="188" font-size="12" font-weight="700" fill="#4a8c5f" font-family="sans-serif">プロファイル更新パイプライン（週次 / リリース前）</text>
+  <rect x="40" y="200" width="120" height="52" rx="3" fill="#fff" stroke="#4a8c5f"/>
+  <text x="100" y="222" font-size="10.5" text-anchor="middle" font-family="sans-serif" fill="#1b1d21">計装ビルド</text>
+  <rect x="196" y="200" width="120" height="52" rx="3" fill="#fff" stroke="#4a8c5f"/>
+  <text x="256" y="222" font-size="10.5" text-anchor="middle" font-family="sans-serif" fill="#1b1d21">トレーニング</text>
+  <rect x="352" y="200" width="120" height="52" rx="3" fill="#fff" stroke="#4a8c5f"/>
+  <text x="412" y="222" font-size="10.5" text-anchor="middle" font-family="sans-serif" fill="#1b1d21">マージ・検査</text>
+  <text x="412" y="239" font-size="9.5" text-anchor="middle" font-family="monospace" fill="#5c626b">show / overlap</text>
+  <rect x="508" y="200" width="120" height="52" rx="3" fill="#fff" stroke="#4a8c5f"/>
+  <text x="568" y="222" font-size="10.5" text-anchor="middle" font-family="sans-serif" fill="#1b1d21">保管</text>
+  <line x1="164" y1="226" x2="192" y2="226" stroke="#5c626b" stroke-width="1.3" marker-end="url(#a41)"/>
+  <line x1="320" y1="226" x2="348" y2="226" stroke="#5c626b" stroke-width="1.3" marker-end="url(#a41)"/>
+  <line x1="476" y1="226" x2="504" y2="226" stroke="#5c626b" stroke-width="1.3" marker-end="url(#a41)"/>
+
+  <path d="M628,226 L660,226 L660,150 L100,150 L100,62" stroke="#4a8c5f" stroke-width="1.4" fill="none" stroke-dasharray="5,4" marker-end="url(#a41)"/>
+</svg>
+<figcaption>図 41-1　二つのパイプライン</figcaption>
+</figure>
+
+<h2>41.2 プロファイルの保管</h2>
+
+<p>第 34 章で三つの選択肢を挙げました。CI の観点で見直します。</p>
+
+<table>
+<thead><tr><th>方式</th><th>CI での扱い</th><th>向いている規模</th></tr></thead>
+<tbody>
+<tr><td>リポジトリにコミット</td><td>チェックアウトすれば手に入る。追加の仕組み不要</td><td>プロファイルが数 MB 以下</td></tr>
+<tr><td>成果物（artifact）として保管</td><td>更新パイプラインが公開し、通常パイプラインが取得</td><td><strong>ほとんどの場合これ</strong></td></tr>
+<tr><td>毎回生成</td><td>仕組みは単純だがビルドが長い</td><td>ビルドが元々短い場合</td></tr>
+</tbody>
+</table>
+
+<div class="box tip">
+<span class="t">バージョンを添えて保管する</span>
+<p>プロファイルには、少なくとも次の情報を添えてください。</p>
+<ul>
+<li>生成元のコミットハッシュ</li>
+<li>使用した <code>clang-cl</code> のバージョン（第 29 章のバージョン不一致問題）</li>
+<li>トレーニングに使ったワークロードの内容</li>
+</ul>
+<p>「このプロファイルはいつの何なのか」が分からなくなると、陳腐化の判断ができません。</p>
+</div>
+
+<h2>41.3 陳腐化の自動検出</h2>
+
+<p>第 34 章の内容を CI に落とします。二段構えにするのが実用的です。</p>
+
+<h3>41.3.1 まず数える</h3>
+
+<pre><code>@echo off
+:: check-profile.cmd — 陳腐化した関数の数を数えて判定する
+setlocal enabledelayedexpansion
+
+set LOG=%TEMP%\build.log
+msbuild ClangOptLab.sln /p:Configuration=Release-Opt /p:Platform=x64 ^
+    /t:Rebuild /v:normal &gt; "%LOG%" 2&gt;&amp;1
+if errorlevel 1 (
+    type "%LOG%"
+    exit /b 1
+)
+
+for /f %%c in ('findstr /C:"hash mismatch" "%LOG%" ^| find /c /v ""') do set STALE=%%c
+echo 陳腐化した関数: !STALE!
+
+if !STALE! GTR 20 (
+    echo ##[error] プロファイルが古すぎます。更新パイプラインを実行してください。
+    exit /b 1
+)
+if !STALE! GTR 5 (
+    echo ##[warning] プロファイルの陳腐化が進んでいます。
+)
+exit /b 0</code></pre>
+<p class="cap">リスト 41-1　check-profile.cmd</p>
+
+<p>閾値は、プロジェクトの規模と変更の頻度で決めてください。「関数の総数の 5%」くらいから始めて調整するのが現実的です。</p>
+
+<h3>41.3.2 リリースビルドでは厳しく</h3>
+
+<p>出荷するバイナリについては、陳腐化をエラーにします。第 39 章のプロパティシートに入れた <code>-Werror=backend-plugin</code> がこれです。</p>
+
+<pre><code>msbuild ... /p:Configuration=Release-Opt /p:StrictProfile=true</code></pre>
+
+<pre><code>&lt;!-- UseProfile.props --&gt;
+&lt;ClCompile Condition="'$(StrictProfile)'=='true'"&gt;
+  &lt;AdditionalOptions&gt;/clang:-Werror=backend-plugin %(AdditionalOptions)&lt;/AdditionalOptions&gt;
+&lt;/ClCompile&gt;</code></pre>
+
+<h2>41.4 プロファイルが無いときのフォールバック</h2>
+
+<p>第 39 章 39.6 節の続きです。CI では「無いことに気づかず最適化されていないバイナリを出荷する」のが最悪なので、明示的に失敗させます。</p>
+
+<pre><code>&lt;Target Name="RequireProfile" BeforeTargets="ClCompile"
+        Condition="'$(RequireProfile)'=='true' And !Exists('$(ProfileData)')"&gt;
+  &lt;Error Text="プロファイル $(ProfileData) が見つかりません。" /&gt;
+&lt;/Target&gt;
+
+&lt;Target Name="WarnNoProfile" BeforeTargets="ClCompile"
+        Condition="'$(RequireProfile)'!='true' And !Exists('$(ProfileData)')"&gt;
+  &lt;Warning Text="プロファイルが見つかりません。PGO 無しでビルドします。" /&gt;
+&lt;/Target&gt;</code></pre>
+
+<table>
+<thead><tr><th>場面</th><th><code>RequireProfile</code></th><th>挙動</th></tr></thead>
+<tbody>
+<tr><td>開発者の手元</td><td>未指定</td><td>警告して PGO 無しでビルド</td></tr>
+<tr><td>プルリクエストの CI</td><td>未指定</td><td>同上（プロファイル取得が失敗しても止まらない）</td></tr>
+<tr><td>リリースビルド</td><td><code>true</code></td><td><strong>失敗させる</strong></td></tr>
+</tbody>
+</table>
+
+<h2>41.5 性能の回帰を検出する</h2>
+
+<p>ここで第 15 章と第 31 章の教訓が効いてきます。</p>
+
+<h3>41.5.1 ノイズ床を毎回測る</h3>
+
+<p>CI のマシンは、実行のたびに条件が違います。共有ランナーなら、他のジョブと同じ物理マシンで動いているかもしれません。<strong>固定の閾値（「5% 以上遅くなったら失敗」など）を決め打ちするのは危険です。</strong></p>
+
+<p>第 15 章の空試験を、毎回のジョブの中で行います。</p>
+
+<pre><code>:: 同じバイナリを 2 つ用意して比較 → その回のノイズ床
+copy /y out\app.exe out\app_copy.exe
+python bench.py out\app.exe out\app_copy.exe -n 10 --args ... &gt; noise.txt
+
+:: 前回のリリースと比較
+python bench.py baseline\app.exe out\app.exe -n 10 --args ... &gt; result.txt</code></pre>
+
+<p>そして「差がノイズ床の 3 倍を超えたら報告する」といった相対的な判定にします。</p>
+
+<div class="box warn">
+<span class="t">CI での性能測定は難しい</span>
+<p>正直に言えば、共有ランナー上での性能測定は信頼性が低いものです。ノイズ床が 10% を超えることも珍しくありません。その状態で数パーセントの改善を検出することはできません。</p>
+<p>現実的な落とし所は次のあたりです。</p>
+<ul>
+<li><strong>大きな回帰だけを検出する。</strong> 「2 倍遅くなった」なら、どんなノイズでも見えます</li>
+<li><strong>専用のマシンを用意する。</strong> 本気で性能を追うなら、これが唯一の解</li>
+<li><strong>時間ではなく決定的な指標を見る。</strong> 次節</li>
+</ul>
+</div>
+
+<h3>41.5.2 決定的な指標を CI で見る</h3>
+
+<p>第 31 章で得た最大の教訓——<strong>コンパイラの判断は決定的、実行時間は環境依存</strong>——を、そのまま CI の設計に反映できます。</p>
+
+<table>
+<thead><tr><th>指標</th><th>CI での扱い</th></tr></thead>
+<tbody>
+<tr><td><code>.text</code> のサイズ</td><td>閾値を超えた増加を報告。<strong>完全に決定的</strong></td></tr>
+<tr><td>最適化レコードの集計（第 10 章）</td><td><code>Inlined</code> / <code>TooCostly</code> の件数を記録。急変を報告</td></tr>
+<tr><td>陳腐化した関数の数</td><td>41.3 節</td></tr>
+<tr><td>リンク時リマークの件数（第 20 章）</td><td>LTO を使っている場合</td></tr>
+<tr><td>実行時間</td><td>ノイズ床との比較。大きな回帰のみ</td></tr>
+</tbody>
+</table>
+
+<pre><code>:: 決定的な指標を記録する
+llvm-objdump --section-headers out\app.exe | findstr ".text" &gt; metrics.txt
+python summarize.py out\*.opt.yaml &gt;&gt; metrics.txt</code></pre>
+
+<div class="box tip">
+<span class="t">これが一番実用的です</span>
+<p>「ある変更で <code>Inlined</code> が 600 件から 200 件に減った」なら、何かがおかしい。プロファイルが効かなくなったか、コードの構造が変わったか。<strong>実行時間を測るより早く、確実に異常を検出できます。</strong></p>
+</div>
+
+<h2>41.6 パイプラインの例</h2>
+
+<pre><code># 通常のパイプライン（擬似コード）
+steps:
+  - checkout
+  - download_artifact: name=profile, path=app.profdata
+  - run: |
+      msbuild ClangOptLab.sln /p:Configuration=Release-Opt /p:Platform=x64 ^
+        /p:RequireProfile=true /t:Rebuild /v:normal &gt; build.log
+  - run: check-profile.cmd          # 陳腐化の判定
+  - run: run-tests.cmd              # checksum を含む正しさの検証
+  - run: collect-metrics.cmd        # 決定的な指標の記録
+  - publish_artifact: metrics.txt
+
+# プロファイル更新パイプライン（週次）
+schedule: "0 3 * * 1"
+steps:
+  - checkout
+  - run: build-pgo.cmd              # 第 39 章のリスト 39-5
+  - run: |
+      llvm-profdata show app.profdata | findstr "Maximum function count"
+      llvm-profdata overlap old.profdata app.profdata   # 傾向の変化を確認
+  - publish_artifact: name=profile, path=app.profdata</code></pre>
+
+<div class="box note">
+<span class="t"><code>overlap</code> を更新時に取る</span>
+<p>新旧のプロファイルを <code>overlap</code>（第 30 章）で比較すると、「本番の傾向そのものが変わっていないか」が分かります。急に一致度が落ちたら、アプリケーションの使われ方かトレーニングの内容が変わったということです。</p>
+</div>
+
+<h2>41.7 再現性の確保</h2>
+
+<p>CI で最も重要なのは、<strong>同じ入力から同じ出力が得られること</strong>です。PGO はこれを壊しやすい仕組みなので、注意点を挙げます。</p>
+
+<table>
+<thead><tr><th>再現性を壊す要因</th><th>対処</th></tr></thead>
+<tbody>
+<tr><td>プロファイルが実行ごとに変わる</td><td>トレーニングを決定的にする（乱数のシード固定、入力を固定）</td></tr>
+<tr><td>マルチスレッドで記録が揺らぐ（第 33 章）</td><td>複数回トレーニングしてマージする</td></tr>
+<tr><td>ツールのバージョンが変わる</td><td><code>clang-cl</code> と <code>llvm-profdata</code> のバージョンを固定・記録する</td></tr>
+<tr><td>プロファイルの取り違え</td><td>コミットハッシュを添えて保管する</td></tr>
+<tr><td>ビルドの並列度でリンク結果が変わる</td><td>通常は変わらないが、<code>/Brepro</code> などの再現ビルド機能も検討</td></tr>
+</tbody>
+</table>
+
+<h2>41.8 ハンズオン</h2>
+
+<ol>
+<li>リスト 41-1 の <code>check-profile.cmd</code> を作る</li>
+<li>ソースを一箇所変更して、陳腐化の件数が増えることを確認する</li>
+<li>閾値を小さくして、意図的に失敗させてみる</li>
+<li>ビルドの後に <code>.text</code> のサイズを記録するスクリプトを書く</li>
+<li>空試験と本番比較を続けて行うスクリプトを書き、ノイズ床との比を出す</li>
+<li>プロファイルを削除して <code>RequireProfile=true</code> を渡し、ビルドが失敗することを確認する</li>
+</ol>
+
+<h2>41.9 まとめ</h2>
+
+<ul>
+<li>CI は<strong>二つのパイプライン</strong>に分ける。通常ビルドは保管したプロファイルを使い、更新は定期的に行う</li>
+<li>プロファイルは<strong>成果物として保管</strong>し、コミットハッシュとツールのバージョンを添える</li>
+<li>陳腐化は <code>hash mismatch</code> の件数で判定する。リリースビルドでは <code>-Werror=backend-plugin</code></li>
+<li>プロファイルが無いときの挙動を、<strong>開発者の手元とリリースで切り替える</strong></li>
+<li>CI での性能測定は信頼性が低い。<strong>ノイズ床を毎回測り、相対的に判定する</strong></li>
+<li>より確実なのは<strong>決定的な指標</strong>——<code>.text</code> のサイズ、レコードの集計、陳腐化の件数</li>
+<li>トレーニングを決定的にし、ツールのバージョンを固定して再現性を確保する</li>
+</ul>
+
+<p class="next"><strong>次章が最終章です。</strong> 本書で行ったすべての実測を一覧にまとめ、そこから得られる原則を整理します。そして、最適化を一度きりの作業ではなく継続的な営みにするためのワークフローを提示します。</p>
+
+</div>
+</body>
+</html>

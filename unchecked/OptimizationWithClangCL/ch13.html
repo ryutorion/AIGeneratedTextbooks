@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第13章 ETW と Windows Performance Analyzer の基本 — Clang最適化入門</title>
+<style>
+:root{
+  --ink:#1b1d21; --sub:#5c626b; --line:#dfe3e8; --bg:#fff;
+  --code-bg:#f5f7f9; --code-ink:#22262b; --accent:#2f5d8a;
+  --note-bg:#eef4fa; --note-line:#4a80b5;
+  --warn-bg:#fdf4ec; --warn-line:#c07830;
+  --tip-bg:#eef7f1; --tip-line:#4a8c5f;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Meiryo",system-ui,sans-serif;
+  font-size:16px; line-height:1.9; text-align:justify;
+}
+.book{max-width:46rem; margin:0 auto; padding:3rem 1.25rem 6rem}
+.chapno{font-size:.82rem; letter-spacing:.18em; color:var(--accent); font-weight:700; margin:0 0 .4rem}
+h1{font-size:1.85rem; line-height:1.45; margin:0 0 .6rem; letter-spacing:.01em}
+.lead{color:var(--sub); font-size:1.02rem; margin:0 0 2.5rem; padding-bottom:2rem; border-bottom:2px solid var(--line)}
+h2{font-size:1.32rem; margin:3.2rem 0 1rem; padding-bottom:.45rem; border-bottom:1px solid var(--line); letter-spacing:.01em}
+h3{font-size:1.08rem; margin:2.2rem 0 .7rem; color:#2c3239}
+h4{font-size:.98rem; margin:1.6rem 0 .5rem; color:#3a4048}
+p{margin:0 0 1.1rem}
+ul,ol{margin:0 0 1.2rem; padding-left:1.5rem}
+li{margin:.4rem 0}
+code{
+  font-family:"Cascadia Mono","Consolas","SF Mono",monospace;
+  font-size:.88em; background:var(--code-bg); padding:.12em .38em;
+  border-radius:3px; border:1px solid var(--line); word-break:break-all;
+}
+pre{
+  background:var(--code-bg); color:var(--code-ink); border:1px solid var(--line);
+  border-left:3px solid var(--accent); border-radius:4px;
+  padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.6;
+}
+pre code{background:none; border:none; padding:0; font-size:.85rem; word-break:normal}
+.cap{font-size:.83rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+.box{border-radius:4px; padding:.95rem 1.15rem; margin:1.6rem 0; font-size:.95rem}
+.box p:last-child{margin-bottom:0}
+.box .t{font-weight:700; font-size:.86rem; letter-spacing:.06em; display:block; margin-bottom:.4rem}
+.note{background:var(--note-bg); border-left:4px solid var(--note-line)}
+.note .t{color:var(--note-line)}
+.warn{background:var(--warn-bg); border-left:4px solid var(--warn-line)}
+.warn .t{color:var(--warn-line)}
+.tip{background:var(--tip-bg); border-left:4px solid var(--tip-line)}
+.tip .t{color:var(--tip-line)}
+table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+th{background:var(--code-bg); font-weight:700}
+figure{margin:2rem 0}
+figure svg{display:block; width:100%; height:auto}
+figcaption{font-size:.83rem; color:var(--sub); text-align:center; margin-top:.7rem}
+.goal{border:1px solid var(--line); border-top:3px solid var(--accent); border-radius:4px; padding:1.1rem 1.3rem; margin:0 0 2.4rem; background:#fbfcfd}
+.goal h2{margin:0 0 .6rem; font-size:1rem; border:none; padding:0; letter-spacing:.06em}
+.goal ul{margin-bottom:0}
+.next{margin-top:3.5rem; padding-top:1.4rem; border-top:2px solid var(--line); color:var(--sub); font-size:.95rem}
+.next strong{color:var(--ink)}
+.chk{list-style:none; padding-left:0}
+.chk li{padding-left:1.7rem; position:relative}
+.chk li::before{content:"\2610"; position:absolute; left:.2rem; color:var(--accent); font-size:1.05rem}
+.path{font-size:.93rem; color:var(--sub); background:var(--code-bg); border:1px solid var(--line); border-radius:3px; padding:.5rem .8rem; margin:0 0 1.2rem}
+.partend{margin-top:3rem; padding:1.2rem 1.4rem; border:2px solid var(--accent); border-radius:5px; background:#fbfcfd}
+.partend h3{margin-top:0; color:var(--accent)}
+.real{border-left-color:var(--tip-line)}
+@media (prefers-color-scheme:dark){
+  :root{
+    --ink:#e6e8ea; --sub:#a2a9b2; --line:#333940; --bg:#16181b;
+    --code-bg:#1e2126; --code-ink:#dfe3e8; --accent:#7fb0dd;
+    --note-bg:#1b2530; --note-line:#5f96c9;
+    --warn-bg:#2b2118; --warn-line:#d09154;
+    --tip-bg:#182619; --tip-line:#6aad7d;
+  }
+  h3{color:#d5d9dd} h4{color:#c3c9cf}
+  .goal,.partend{background:#1a1d21}
+}
+</style>
+</head>
+<body>
+<div class="book">
+
+<p class="chapno">第 13 章</p>
+<h1>ETW と Windows Performance Analyzer の基本</h1>
+<p class="lead">Windows には、OS 自身に組み込まれたトレース機構があります。コマンド 2 行でトレースが採れ、どんなプロセスでも対象にでき、CI にも組み込めます。本書の計測の本命です。</p>
+
+<div class="goal">
+<h2>この章のゴール</h2>
+<ul>
+<li><code>wpr</code> コマンドで CPU トレースを採る</li>
+<li>WPA でトレースを開き、シンボルを読み込む</li>
+<li>Sampled と Precise の違いを理解する</li>
+<li>ホット関数を特定する定型手順を身につける</li>
+</ul>
+</div>
+
+<h2>13.1 ETW とは</h2>
+
+<p>ETW（Event Tracing for Windows）は、カーネルとユーザーモードの双方からイベントを高速に記録する仕組みです。CPU サンプリング、コンテキストスイッチ、ディスク I/O、ページフォルト、ヒープ確保——Windows で起きるほとんどのことが、ETW のイベントとして取り出せます。</p>
+
+<p>本書で使うのは、その中の CPU サンプリングです。第 12 章で説明したとおり、一定間隔でコールスタックを記録するものです。実は PIX のタイミングキャプチャも、内部ではこの仕組みを使っています。</p>
+
+<p>役割分担は次のようになっています。</p>
+
+<table>
+<thead><tr><th>ツール</th><th>役割</th><th>入手方法</th></tr></thead>
+<tbody>
+<tr><td><strong>WPR</strong>（<code>wpr.exe</code>）</td><td>トレースを<strong>採る</strong>。Windows に標準で入っている</td><td>標準搭載</td></tr>
+<tr><td><strong>WPA</strong></td><td>トレースを<strong>見る</strong></td><td>Microsoft Store、または Windows ADK の Windows Performance Toolkit</td></tr>
+<tr><td><code>xperf.exe</code></td><td>WPR より低レベルな採取コマンド</td><td>Windows Performance Toolkit</td></tr>
+</tbody>
+</table>
+
+<h2>13.2 トレースを採る</h2>
+
+<p><strong>管理者権限の</strong> コマンドプロンプトまたは PowerShell を開きます。カーネルのイベントを扱うため、昇格が必要です。</p>
+
+<pre><code>:: 1. 記録を開始する
+wpr -start CPU -filemode
+
+:: 2. 測りたい処理を実行する
+cd x64\Release
+ClangOptLab.exe
+
+:: 3. 記録を停止し、ファイルに保存する
+wpr -stop loglab_O2.etl "LogLab baseline /O2"</code></pre>
+
+<p>これだけです。<code>loglab_O2.etl</code> が生成されます。</p>
+
+<h3>13.2.1 主なコマンド</h3>
+
+<table>
+<thead><tr><th>コマンド</th><th>意味</th></tr></thead>
+<tbody>
+<tr><td><code>wpr -start &lt;プロファイル&gt; [-filemode]</code></td><td>記録を開始する</td></tr>
+<tr><td><code>wpr -stop &lt;file.etl&gt; "&lt;説明&gt;"</code></td><td>記録を停止して保存する。説明は省略できるが付けておくとよい</td></tr>
+<tr><td><code>wpr -cancel</code></td><td>保存せずに記録を中止する</td></tr>
+<tr><td><code>wpr -status</code></td><td>記録中かどうか、取りこぼしがないかを確認する</td></tr>
+<tr><td><code>wpr -profiles</code></td><td>使える組み込みプロファイルの一覧を表示する</td></tr>
+</tbody>
+</table>
+
+<div class="box note">
+<span class="t"><code>-filemode</code> を付ける理由</span>
+<p><code>-filemode</code> を省略すると<strong>メモリモード</strong>になり、固定サイズの循環バッファに記録されます。長時間動くアプリの「最後の数秒」を捕まえるのには向いていますが、LogLab のように短い処理を最初から最後まで記録したい場合は <code>-filemode</code> を付けます。こちらはディスクに直接書き続けるので、記録が上書きで消えることがありません（そのかわりファイルは際限なく大きくなります）。</p>
+</div>
+
+<div class="box tip">
+<span class="t">トレースが大きすぎるとき</span>
+<p><code>CPU</code> プロファイルは既定で verbose（詳細）です。ファイルが大きくなりすぎる場合は <code>CPU.light</code> を使うと軽くなります。</p>
+<pre><code>wpr -start CPU.light -filemode</code></pre>
+<p>また、<code>wpr -status</code> で <code>Dropped event</code> が 0 でない場合は、イベントを取りこぼしています。この状態のトレースは統計として信用できないので、軽いプロファイルにするか、測る範囲を狭めてください。</p>
+</div>
+
+<h3>13.2.2 スクリプトにしておく</h3>
+
+<p>第 4 部以降、LTO や PGO のたびにトレースを採り直します。バッチファイルにしておきましょう。</p>
+
+<pre><code>@echo off
+:: capture.cmd &lt;出力名&gt;
+:: 管理者権限で実行すること
+set NAME=%1
+if "%NAME%"=="" set NAME=trace
+
+wpr -cancel &gt;nul 2&gt;&amp;1
+wpr -start CPU -filemode || exit /b 1
+
+pushd x64\Release
+ClangOptLab.exe
+popd
+
+wpr -stop %NAME%.etl "LogLab %NAME%"
+echo saved: %NAME%.etl</code></pre>
+<p class="cap">リスト 13-1　capture.cmd</p>
+
+<p>冒頭の <code>wpr -cancel</code> は、前回の記録が止まっていなかった場合の保険です。WPR は同時に複数の記録を開始できないため、これが残っていると <code>-start</code> が失敗します。</p>
+
+<h2>13.3 WPA で開く</h2>
+
+<p><code>.etl</code> ファイルを WPA で開きます。左側の <strong>Graph Explorer</strong> に、記録された内容がカテゴリごとに並びます。</p>
+
+<h3>13.3.1 まずシンボルを読み込む</h3>
+
+<p><strong>これを忘れると何も分かりません。</strong> 関数名の代わりにアドレスが並ぶだけです。</p>
+
+<p>まず、環境変数でシンボルの場所を教えます。WPA を起動する<strong>前</strong>に設定してください。</p>
+
+<pre><code>set _NT_SYMBOL_PATH=srv*C:\symbols*https://msdl.microsoft.com/download/symbols;C:\work\ClangOptLab\x64\Release</code></pre>
+
+<p>前半が Microsoft のシンボルサーバ（OS の DLL 用）、セミコロンの後ろが<strong>自分のプロジェクトの PDB がある場所</strong>です。両方が必要です。</p>
+
+<p>WPA でトレースを開いたら、メニューの <strong>Trace &gt; Load Symbols</strong> を実行します。初回は OS のシンボルをダウンロードするため数分かかることがあります。</p>
+
+<div class="box warn">
+<span class="t">シンボルが読めているかの確認</span>
+<p>スタックに <code>ClangOptLab.exe!0x1a3f</code> のような表示が残っていたら、自分の PDB が見つかっていません。<code>_NT_SYMBOL_PATH</code> に <code>x64\Release</code> を含めたか、そこに <code>ClangOptLab.pdb</code> があるかを確認してください。シンボル解決のより詳しい話は次章で扱います。</p>
+</div>
+
+<h3>13.3.2 Sampled と Precise</h3>
+
+<p>CPU 関連のグラフは二種類あります。名前が紛らわしいので整理しておきます。</p>
+
+<table>
+<thead><tr><th></th><th>CPU Usage (Sampled)</th><th>CPU Usage (Precise)</th></tr></thead>
+<tbody>
+<tr><td>記録するもの</td><td>一定間隔（通常 1 ms）のサンプル</td><td>コンテキストスイッチ（スレッドの切り替え）</td></tr>
+<tr><td>1 行の意味</td><td>1 個のサンプル</td><td>1 回のスイッチ</td></tr>
+<tr><td>得意なこと</td><td><strong>どの関数が CPU を使っているか</strong></td><td>スレッドがいつ動き、何を待っていたか</td></tr>
+<tr><td>苦手なこと</td><td>短時間の事象（DPC / ISR など）</td><td>関数単位の時間配分</td></tr>
+</tbody>
+</table>
+
+<p><strong>本書で使うのは Sampled のほうです。</strong> 「Precise」という名前につられないでください。Precise が精密なのは<strong>スイッチの時刻</strong>であって、関数ごとの時間配分ではありません。</p>
+
+<h3>13.3.3 列の意味</h3>
+
+<table>
+<thead><tr><th>列</th><th>意味</th></tr></thead>
+<tbody>
+<tr><td><strong>Weight</strong></td><td>そのサンプルが代表する時間（ミリ秒）。前のサンプルとの時刻差</td></tr>
+<tr><td><strong>Count</strong></td><td>サンプルの個数（アイドルを除く）</td></tr>
+<tr><td>All Count</td><td>アイドルを含むサンプルの個数</td></tr>
+<tr><td><strong>% Weight</strong></td><td>表示中の時間範囲に占める割合。<strong>これを見る</strong></td></tr>
+</tbody>
+</table>
+
+<h2>13.4 ホット関数を見つける定型手順</h2>
+
+<p>WPA は自由度が高すぎて最初は迷います。次の手順を型として覚えてしまうのが早道です。</p>
+
+<ol>
+<li><strong>Trace &gt; Load Symbols</strong> を実行する</li>
+<li>Graph Explorer から <strong>Computation &gt; CPU Usage (Sampled)</strong> をドラッグして解析ビューに置く</li>
+<li>タイムライン上で、測りたい区間をドラッグして選択し、右クリックから <strong>Zoom</strong> する</li>
+<li>プリセットを <strong>Utilization by Process and Thread</strong> にする</li>
+<li><code>ClangOptLab.exe</code> の行を展開し、スレッドを展開する</li>
+<li><strong>Stack</strong> 列を <strong>Thread ID</strong> の右隣に配置する（すでにあればそのまま）</li>
+<li>スタックツリーを、<strong>% Weight</strong> の大きい枝から順に展開していく</li>
+</ol>
+
+<h3>13.4.1 <code>&lt;itself&gt;</code> が排他時間</h3>
+
+<p>スタックツリーを展開していくと、子ノードのひとつに <code>&lt;itself&gt;</code> という項目が現れます。これが<strong>その関数自身で消費した時間</strong>、つまり第 12 章で説明した排他時間です。</p>
+
+<pre><code>ClangOptLab.exe (100.0%)
+  └ main (99.8%)
+      ├ loglab::parse_line (52.1%)
+      │   └ &lt;itself&gt; (52.1%)        &lt;- parse_line 自身が 52.1%
+      ├ loglab::Stats::add (18.4%)
+      │   └ &lt;itself&gt; (18.4%)
+      ├ &lt;itself&gt; (21.0%)             &lt;- main に展開されたコード（accept など）
+      └ ...</code></pre>
+<p class="cap">スタックツリーの読み方（数値は例）</p>
+
+<div class="box tip">
+<span class="t"><code>main</code> の <code>&lt;itself&gt;</code> が大きいとき</span>
+<p>これは <code>main</code> のループ本体そのものと、<strong><code>main</code> にインライン展開された関数</strong>の合計です。LogLab では <code>Filter::accept()</code> のうち展開されたものがここに含まれます。第 12 章で触れた「インライン化された関数は見えない」問題が、こういう形で現れます。</p>
+</div>
+
+<h3>13.4.2 Butterfly ビュー</h3>
+
+<p>ある関数が複数の場所から呼ばれている場合、「どこから呼ばれたぶんが重いのか」を知りたくなります。関数を右クリックして <strong>View Callers</strong> / <strong>View Callees</strong> を選ぶと、呼び出し元・呼び出し先の内訳が見られます。</p>
+
+<p>これは第 6 部の CSPGO と直接つながる話です。CSPGO が解決しようとしているのは、まさに「同じ関数でも呼び出し元によって挙動が違う」という問題だからです。</p>
+
+<h2>13.5 落とし穴</h2>
+
+<h4>トレースにシステム全体が入っている</h4>
+<p>WPR はマシン全体を記録します。ブラウザやウイルス対策ソフトが動いていれば、それも全部入ります。まず <code>ClangOptLab.exe</code> の行を選び、そこにズームしてから解析してください。</p>
+
+<h4>ファイルが巨大になる</h4>
+<p><code>-filemode</code> は際限なく書き続けます。数分のトレースで数百 MB になることもあります。測る範囲は短く保ち、不要な <code>.etl</code> は消してください。</p>
+
+<h4>計測対象外の処理が混ざる</h4>
+<p>LogLab は起動時に <code>generate_lines()</code> でログを生成します。この時間もトレースには含まれます。タイムラインで区間を選ぶときは、実際の計測ループの部分だけを選んでください。区間の見分けがつかない場合は、行数を増やして計測ループを相対的に長くすると分かりやすくなります。</p>
+
+<h4>1 回のトレースを信じすぎる</h4>
+<p>プロファイルもまた 1 回の実行結果です。上位の関数が入れ替わる程度のばらつきは普通に起こります。判断に迷うときは 2、3 回採って傾向を見てください。この話は次々章（第 15 章）で本格的に扱います。</p>
+
+<h2>13.6 ハンズオン</h2>
+
+<ol>
+<li>リスト 13-1 の <code>capture.cmd</code> を作る</li>
+<li>管理者権限で <code>capture.cmd baseline_O2</code> を実行する</li>
+<li><code>_NT_SYMBOL_PATH</code> を設定してから WPA を起動し、<code>baseline_O2.etl</code> を開く</li>
+<li><strong>Trace &gt; Load Symbols</strong> を実行する</li>
+<li>13.4 節の手順でスタックツリーを展開する</li>
+<li>排他時間の上位 5 関数と <strong>% Weight</strong> をメモする ← <strong>第 3 部の成果物</strong></li>
+<li><code>.etl</code> ファイルを作業フォルダに保存しておく（第 20 章・第 32 章で比較します）</li>
+</ol>
+
+<h2>13.7 まとめ</h2>
+
+<ul>
+<li>ETW は Windows 標準のトレース機構。PIX のタイミングキャプチャも内部ではこれを使っている</li>
+<li>採取は <code>wpr -start CPU -filemode</code> と <code>wpr -stop &lt;file&gt;.etl</code> の 2 行。<strong>管理者権限が必要</strong></li>
+<li>短い処理を丸ごと採るには <code>-filemode</code>。<code>wpr -status</code> で <code>Dropped event</code> が 0 であることを確認する</li>
+<li>WPA では<strong>最初に Load Symbols</strong>。<code>_NT_SYMBOL_PATH</code> に自分の PDB のフォルダを含める</li>
+<li>関数ごとの時間配分を見るのは <strong>Sampled</strong>。Precise はスレッドのスケジューリング用</li>
+<li>定型手順は「Load Symbols → CPU Usage (Sampled) → 区間をズーム → Utilization by Process and Thread → Stack 列を展開」</li>
+<li><code>&lt;itself&gt;</code> が排他時間。インライン展開された関数はここに吸収される</li>
+</ul>
+
+<p class="next"><strong>次章では</strong>、この章で「読み込む」としか書かなかったシンボルの話を掘り下げます。clang-cl の <code>/Zi</code> は MSVC の <code>/Zi</code> とは違うこと、PDB を作っているのは実はリンカであること、そしてリンカの設定次第でプロファイルのシンボルが壊れることを扱います。</p>
+
+</div>
+</body>
+</html>

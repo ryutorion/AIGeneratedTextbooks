@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第25章 PGO の考え方 — Clang最適化入門</title>
+<style>
+:root{
+  --ink:#1b1d21; --sub:#5c626b; --line:#dfe3e8; --bg:#fff;
+  --code-bg:#f5f7f9; --code-ink:#22262b; --accent:#2f5d8a;
+  --note-bg:#eef4fa; --note-line:#4a80b5;
+  --warn-bg:#fdf4ec; --warn-line:#c07830;
+  --tip-bg:#eef7f1; --tip-line:#4a8c5f;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Meiryo",system-ui,sans-serif;
+  font-size:16px; line-height:1.9; text-align:justify;
+}
+.book{max-width:46rem; margin:0 auto; padding:3rem 1.25rem 6rem}
+.chapno{font-size:.82rem; letter-spacing:.18em; color:var(--accent); font-weight:700; margin:0 0 .4rem}
+h1{font-size:1.85rem; line-height:1.45; margin:0 0 .6rem; letter-spacing:.01em}
+.lead{color:var(--sub); font-size:1.02rem; margin:0 0 2.5rem; padding-bottom:2rem; border-bottom:2px solid var(--line)}
+h2{font-size:1.32rem; margin:3.2rem 0 1rem; padding-bottom:.45rem; border-bottom:1px solid var(--line); letter-spacing:.01em}
+h3{font-size:1.08rem; margin:2.2rem 0 .7rem; color:#2c3239}
+h4{font-size:.98rem; margin:1.6rem 0 .5rem; color:#3a4048}
+p{margin:0 0 1.1rem}
+ul,ol{margin:0 0 1.2rem; padding-left:1.5rem}
+li{margin:.4rem 0}
+code{
+  font-family:"Cascadia Mono","Consolas","SF Mono",monospace;
+  font-size:.88em; background:var(--code-bg); padding:.12em .38em;
+  border-radius:3px; border:1px solid var(--line); word-break:break-all;
+}
+pre{
+  background:var(--code-bg); color:var(--code-ink); border:1px solid var(--line);
+  border-left:3px solid var(--accent); border-radius:4px;
+  padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.6;
+}
+pre code{background:none; border:none; padding:0; font-size:.85rem; word-break:normal}
+.cap{font-size:.83rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+.box{border-radius:4px; padding:.95rem 1.15rem; margin:1.6rem 0; font-size:.95rem}
+.box p:last-child{margin-bottom:0}
+.box .t{font-weight:700; font-size:.86rem; letter-spacing:.06em; display:block; margin-bottom:.4rem}
+.note{background:var(--note-bg); border-left:4px solid var(--note-line)}
+.note .t{color:var(--note-line)}
+.warn{background:var(--warn-bg); border-left:4px solid var(--warn-line)}
+.warn .t{color:var(--warn-line)}
+.tip{background:var(--tip-bg); border-left:4px solid var(--tip-line)}
+.tip .t{color:var(--tip-line)}
+table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+th{background:var(--code-bg); font-weight:700}
+figure{margin:2rem 0}
+figure svg{display:block; width:100%; height:auto}
+figcaption{font-size:.83rem; color:var(--sub); text-align:center; margin-top:.7rem}
+.goal{border:1px solid var(--line); border-top:3px solid var(--accent); border-radius:4px; padding:1.1rem 1.3rem; margin:0 0 2.4rem; background:#fbfcfd}
+.goal h2{margin:0 0 .6rem; font-size:1rem; border:none; padding:0; letter-spacing:.06em}
+.goal ul{margin-bottom:0}
+.next{margin-top:3.5rem; padding-top:1.4rem; border-top:2px solid var(--line); color:var(--sub); font-size:.95rem}
+.next strong{color:var(--ink)}
+.chk{list-style:none; padding-left:0}
+.chk li{padding-left:1.7rem; position:relative}
+.chk li::before{content:"\2610"; position:absolute; left:.2rem; color:var(--accent); font-size:1.05rem}
+.path{font-size:.93rem; color:var(--sub); background:var(--code-bg); border:1px solid var(--line); border-radius:3px; padding:.5rem .8rem; margin:0 0 1.2rem}
+.partend{margin-top:3rem; padding:1.2rem 1.4rem; border:2px solid var(--accent); border-radius:5px; background:#fbfcfd}
+.partend h3{margin-top:0; color:var(--accent)}
+.real{border-left-color:var(--tip-line)}
+@media (prefers-color-scheme:dark){
+  :root{
+    --ink:#e6e8ea; --sub:#a2a9b2; --line:#333940; --bg:#16181b;
+    --code-bg:#1e2126; --code-ink:#dfe3e8; --accent:#7fb0dd;
+    --note-bg:#1b2530; --note-line:#5f96c9;
+    --warn-bg:#2b2118; --warn-line:#d09154;
+    --tip-bg:#182619; --tip-line:#6aad7d;
+  }
+  h3{color:#d5d9dd} h4{color:#c3c9cf}
+  .goal,.partend{background:#1a1d21}
+}
+</style>
+</head>
+<body>
+<div class="book">
+
+<p class="chapno">第 25 章</p>
+<h1>PGO の考え方<br>— 実行時の事実がコード生成を変える</h1>
+<p class="lead">ここから第 5 部です。LTO がコンパイラに与えたのは「より広い視野」でした。PGO が与えるのは「実際に何が起きたかという事実」です。そして PGO は、コンパイラの判断を目に見えて変えます。</p>
+
+<div class="goal">
+<h2>この章のゴール</h2>
+<ul>
+<li>コンパイラが原理的に知りえないことを整理する</li>
+<li>静的なヒューリスティクスの限界を理解する</li>
+<li>PGO の三段階を把握する</li>
+<li>二つの計装方式の違いを知る</li>
+</ul>
+</div>
+
+<h2>25.1 コンパイラが知らないこと</h2>
+
+<p>第 11 章で、インライン化の判定が <code>cost ≤ threshold</code> であることを見ました。そして <code>threshold</code> は呼び出し箇所ごとに変わる、とも書きました。では何を根拠に変えているのか。</p>
+
+<p>ソースコードだけから分かることには限りがあります。次のようなことは、原理的に分かりません。</p>
+
+<table>
+<thead><tr><th>知りたいこと</th><th>ソースから分かるか</th></tr></thead>
+<tbody>
+<tr><td>この <code>if</code> はどちらに転ぶことが多いか</td><td>分からない</td></tr>
+<tr><td>この関数は 1 回しか呼ばれないのか、1 億回呼ばれるのか</td><td>分からない</td></tr>
+<tr><td>この仮想関数呼び出しは、実際どのクラスに行くのか</td><td>分からない</td></tr>
+<tr><td>このループは平均何回まわるのか</td><td>分からない</td></tr>
+<tr><td>この <code>catch</code> は実際に到達するのか</td><td>分からない</td></tr>
+</tbody>
+</table>
+
+<p>LogLab で言えば、次の一行がそうです。</p>
+
+<pre><code>if (r.level == Level::Error) {
+    handle_error(r);
+}</code></pre>
+
+<p>この分岐が 1000 回に 3 回しか成立しないことは、<strong>ソースのどこにも書いてありません</strong>。第 4 章でこの事実を <code>generator.cpp</code> の出現比率として仕込みましたが、コンパイラにはそれを知る手立てがありません。</p>
+
+<h2>25.2 静的ヒューリスティクスとその限界</h2>
+
+<p>コンパイラは、分からないなりに推測します。よく知られた経験則がいくつかあります。</p>
+
+<ul>
+<li>ループは複数回まわる可能性が高い</li>
+<li>後ろ向きの分岐（ループの継続）は成立しやすい</li>
+<li><code>nullptr</code> との比較は成立しにくい</li>
+<li>例外を投げる経路はめったに通らない</li>
+<li>関数の途中の <code>return</code> は稀な経路であることが多い</li>
+</ul>
+
+<p>これらは平均的には当たりますが、あくまで平均の話です。LogLab の <code>if (r.level == Level::Error)</code> は、この経験則のどれにも当てはまりません。コンパイラにとっては、成立率 50% の普通の分岐に見えます。</p>
+
+<div class="box note">
+<span class="t">第 11 章の結論とつながります</span>
+<p>第 11 章で「しきい値の手動調整は最後の手段」と書き、その理由を二つ挙げました。「全部に一律に効く」ことと「判断材料が足りない」ことです。PGO は後者を根本から解決します。そして材料が正確になれば、しきい値は箇所ごとに適切な値へ自動的に調整されます。前者も同時に解決するわけです。</p>
+</div>
+
+<h2>25.3 PGO の三段階</h2>
+
+<figure>
+<svg viewBox="0 0 720 300" role="img" aria-label="PGO の三段階。計装ビルド、トレーニング実行、最適化ビルドの流れ">
+  <defs>
+    <marker id="a25" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
+      <path d="M0,0 L9,4.5 L0,9 z" fill="#5c626b"/>
+    </marker>
+  </defs>
+
+  <rect x="20" y="46" width="200" height="94" rx="5" fill="#eef4fa" stroke="#4a80b5"/>
+  <text x="120" y="70" font-size="12" text-anchor="middle" font-weight="700" fill="#1b1d21" font-family="sans-serif">① 計装ビルド</text>
+  <text x="120" y="92" font-size="10.5" text-anchor="middle" font-family="monospace" fill="#5c626b">-fprofile-generate</text>
+  <text x="120" y="112" font-size="10.5" text-anchor="middle" font-family="sans-serif" fill="#5c626b">数える仕掛けを埋め込む</text>
+  <text x="120" y="130" font-size="10.5" text-anchor="middle" font-family="sans-serif" fill="#c07830">遅くて大きい</text>
+
+  <rect x="260" y="46" width="200" height="94" rx="5" fill="#eef7f1" stroke="#4a8c5f"/>
+  <text x="360" y="70" font-size="12" text-anchor="middle" font-weight="700" fill="#1b1d21" font-family="sans-serif">② トレーニング実行</text>
+  <text x="360" y="92" font-size="10.5" text-anchor="middle" font-family="sans-serif" fill="#5c626b">代表的なワークロードで</text>
+  <text x="360" y="110" font-size="10.5" text-anchor="middle" font-family="sans-serif" fill="#5c626b">実際に動かす</text>
+  <text x="360" y="130" font-size="10.5" text-anchor="middle" font-family="monospace" fill="#4a8c5f">*.profraw</text>
+
+  <rect x="500" y="46" width="200" height="94" rx="5" fill="#eef4fa" stroke="#4a80b5"/>
+  <text x="600" y="70" font-size="12" text-anchor="middle" font-weight="700" fill="#1b1d21" font-family="sans-serif">③ 最適化ビルド</text>
+  <text x="600" y="92" font-size="10.5" text-anchor="middle" font-family="monospace" fill="#5c626b">-fprofile-use=…</text>
+  <text x="600" y="112" font-size="10.5" text-anchor="middle" font-family="sans-serif" fill="#5c626b">実測に基づいて</text>
+  <text x="600" y="130" font-size="10.5" text-anchor="middle" font-family="sans-serif" fill="#5c626b">判断し直す</text>
+
+  <line x1="224" y1="93" x2="256" y2="93" stroke="#5c626b" stroke-width="1.5" marker-end="url(#a25)"/>
+  <line x1="464" y1="93" x2="496" y2="93" stroke="#5c626b" stroke-width="1.5" marker-end="url(#a25)"/>
+
+  <rect x="300" y="172" width="120" height="40" rx="4" fill="#fdf4ec" stroke="#c07830"/>
+  <text x="360" y="197" font-size="11" text-anchor="middle" font-family="monospace" fill="#1b1d21">llvm-profdata</text>
+  <path d="M360,144 L360,168" stroke="#5c626b" stroke-width="1.5" fill="none" marker-end="url(#a25)"/>
+  <path d="M424,192 L560,192 L560,144" stroke="#5c626b" stroke-width="1.5" fill="none" marker-end="url(#a25)"/>
+  <text x="492" y="185" font-size="10" text-anchor="middle" font-family="monospace" fill="#5c626b">app.profdata</text>
+
+  <rect x="20" y="240" width="680" height="46" rx="4" fill="#f5f7f9" stroke="#dfe3e8"/>
+  <text x="38" y="264" font-size="11" fill="#5c626b" font-family="sans-serif">①と③は同じソースからビルドする。②で得た「事実」だけが③に渡る。</text>
+  <text x="38" y="280" font-size="11" fill="#5c626b" font-family="sans-serif">出荷するのは③のバイナリ。計装ビルドは測定用の使い捨て。</text>
+</svg>
+<figcaption>図 25-1　PGO の三段階</figcaption>
+</figure>
+
+<h2>25.4 何が変わるのか</h2>
+
+<p>プロファイルを得たコンパイラは、次のような判断を実測に基づいて行えるようになります。</p>
+
+<table>
+<thead><tr><th>判断</th><th>プロファイルが無いとき</th><th>あるとき</th></tr></thead>
+<tbody>
+<tr><td>インライン化のしきい値</td><td>一律</td><td><strong>呼び出し箇所のホット度に応じて上下</strong></td></tr>
+<tr><td>コードの配置</td><td>ソースの順</td><td>よく通る経路を連続して並べる</td></tr>
+<tr><td>分岐のレイアウト</td><td>経験則</td><td>成立しやすいほうを直進経路に</td></tr>
+<tr><td>ループ展開</td><td>回転数を推測</td><td>実際の平均回転数に基づく</td></tr>
+<tr><td>コールドコードの扱い</td><td>区別しない</td><td>ホットな経路から離れた場所へ</td></tr>
+<tr><td>間接呼び出し</td><td>手が出ない</td><td>頻出する行き先を投機的に展開できる</td></tr>
+<tr><td>レジスタ割り付け</td><td>一様</td><td>ホットな部分を優先</td></tr>
+</tbody>
+</table>
+
+<div class="box tip">
+<span class="t">第 7 章の伏線</span>
+<p>第 7 章で、<code>hot-cold-split</code> や <code>chr</code>（<code>-O3</code> で追加されるパス）は「プロファイルがないとほとんど働かない」と書きました。眠っていたパスがここで起き上がります。</p>
+</div>
+
+<h2>25.5 二つの計装方式</h2>
+
+<p>Clang には計装のやり方が二つあります。本書では主に前者を使いますが、後者も第 30 章で登場するので、違いを押さえておきます。</p>
+
+<table>
+<thead><tr><th></th><th>IR レベル計装</th><th>フロントエンド計装</th></tr></thead>
+<tbody>
+<tr><td>オプション</td><td><code>-fprofile-generate</code> / <code>-fprofile-use</code></td><td><code>-fprofile-instr-generate</code> / <code>-fprofile-instr-use</code></td></tr>
+<tr><td>内部の指定</td><td><code>-fprofile-instrument=llvm</code></td><td><code>-fprofile-instrument=clang</code></td></tr>
+<tr><td>カウンタを置く場所</td><td>最適化の途中（IR の段階）</td><td>構文解析の直後</td></tr>
+<tr><td>オーバーヘッド</td><td>小さい</td><td>大きい</td></tr>
+<tr><td>最適化への向き不向き</td><td><strong>PGO 向き</strong></td><td>やや不向き</td></tr>
+<tr><td><code>llvm-cov</code> で可視化</td><td><strong>できない</strong></td><td>できる</td></tr>
+<tr><td>主な用途</td><td>最適化</td><td>コードカバレッジ計測</td></tr>
+</tbody>
+</table>
+
+<p>本書の PGO は IR レベル計装で進めます。ソースコードのカバレッジではなく、最適化のための情報が欲しいからです。</p>
+
+<h2>25.6 LTO との関係</h2>
+
+<p>第 24 章で触れたとおり、<strong>Clang の PGO は LTO と独立しています。</strong> MSVC の PGO が <code>/LTCG</code> を前提とするのとは違い、LTO 無しで PGO だけを使えます。</p>
+
+<p>本書もその順で進めます。第 5 部では LTO をいったん外し、PGO 単体の効果を見ます。両方を組み合わせるのは第 38 章です。効果を切り分けるためです。</p>
+
+<div class="box warn">
+<span class="t">第 4 部の設定を外してください</span>
+<p>第 5 部に入る前に、追加のオプションから <code>/clang:-flto</code>（または <code>-flto=thin</code>）と <code>/clang:-fwhole-program-vtables</code> を外してください。<code>/O2</code> だけの状態に戻します。<code>builds\baseline\</code> に退避してある実行ファイルが、比較の基準になります。</p>
+</div>
+
+<h2>25.7 この部で得られる結果</h2>
+
+<p>先に結論を言っておきます。<strong>PGO はコンパイラの判断を大きく変えました。</strong> インライン化のしきい値が 600 以上の呼び出し箇所で変わり、第 4 章で仕込んだ <code>handle_error</code> の展開が取りやめになります（第 32 章）。これは決定的な事実で、環境によらず再現します。</p>
+
+<p>一方、<strong>それが実行時間に現れるかどうかは環境に依存しました。</strong> ある環境では 6.5〜9.0% 短縮し、別の環境ではノイズ床以下でした。同じバイナリ、同じ手順です。この食い違いこそ本書で最も実務的な教訓なので、第 31 章で正面から扱います。</p>
+
+<div class="box note">
+<span class="t">なぜ PGO のほうが深く効くのか</span>
+<p>第 20 章の考察で、LTO が効かなかった理由として「ホットな処理が翻訳単位内で完結している」ことを挙げました。裏を返せば、<strong>LogLab の性能を決めているのは翻訳単位の壁ではなく、ホットな処理そのものの中身</strong>だということです。</p>
+<p>PGO はまさにそこに効きます。どの分岐がどちらに転ぶか、どの経路がホットか——翻訳単位の内側の話だからです。第 32 章で、実際に何が変わったのかを見ます。</p>
+</div>
+
+<h2>25.8 第 5 部の流れ</h2>
+
+<table>
+<thead><tr><th>章</th><th>内容</th></tr></thead>
+<tbody>
+<tr><td>第 26 章</td><td>計装ビルドを作る。プロファイルランタイムのリンク</td></tr>
+<tr><td>第 27 章</td><td>プロファイルの出力先を制御する</td></tr>
+<tr><td>第 28 章</td><td>トレーニングワークロードを設計する</td></tr>
+<tr><td>第 29 章</td><td><code>llvm-profdata merge</code> でまとめる</td></tr>
+<tr><td>第 30 章</td><td>プロファイルの中身を読む</td></tr>
+<tr><td>第 31 章</td><td>最適化ビルドを作り、効果を測る</td></tr>
+<tr><td>第 32 章</td><td><strong>何がどう変わったのかを解明する</strong></td></tr>
+<tr><td>第 33 章</td><td>マルチスレッドでの計装</td></tr>
+<tr><td>第 34 章</td><td>プロファイルの陳腐化への対処</td></tr>
+</tbody>
+</table>
+
+<h2>25.9 まとめ</h2>
+
+<ul>
+<li>分岐の偏り、呼び出し頻度、間接呼び出しの行き先——これらはソースからは原理的に分からない</li>
+<li>コンパイラは経験則で推測するが、それは平均の話であり、個別のコードには当たらない</li>
+<li>PGO は<strong>計装ビルド → トレーニング実行 → 最適化ビルド</strong>の三段階</li>
+<li>プロファイルがあると、しきい値・コード配置・分岐レイアウト・間接呼び出しの扱いが実測に基づくものになる</li>
+<li>計装には IR レベルとフロントエンドの二方式。<strong>PGO には IR レベル</strong>を使う</li>
+<li>Clang の PGO は <strong>LTO と独立</strong>。本書では切り分けのため、まず PGO 単体で進める</li>
+<li>LogLab では PGO により<strong>実行時間が 7〜8% 短縮</strong>した（ノイズ床 0.4%）</li>
+</ul>
+
+<p class="next"><strong>次章では</strong>、計装ビルドを実際に作ります。オプション自体は一つですが、Windows では「プロファイルランタイムのライブラリが見つからない」という壁にぶつかりがちです。その仕組みと対処を扱います。あわせて、計装ビルドがどれだけ重いのかも実測します。</p>
+
+</div>
+</body>
+</html>

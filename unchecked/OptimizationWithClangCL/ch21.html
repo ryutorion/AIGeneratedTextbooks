@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第21章 -fwhole-program-vtables — Clang最適化入門</title>
+<style>
+:root{
+  --ink:#1b1d21; --sub:#5c626b; --line:#dfe3e8; --bg:#fff;
+  --code-bg:#f5f7f9; --code-ink:#22262b; --accent:#2f5d8a;
+  --note-bg:#eef4fa; --note-line:#4a80b5;
+  --warn-bg:#fdf4ec; --warn-line:#c07830;
+  --tip-bg:#eef7f1; --tip-line:#4a8c5f;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Meiryo",system-ui,sans-serif;
+  font-size:16px; line-height:1.9; text-align:justify;
+}
+.book{max-width:46rem; margin:0 auto; padding:3rem 1.25rem 6rem}
+.chapno{font-size:.82rem; letter-spacing:.18em; color:var(--accent); font-weight:700; margin:0 0 .4rem}
+h1{font-size:1.85rem; line-height:1.45; margin:0 0 .6rem; letter-spacing:.01em}
+.lead{color:var(--sub); font-size:1.02rem; margin:0 0 2.5rem; padding-bottom:2rem; border-bottom:2px solid var(--line)}
+h2{font-size:1.32rem; margin:3.2rem 0 1rem; padding-bottom:.45rem; border-bottom:1px solid var(--line); letter-spacing:.01em}
+h3{font-size:1.08rem; margin:2.2rem 0 .7rem; color:#2c3239}
+h4{font-size:.98rem; margin:1.6rem 0 .5rem; color:#3a4048}
+p{margin:0 0 1.1rem}
+ul,ol{margin:0 0 1.2rem; padding-left:1.5rem}
+li{margin:.4rem 0}
+code{
+  font-family:"Cascadia Mono","Consolas","SF Mono",monospace;
+  font-size:.88em; background:var(--code-bg); padding:.12em .38em;
+  border-radius:3px; border:1px solid var(--line); word-break:break-all;
+}
+pre{
+  background:var(--code-bg); color:var(--code-ink); border:1px solid var(--line);
+  border-left:3px solid var(--accent); border-radius:4px;
+  padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.6;
+}
+pre code{background:none; border:none; padding:0; font-size:.85rem; word-break:normal}
+.cap{font-size:.83rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+.box{border-radius:4px; padding:.95rem 1.15rem; margin:1.6rem 0; font-size:.95rem}
+.box p:last-child{margin-bottom:0}
+.box .t{font-weight:700; font-size:.86rem; letter-spacing:.06em; display:block; margin-bottom:.4rem}
+.note{background:var(--note-bg); border-left:4px solid var(--note-line)}
+.note .t{color:var(--note-line)}
+.warn{background:var(--warn-bg); border-left:4px solid var(--warn-line)}
+.warn .t{color:var(--warn-line)}
+.tip{background:var(--tip-bg); border-left:4px solid var(--tip-line)}
+.tip .t{color:var(--tip-line)}
+table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+th{background:var(--code-bg); font-weight:700}
+figure{margin:2rem 0}
+figure svg{display:block; width:100%; height:auto}
+figcaption{font-size:.83rem; color:var(--sub); text-align:center; margin-top:.7rem}
+.goal{border:1px solid var(--line); border-top:3px solid var(--accent); border-radius:4px; padding:1.1rem 1.3rem; margin:0 0 2.4rem; background:#fbfcfd}
+.goal h2{margin:0 0 .6rem; font-size:1rem; border:none; padding:0; letter-spacing:.06em}
+.goal ul{margin-bottom:0}
+.next{margin-top:3.5rem; padding-top:1.4rem; border-top:2px solid var(--line); color:var(--sub); font-size:.95rem}
+.next strong{color:var(--ink)}
+.chk{list-style:none; padding-left:0}
+.chk li{padding-left:1.7rem; position:relative}
+.chk li::before{content:"\2610"; position:absolute; left:.2rem; color:var(--accent); font-size:1.05rem}
+.path{font-size:.93rem; color:var(--sub); background:var(--code-bg); border:1px solid var(--line); border-radius:3px; padding:.5rem .8rem; margin:0 0 1.2rem}
+.partend{margin-top:3rem; padding:1.2rem 1.4rem; border:2px solid var(--accent); border-radius:5px; background:#fbfcfd}
+.partend h3{margin-top:0; color:var(--accent)}
+.real{border-left-color:var(--tip-line)}
+@media (prefers-color-scheme:dark){
+  :root{
+    --ink:#e6e8ea; --sub:#a2a9b2; --line:#333940; --bg:#16181b;
+    --code-bg:#1e2126; --code-ink:#dfe3e8; --accent:#7fb0dd;
+    --note-bg:#1b2530; --note-line:#5f96c9;
+    --warn-bg:#2b2118; --warn-line:#d09154;
+    --tip-bg:#182619; --tip-line:#6aad7d;
+  }
+  h3{color:#d5d9dd} h4{color:#c3c9cf}
+  .goal,.partend{background:#1a1d21}
+}
+</style>
+</head>
+<body>
+<div class="book">
+
+<p class="chapno">第 21 章</p>
+<h1><code>-fwhole-program-vtables</code><br>— 仮想関数のデバーチャライズ</h1>
+<p class="lead">第 8 章の逆アセンブルに <code>call qword ptr [rax + 0x10]</code> という行がありました。仮想関数テーブル経由の間接呼び出しです。LTO はこれを直接呼び出しに変えられる場合があります。ただし条件は厳しく、LogLab では成立しません。その理由を理解することが、この章の本題です。</p>
+
+<div class="goal">
+<h2>この章のゴール</h2>
+<ul>
+<li>間接呼び出しが最適化を妨げる理由を理解する</li>
+<li>デバーチャライズが成立する条件を知る</li>
+<li><code>-fwhole-program-vtables</code> を有効にし、効果を測定する</li>
+<li><strong>効かなかったときに、なぜ効かないのかを説明できるようになる</strong></li>
+</ul>
+</div>
+
+<h2>21.1 間接呼び出しの何が問題か</h2>
+
+<p>仮想関数の呼び出しは、機械語では次のようになります。</p>
+
+<pre><code>mov     rdi, qword ptr [r13]        ; オブジェクトのポインタ
+mov     rax, qword ptr [rdi]        ; vtable のアドレスを取り出す
+mov     rsi, r12                    ; 引数
+call    qword ptr [rax + 0x10]      ; vtable の 3 番目のエントリを呼ぶ</code></pre>
+
+<p>コスト自体は数命令ですが、本当の損失はそこではありません。</p>
+
+<p><strong>コンパイラは、この <code>call</code> がどこへ行くのかを知りません。</strong> 第 11 章で見たインライン化の連鎖——定数伝播、デッドコード削除、ベクトル化——は、呼び先が分からなければ一つも始まりません。第 9 章のリマークでいう <code>indirect call</code> がこれです。</p>
+
+<h2>21.2 デバーチャライズの条件</h2>
+
+<p>間接呼び出しを直接呼び出しに変えることをデバーチャライズと呼びます。成立するのは、コンパイラが<strong>呼び先を一つに絞れるとき</strong>です。そのためには二つのことが必要です。</p>
+
+<table>
+<thead><tr><th>必要なこと</th><th>誰が担うか</th></tr></thead>
+<tbody>
+<tr><td>ある基底クラスの派生クラスが<strong>全部で何個あるか</strong>を知る</td><td>LTO（プログラム全体が見えるから）</td></tr>
+<tr><td>プログラムが<strong>閉じている</strong>と保証する（外から新しい派生クラスが来ない）</td><td>リンカの設定と、DLL の有無</td></tr>
+</tbody>
+</table>
+
+<p>一つ目が <code>-fwhole-program-vtables</code> の役割です。仮想関数テーブルに関する情報を IR に載せ、LTO の段階で「この基底クラスの実装はこれで全部だ」と結論できるようにします。</p>
+
+<h2>21.3 有効にする</h2>
+
+<p class="path"><strong>構成プロパティ &gt; C/C++ &gt; コマンド ライン &gt; 追加のオプション</strong></p>
+
+<pre><code>/clang:-flto  /clang:-fwhole-program-vtables</code></pre>
+
+<div class="box warn">
+<span class="t">LTO が前提です</span>
+<p><code>-fwhole-program-vtables</code> は単独では機能しません。プログラム全体を見る仕組みが無ければ、「派生クラスはこれで全部」と結論できないからです。<code>-flto</code> または <code>-flto=thin</code> と必ず併用してください。</p>
+</div>
+
+<h2>21.4 実測 — 実装が一つのとき</h2>
+
+<p>最小の例で確かめます。基底クラス <code>Sink</code> と、その実装が一つだけあるプログラムです。</p>
+
+<pre><code>// iface.h
+struct Sink {
+    virtual ~Sink() = default;
+    virtual int put(int v) = 0;
+};
+Sink* make_sink();
+
+// impl.cpp
+namespace {
+struct CountSink final : Sink {
+    int n = 0;
+    int put(int v) override { n += v; return n; }
+};
+}
+Sink* make_sink() { static CountSink s; return &amp;s; }
+
+// main.cpp
+Sink* s = make_sink();
+int r = 0;
+for (int i = 0; i &lt; 1000; ++i) r = s-&gt;put(i);</code></pre>
+
+<p>ビルド方法を変えながら、間接呼び出し（<code>call qword ptr</code>）の数を数えました。</p>
+
+<table>
+<thead><tr><th>ビルド</th><th>間接呼び出しの数</th></tr></thead>
+<tbody>
+<tr><td>LTO なし</td><td>2</td></tr>
+<tr><td>LTO のみ</td><td>2</td></tr>
+<tr><td>LTO + <code>-fwhole-program-vtables</code></td><td>2</td></tr>
+<tr><td>LTO + <code>-fwhole-program-vtables</code> + リンカに「閉じている」と指示</td><td><strong>1</strong></td></tr>
+</tbody>
+</table>
+<p class="cap">実測の一例</p>
+
+<p>三行目に注目してください。<strong><code>-fwhole-program-vtables</code> を付けただけでは変化がありません。</strong> リンカが「このプログラムに外から派生クラスが追加されることはない」と認めて初めて、デバーチャライズが起きました。</p>
+
+<div class="box note">
+<span class="t">プラットフォームによる違い</span>
+<p>この「閉じている」保証の必要性は、動的リンクの仕組みに由来します。ELF（Linux など）では、実行時に共有ライブラリのシンボルが別の定義で置き換わりうるため、リンカに明示的に指示する必要があります（<code>--lto-whole-program-visibility</code>）。</p>
+<p>Windows の PE/COFF にはこのシンボル置き換えの仕組みがありません。そのため lld-link には対応するオプションが用意されていません。<strong>実際にどう振る舞うかは、必ずご自身の環境で確認してください。</strong> 確認方法は単純です。</p>
+<pre><code>llvm-objdump -d --x86-asm-syntax=intel --no-show-raw-insn ClangOptLab.exe ^
+  | findstr /C:"call    qword ptr" | find /c /v ""</code></pre>
+<p>この数がオプションの有無で減れば、効いています。</p>
+</div>
+
+<h2>21.5 実測 — 実装が二つになると</h2>
+
+<p>同じプログラムに、派生クラスをもう一つ足しました。</p>
+
+<pre><code>struct XorSink final : Sink { int n = 0; int put(int v) override { n ^= v; return n; } };</code></pre>
+
+<table>
+<thead><tr><th>実装の数</th><th>間接呼び出しの数</th></tr></thead>
+<tbody>
+<tr><td>1 個</td><td><strong>1</strong>（デバーチャライズされた）</td></tr>
+<tr><td>2 個</td><td>2（変化なし）</td></tr>
+</tbody>
+</table>
+
+<p>実装が二つになった瞬間、効果が消えました。呼び先が一つに絞れないからです。</p>
+
+<h2>21.6 LogLab では効きません</h2>
+
+<p>ここで LogLab に戻ります。<code>Filter</code> の実装は三つありました。</p>
+
+<pre><code>class LevelFilter final : public Filter { ... };
+class ComponentFilter final : public Filter { ... };
+class MessageFilter final : public Filter { ... };</code></pre>
+
+<p>実際に測っても、変化はありませんでした。</p>
+
+<table>
+<thead><tr><th>ビルド</th><th>間接呼び出し</th><th><code>loglab::</code> への <code>call</code></th><th><code>.text</code></th></tr></thead>
+<tbody>
+<tr><td>Full LTO</td><td>8</td><td>6</td><td>7,911 B</td></tr>
+<tr><td>Full LTO + <code>-fwhole-program-vtables</code></td><td>8</td><td>6</td><td>7,911 B</td></tr>
+</tbody>
+</table>
+<p class="cap">実測の一例。バイト単位まで完全に同一でした</p>
+
+<div class="box tip">
+<span class="t">これが本章でいちばん重要な結果です</span>
+<p><code>-fwhole-program-vtables</code> は「仮想関数呼び出しを速くするオプション」ではありません。<strong>実装が事実上一つしかない抽象化を、抽象化のコストごと消し去るオプション</strong>です。</p>
+<p>だからこそ効く場面は限られます。逆に言えば、効く場面ははっきりしています。「将来の拡張のために」インターフェースを切ったものの、実装が一つしかないまま数年が経った——そういうクラスが、このオプションの本命です。</p>
+</div>
+
+<h2>21.7 それでも間接呼び出しを減らしたいなら</h2>
+
+<p>デバーチャライズが成立しない場合の選択肢を挙げておきます。</p>
+
+<table>
+<thead><tr><th>手段</th><th>内容</th><th>本書での扱い</th></tr></thead>
+<tbody>
+<tr><td><code>final</code> を付ける</td><td>クラスや仮想関数に <code>final</code> を付けると、そのポインタ型経由の呼び出しは LTO 無しでもデバーチャライズできる。ただし<strong>基底クラスのポインタ経由では効かない</strong></td><td>本章</td></tr>
+<tr><td>ポインタの型を絞る</td><td><code>Sink*</code> ではなく <code>CountSink*</code> として持てば、そもそも仮想呼び出しにならない</td><td>設計の問題</td></tr>
+<tr><td><strong>間接呼び出しの投機的展開</strong></td><td>プロファイルで「この間接呼び出しの 95% は <code>LevelFilter::accept</code> に行く」と分かれば、その場合の分岐を作って展開できる</td><td><strong>第 32 章（PGO）</strong></td></tr>
+<tr><td>仮想関数を使わない設計にする</td><td>テンプレート、<code>std::variant</code> など</td><td>本書の範囲外</td></tr>
+</tbody>
+</table>
+
+<p>三つ目に注目してください。LogLab のように<strong>実装が複数あるが、実行時の分布が偏っている</strong>ケースこそ、PGO が力を発揮する場所です。<code>-fwhole-program-vtables</code> が「静的に一つに絞れるか」を問うのに対し、PGO は「実際にはどこへ行っているか」を問います。第 5 部で LogLab の <code>Filter::accept()</code> に戻ってきます。</p>
+
+<div class="box warn">
+<span class="t"><code>final</code> について補足</span>
+<p><code>final</code> は無料で付けられる有用な指定ですが、万能ではありません。LogLab の三つのフィルタはすべて <code>final</code> が付いていますが、呼び出しは <code>Filter*</code> 経由なので効果がありません。<code>final</code> が効くのは「<code>CountSink* p; p-&gt;put(x);</code>」のように、派生クラスの型が分かっている場合です。</p>
+</div>
+
+<h2>21.8 DLL があると成立しません</h2>
+
+<p>もう一つの前提「プログラムが閉じている」は、DLL を使うと崩れます。DLL からエクスポートされたクラスは、どこから派生されるか分かりません。逆に、実行ファイル側のクラスが DLL 側から派生される可能性もあります。</p>
+
+<p>この話は次章で扱います。</p>
+
+<h2>21.9 ハンズオン</h2>
+
+<ol>
+<li>追加のオプションに <code>/clang:-fwhole-program-vtables</code> を足してリビルドする</li>
+<li>間接呼び出し（<code>call qword ptr</code>）の数を、付ける前と後で数える</li>
+<li><code>.text</code> のサイズも比べる</li>
+<li>変化がないことを確認する（LogLab では変わりません）</li>
+<li>21.4 節の <code>Sink</code> の例を自分で作り、実装が一つのときの挙動を確かめる</li>
+<li>実装を二つに増やして、効果が消えることを確かめる</li>
+</ol>
+
+<h2>21.10 まとめ</h2>
+
+<ul>
+<li>間接呼び出しの真のコストは命令数ではなく、<strong>インライン化の連鎖が始まらないこと</strong></li>
+<li>デバーチャライズには「派生クラスの全体像」と「プログラムが閉じていること」の両方が要る</li>
+<li><code>-fwhole-program-vtables</code> は LTO との併用が前提。単独では機能しない</li>
+<li>実測では、<strong>実装が 1 個のときだけ</strong>デバーチャライズされた。2 個になると効果が消える</li>
+<li>LogLab は <code>Filter</code> の実装が 3 個あるため、<strong>バイト単位で何も変わらなかった</strong></li>
+<li>このオプションの本命は「実装が一つしかない抽象化」を消すこと</li>
+<li>実装が複数あって分布が偏っている場合は、PGO の出番（第 32 章）</li>
+</ul>
+
+<p class="next"><strong>次章では</strong>、LTO と静的ライブラリ・DLL の関係を扱います。ビットコードを含む <code>.lib</code> は作れるのか、LTO はライブラリの境界を越えられるのか、DLL があると何ができなくなるのか。実際のプロジェクトで LTO を導入するときに、必ずぶつかる問題です。</p>
+
+</div>
+</body>
+</html>

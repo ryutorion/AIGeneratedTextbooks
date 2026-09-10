@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第7章 LLVM 最適化パイプライン概観 — Clang最適化入門</title>
+<style>
+:root{
+  --ink:#1b1d21; --sub:#5c626b; --line:#dfe3e8; --bg:#fff;
+  --code-bg:#f5f7f9; --code-ink:#22262b; --accent:#2f5d8a;
+  --note-bg:#eef4fa; --note-line:#4a80b5;
+  --warn-bg:#fdf4ec; --warn-line:#c07830;
+  --tip-bg:#eef7f1; --tip-line:#4a8c5f;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Meiryo",system-ui,sans-serif;
+  font-size:16px; line-height:1.9; text-align:justify;
+}
+.book{max-width:46rem; margin:0 auto; padding:3rem 1.25rem 6rem}
+.chapno{font-size:.82rem; letter-spacing:.18em; color:var(--accent); font-weight:700; margin:0 0 .4rem}
+h1{font-size:1.85rem; line-height:1.45; margin:0 0 .6rem; letter-spacing:.01em}
+.lead{color:var(--sub); font-size:1.02rem; margin:0 0 2.5rem; padding-bottom:2rem; border-bottom:2px solid var(--line)}
+h2{font-size:1.32rem; margin:3.2rem 0 1rem; padding-bottom:.45rem; border-bottom:1px solid var(--line); letter-spacing:.01em}
+h3{font-size:1.08rem; margin:2.2rem 0 .7rem; color:#2c3239}
+h4{font-size:.98rem; margin:1.6rem 0 .5rem; color:#3a4048}
+p{margin:0 0 1.1rem}
+ul,ol{margin:0 0 1.2rem; padding-left:1.5rem}
+li{margin:.4rem 0}
+code{
+  font-family:"Cascadia Mono","Consolas","SF Mono",monospace;
+  font-size:.88em; background:var(--code-bg); padding:.12em .38em;
+  border-radius:3px; border:1px solid var(--line); word-break:break-all;
+}
+pre{
+  background:var(--code-bg); color:var(--code-ink); border:1px solid var(--line);
+  border-left:3px solid var(--accent); border-radius:4px;
+  padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.6;
+}
+pre code{background:none; border:none; padding:0; font-size:.85rem; word-break:normal}
+.cap{font-size:.83rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+.box{border-radius:4px; padding:.95rem 1.15rem; margin:1.6rem 0; font-size:.95rem}
+.box p:last-child{margin-bottom:0}
+.box .t{font-weight:700; font-size:.86rem; letter-spacing:.06em; display:block; margin-bottom:.4rem}
+.note{background:var(--note-bg); border-left:4px solid var(--note-line)}
+.note .t{color:var(--note-line)}
+.warn{background:var(--warn-bg); border-left:4px solid var(--warn-line)}
+.warn .t{color:var(--warn-line)}
+.tip{background:var(--tip-bg); border-left:4px solid var(--tip-line)}
+.tip .t{color:var(--tip-line)}
+table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+th{background:var(--code-bg); font-weight:700}
+figure{margin:2rem 0}
+figure svg{display:block; width:100%; height:auto}
+figcaption{font-size:.83rem; color:var(--sub); text-align:center; margin-top:.7rem}
+.goal{border:1px solid var(--line); border-top:3px solid var(--accent); border-radius:4px; padding:1.1rem 1.3rem; margin:0 0 2.4rem; background:#fbfcfd}
+.goal h2{margin:0 0 .6rem; font-size:1rem; border:none; padding:0; letter-spacing:.06em}
+.goal ul{margin-bottom:0}
+.next{margin-top:3.5rem; padding-top:1.4rem; border-top:2px solid var(--line); color:var(--sub); font-size:.95rem}
+.next strong{color:var(--ink)}
+.chk{list-style:none; padding-left:0}
+.chk li{padding-left:1.7rem; position:relative}
+.chk li::before{content:"\2610"; position:absolute; left:.2rem; color:var(--accent); font-size:1.05rem}
+.path{font-size:.93rem; color:var(--sub); background:var(--code-bg); border:1px solid var(--line); border-radius:3px; padding:.5rem .8rem; margin:0 0 1.2rem}
+.partend{margin-top:3rem; padding:1.2rem 1.4rem; border:2px solid var(--accent); border-radius:5px; background:#fbfcfd}
+.partend h3{margin-top:0; color:var(--accent)}
+.real{border-left-color:var(--tip-line)}
+@media (prefers-color-scheme:dark){
+  :root{
+    --ink:#e6e8ea; --sub:#a2a9b2; --line:#333940; --bg:#16181b;
+    --code-bg:#1e2126; --code-ink:#dfe3e8; --accent:#7fb0dd;
+    --note-bg:#1b2530; --note-line:#5f96c9;
+    --warn-bg:#2b2118; --warn-line:#d09154;
+    --tip-bg:#182619; --tip-line:#6aad7d;
+  }
+  h3{color:#d5d9dd} h4{color:#c3c9cf}
+  .goal,.partend{background:#1a1d21}
+}
+</style>
+</head>
+<body>
+<div class="book">
+
+<p class="chapno">第 7 章</p>
+<h1>LLVM 最適化パイプライン概観<br>— <code>-O0</code> から <code>-O3</code> まで、何が足されていくのか</h1>
+<p class="lead">前章で <code>/O2</code> が <code>-O2</code> であることは分かりました。では <code>-O2</code> とは何なのか。この章では最適化パイプラインの構造を眺め、レベルごとに何が加わるのかを実際に表示させて確認します。LTO と PGO が<strong>どこに</strong>効くのかを理解するための土台です。</p>
+
+<div class="goal">
+<h2>この章のゴール</h2>
+<ul>
+<li>コンパイラの三層構造と、最適化が行われる場所を理解する</li>
+<li>LLVM IR を実際に出力して、最適化の前後を見比べる</li>
+<li>最適化パイプラインを表示させ、その構造を読む</li>
+<li><code>-O1</code> / <code>-O2</code> / <code>-O3</code> の差が何なのかを具体的に知る</li>
+</ul>
+</div>
+
+<h2>7.1 コンパイラの三層構造</h2>
+
+<p>Clang / LLVM は大きく三つの層に分かれています。</p>
+
+<figure>
+<svg viewBox="0 0 720 320" role="img" aria-label="Clang/LLVM の三層構造。フロントエンド、ミドルエンド、バックエンドと、それぞれの入出力を示した図">
+  <defs>
+    <marker id="a7" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
+      <path d="M0,0 L9,4.5 L0,9 z" fill="#2f5d8a"/>
+    </marker>
+  </defs>
+
+  <rect x="20" y="46" width="130" height="60" rx="4" fill="#f5f7f9" stroke="#dfe3e8"/>
+  <text x="85" y="72" font-size="12" text-anchor="middle" font-family="monospace" fill="#1b1d21">*.cpp</text>
+  <text x="85" y="91" font-size="10.5" text-anchor="middle" font-family="sans-serif" fill="#5c626b">C++ ソース</text>
+
+  <rect x="190" y="36" width="150" height="80" rx="4" fill="#eef4fa" stroke="#4a80b5"/>
+  <text x="265" y="62" font-size="12.5" text-anchor="middle" font-weight="700" font-family="sans-serif" fill="#1b1d21">フロントエンド</text>
+  <text x="265" y="82" font-size="10.5" text-anchor="middle" font-family="sans-serif" fill="#5c626b">構文解析・意味解析</text>
+  <text x="265" y="100" font-size="10.5" text-anchor="middle" font-family="sans-serif" fill="#5c626b">C++ を理解する唯一の層</text>
+
+  <rect x="380" y="36" width="160" height="80" rx="4" fill="#eef7f1" stroke="#4a8c5f"/>
+  <text x="460" y="62" font-size="12.5" text-anchor="middle" font-weight="700" font-family="sans-serif" fill="#1b1d21">ミドルエンド</text>
+  <text x="460" y="82" font-size="10.5" text-anchor="middle" font-family="sans-serif" fill="#5c626b">LLVM IR の最適化</text>
+  <text x="460" y="100" font-size="10.5" text-anchor="middle" font-family="sans-serif" fill="#4a8c5f">本書が扱うのはここ</text>
+
+  <rect x="580" y="36" width="120" height="80" rx="4" fill="#eef4fa" stroke="#4a80b5"/>
+  <text x="640" y="62" font-size="12.5" text-anchor="middle" font-weight="700" font-family="sans-serif" fill="#1b1d21">バックエンド</text>
+  <text x="640" y="82" font-size="10.5" text-anchor="middle" font-family="sans-serif" fill="#5c626b">命令選択</text>
+  <text x="640" y="100" font-size="10.5" text-anchor="middle" font-family="sans-serif" fill="#5c626b">レジスタ割付</text>
+
+  <line x1="154" y1="76" x2="186" y2="76" stroke="#2f5d8a" stroke-width="1.6" marker-end="url(#a7)"/>
+  <line x1="344" y1="76" x2="376" y2="76" stroke="#2f5d8a" stroke-width="1.6" marker-end="url(#a7)"/>
+  <line x1="544" y1="76" x2="576" y2="76" stroke="#2f5d8a" stroke-width="1.6" marker-end="url(#a7)"/>
+
+  <text x="360" y="140" font-size="10.5" text-anchor="middle" font-family="monospace" fill="#5c626b">LLVM IR</text>
+  <text x="560" y="140" font-size="10.5" text-anchor="middle" font-family="monospace" fill="#5c626b">機械語</text>
+
+  <rect x="20" y="170" width="680" height="62" rx="4" fill="#eef7f1" stroke="#4a8c5f"/>
+  <text x="38" y="194" font-size="11.5" font-weight="700" fill="#4a8c5f" font-family="sans-serif">ミドルエンドの性質</text>
+  <text x="38" y="215" font-size="11" fill="#5c626b" font-family="sans-serif">C++ かどうかも、x64 かどうかも関係ない。IR だけを見て IR を書き換える。Rust も Swift もここを共有する。</text>
+
+  <rect x="20" y="248" width="680" height="56" rx="4" fill="#fdf4ec" stroke="#c07830"/>
+  <text x="38" y="270" font-size="11.5" font-weight="700" fill="#c07830" font-family="sans-serif">本書の三つの武器はどこで効くか</text>
+  <text x="38" y="290" font-size="11" fill="#5c626b" font-family="sans-serif">LTO＝リンク時にミドルエンドをもう一度回す／PGO・CSPGO＝ミドルエンドの判断材料を実測値に差し替える</text>
+</svg>
+<figcaption>図 7-1　Clang / LLVM の三層構造と、本書が扱う領域</figcaption>
+</figure>
+
+<p>最後の一行が本書の主題そのものです。<strong>LTO も PGO も、新しい最適化アルゴリズムを追加するものではありません。</strong> どちらも、既存のミドルエンドに「より多くの情報」または「より多くの機会」を与える仕組みです。だからこそ、まずミドルエンドが何をしているかを知る必要があります。</p>
+
+<h2>7.2 LLVM IR を見てみる</h2>
+
+<p>百聞は一見に如かず、です。実際に IR を出力してみましょう。</p>
+
+<pre><code>clang-cl /c /O2 /clang:-emit-llvm /clang:-S sample.cpp</code></pre>
+
+<p><code>.ll</code> という拡張子のテキストファイルが生成されます。次のような小さなコードで試すのが分かりやすいでしょう。</p>
+
+<pre><code>int helper(int a, int b) { return a * b + 7; }
+int caller(int n) {
+    int s = 0;
+    for (int i = 0; i &lt; n; ++i) s += helper(i, s);
+    return s;
+}</code></pre>
+<p class="cap">リスト 7-1　sample.cpp</p>
+
+<h3>7.2.1 <code>/Od</code> のときの IR</h3>
+
+<pre><code>define dso_local noundef i32 @"?helper@@YAHHH@Z"(i32 noundef %0, i32 noundef %1) #0 {
+  %3 = alloca i32, align 4
+  %4 = alloca i32, align 4
+  store i32 %1, ptr %3, align 4
+  store i32 %0, ptr %4, align 4
+  %5 = load i32, ptr %4, align 4
+  %6 = load i32, ptr %3, align 4
+  %7 = mul nsw i32 %5, %6
+  %8 = add nsw i32 %7, 7
+  ret i32 %8
+}</code></pre>
+
+<p>引数がいったんスタック（<code>alloca</code>）に書き出され（<code>store</code>）、すぐに読み戻されて（<code>load</code>）から計算されています。これはフロントエンドが素直に翻訳した結果で、C++ の変数を機械的にメモリ上の箱として扱っています。</p>
+
+<h3>7.2.2 <code>/O2</code> のときの IR</h3>
+
+<pre><code>; Function Attrs: mustprogress nofree norecurse nosync nounwind sspstrong willreturn memory(none) uwtable
+define dso_local noundef i32 @"?helper@@YAHHH@Z"(i32 noundef %0, i32 noundef %1) local_unnamed_addr #0 {
+  %3 = mul nsw i32 %1, %0
+  %4 = add nsw i32 %3, 7
+  ret i32 %4
+}</code></pre>
+
+<p>メモリ操作がすべて消え、掛けて足して返すだけになりました。これを行ったのが <code>mem2reg</code> と <code>sroa</code> というパスです。<strong>最適化の第一歩は、ほぼ常にこの「メモリからレジスタへ」の変換です。</strong> これが済まないと、後続の最適化はほとんど何もできません。</p>
+
+<p>また、関数の上に <code>memory(none)</code>（メモリに触らない）、<code>nofree</code>、<code>willreturn</code> といった属性が付いていることにも注目してください。これらは後続のパスが判断に使う情報で、LTO を有効にすると<strong>翻訳単位をまたいで</strong>これらが伝播するようになります（第 20 章）。</p>
+
+<div class="box tip">
+<span class="t">名前が読めない場合</span>
+<p><code>@"?helper@@YAHHH@Z"</code> は MSVC 形式にマングルされた名前です。<code>llvm-undname</code> で元に戻せます。</p>
+<pre><code>echo ?helper@@YAHHH@Z | llvm-undname
+int __cdecl helper(int, int)</code></pre>
+</div>
+
+<h2>7.3 パイプラインを表示する</h2>
+
+<p><code>-O2</code> が具体的にどんなパスの並びなのかは、LLVM 自身に聞くことができます。</p>
+
+<pre><code>clang-cl /c /O2 -mllvm -print-pipeline-passes sample.cpp</code></pre>
+
+<p>長大な一行が出力されます。冒頭はこうなっています（実際の出力から抜粋）。</p>
+
+<pre><code>annotation2metadata,forceattrs,declare-to-assign,inferattrs,coro-early,
+function&lt;eager-inv&gt;(lower-expect,simplifycfg&lt;...&gt;,sroa&lt;modify-cfg&gt;,early-cse&lt;&gt;),
+openmp-opt,ipsccp,called-value-propagation,globalopt,
+function&lt;eager-inv&gt;(mem2reg,instcombine&lt;...&gt;,simplifycfg&lt;...&gt;),
+always-inline,require&lt;globals-aa&gt;, ...</code></pre>
+
+<h3>7.3.1 読み方 — 入れ子の意味</h3>
+
+<p>この文字列は、パスの<strong>階層構造</strong>を表しています。</p>
+
+<table>
+<thead><tr><th>表記</th><th>意味</th></tr></thead>
+<tbody>
+<tr><td>括弧の外側に直接あるもの</td><td>モジュール（＝翻訳単位）全体に対して 1 回動くパス</td></tr>
+<tr><td><code>function(...)</code></td><td>各関数に対して順に動くパス群</td></tr>
+<tr><td><code>cgscc(...)</code></td><td>呼び出しグラフの強連結成分ごとに動くパス群。<strong>インライン化はここ</strong></td></tr>
+<tr><td><code>loop(...)</code></td><td>各ループに対して動くパス群</td></tr>
+<tr><td><code>&lt;...&gt;</code></td><td>そのパスに与えられたパラメータ</td></tr>
+</tbody>
+</table>
+
+<p>この入れ子は「同じパスが何度も出てくる」理由でもあります。たとえば <code>instcombine</code>（命令の組み合わせによる簡約）や <code>simplifycfg</code>（制御フローの整理）は、パイプライン全体を通して十数回登場します。あるパスが変換を行うと、その結果としてまた別の簡約の機会が生まれるためです。</p>
+
+<div class="box note">
+<span class="t">最適化は「掃除」と「変換」の繰り返し</span>
+<p>LLVM の最適化パイプラインは、大きな変換を一発で決めるのではなく、小さな整理（instcombine、simplifycfg、early-cse）と大きな変換（inline、loop-vectorize、gvn）を交互に繰り返す構造をしています。インライン化が「最適化の入り口」と呼ばれるのは、インライン化そのものが速いからではなく、<strong>インライン化のあとに掃除のパスが働くと、定数畳み込みやデッドコード削除が一気に進むから</strong>です。第 11 章で改めて扱います。</p>
+</div>
+
+<h2>7.4 <code>-O</code> レベルの実際の差</h2>
+
+<p>各レベルのパイプラインを取り出して比較すると、次のことが分かります。</p>
+
+<h3>7.4.1 <code>-O0</code> はほとんど何もしない</h3>
+
+<p><code>-O0</code> のパイプラインはごく短く、実質的に <code>always-inline</code>（<code>__forceinline</code> の処理）くらいしか行いません。「最適化を切る」というより「最適化パイプラインを組み立てない」という状態です。</p>
+
+<h3>7.4.2 <code>-O1</code> でほぼすべてが揃う</h3>
+
+<p>意外に思われるかもしれませんが、最適化パスの大半は <code>-O1</code> の時点で有効になっています。<code>mem2reg</code>、<code>sroa</code>、<code>instcombine</code>、<code>simplifycfg</code>、インライナ、ループ最適化の基本、そしてループのベクトル化までが <code>-O1</code> に含まれます。</p>
+
+<h3>7.4.3 <code>-O2</code> が <code>-O1</code> に加えるもの</h3>
+
+<p>実測して差分を取ると、次のパスが追加されます。</p>
+
+<table>
+<thead><tr><th>パス</th><th>やること</th></tr></thead>
+<tbody>
+<tr><td><code>gvn</code></td><td>大域的な共通部分式の削除。同じ計算の使い回し</td></tr>
+<tr><td><code>dse</code></td><td>デッドストア除去。誰も読まない書き込みを消す</td></tr>
+<tr><td><code>slp-vectorizer</code></td><td>ループ以外の場所で、隣接する演算をまとめて SIMD 化する</td></tr>
+<tr><td><code>jump-threading</code></td><td>結果が分かっている分岐を飛ばして直結する</td></tr>
+<tr><td><code>correlated-propagation</code></td><td>分岐条件から導ける値の情報を伝播する</td></tr>
+<tr><td><code>aggressive-instcombine</code></td><td>より踏み込んだ命令の簡約</td></tr>
+<tr><td><code>constraint-elimination</code></td><td>比較の関係から冗長な条件を消す</td></tr>
+<tr><td><code>mldst-motion</code></td><td>ロード／ストアの移動</td></tr>
+<tr><td><code>speculative-execution</code></td><td>投機的な実行のための命令移動</td></tr>
+</tbody>
+</table>
+
+<h3>7.4.4 <code>-O3</code> が <code>-O2</code> に加えるもの</h3>
+
+<p>ここが前章の答えです。<code>-O3</code> が追加するのは、たった三つです。</p>
+
+<table>
+<thead><tr><th>パス</th><th>やること</th></tr></thead>
+<tbody>
+<tr><td><code>argpromotion</code></td><td>ポインタ渡しの引数を値渡しに昇格させる</td></tr>
+<tr><td><code>callsite-splitting</code></td><td>呼び出し箇所を条件ごとに分割し、それぞれで特殊化しやすくする</td></tr>
+<tr><td><code>chr</code></td><td>Control Height Reduction。分岐の入れ子を平坦化する</td></tr>
+</tbody>
+</table>
+
+<p>加えて、<code>-O3</code> ではインライン化のしきい値も引き上げられます。しかし追加されるパス自体は三つだけです。<strong>前章で <code>/clang:-O3</code> を試して差が出なかったのは、これが理由です。</strong></p>
+
+<div class="box tip">
+<span class="t"><code>chr</code> は PGO を待っている</span>
+<p>三つのうち <code>chr</code>（Control Height Reduction）は、「どの分岐がホットか」の情報が無いとほとんど何もできません。プロファイルがあって初めて本領を発揮するパスです。つまり <code>-O3</code> の一部は、PGO と組み合わせて初めて意味を持ちます。第 32 章で、PGO を有効にした状態の最適化レコードを見ると、このパスが働き始めるのを確認できます。</p>
+</div>
+
+<h2>7.5 覚えておきたい主要パス</h2>
+
+<p>本書の残りで名前が出てくるものを、役割別にまとめておきます。すべてを覚える必要はありませんが、リマーク（第 9 章）や最適化レコード（第 10 章）を読むときに、パス名から見当が付くと理解が速くなります。</p>
+
+<table>
+<thead><tr><th>分類</th><th>パス</th><th>役割</th></tr></thead>
+<tbody>
+<tr><td rowspan="2">土台</td><td><code>mem2reg</code> / <code>sroa</code></td><td>メモリ上の変数を SSA のレジスタに昇格させる。すべての前提</td></tr>
+<tr><td><code>instcombine</code> / <code>simplifycfg</code></td><td>命令と制御フローの整理。何度も繰り返し動く</td></tr>
+<tr><td rowspan="2">関数間</td><td><code>inline</code></td><td>インライン展開。<strong>本書で最も重要なパス</strong>（第 11 章）</td></tr>
+<tr><td><code>globalopt</code> / <code>ipsccp</code></td><td>グローバル変数の最適化、関数間の定数伝播</td></tr>
+<tr><td rowspan="3">ループ</td><td><code>licm</code></td><td>ループ不変式の外出し</td></tr>
+<tr><td><code>loop-unroll</code></td><td>ループ展開</td></tr>
+<tr><td><code>loop-vectorize</code></td><td>ループの SIMD 化（第 9 章でリマークを読む）</td></tr>
+<tr><td rowspan="2">冗長性除去</td><td><code>gvn</code></td><td>同じ値を計算し直さない</td></tr>
+<tr><td><code>dse</code></td><td>読まれない書き込みを消す</td></tr>
+<tr><td rowspan="2">配置</td><td><code>hot-cold-split</code></td><td>めったに通らない部分を別の関数に切り出す（PGO 前提）</td></tr>
+<tr><td><code>chr</code></td><td>分岐の平坦化（PGO 前提、<code>-O3</code>）</td></tr>
+</tbody>
+</table>
+
+<p>最後の二つに注目してください。<strong>プロファイルがなければ働かないパスが、最初から用意されている</strong>のです。第 5 部で PGO を有効にするとき、私たちは新しい最適化を追加するのではなく、眠っていたこれらのパスを起こすことになります。</p>
+
+<h2>7.6 ハンズオン — LogLab で確かめる</h2>
+
+<p>実際に手を動かして確認しましょう。Developer Command Prompt でプロジェクトのフォルダに移動し、次を実行します。</p>
+
+<pre><code>clang-cl /c /O2 /std:c++23 /Iinclude src\tokenizer.cpp ^
+  /clang:-emit-llvm /clang:-S</code></pre>
+
+<p><code>tokenizer.ll</code> が生成されます。エディタで開き、次を確認してください。</p>
+
+<ol>
+<li><code>parse_line</code> のマングル名で検索し、関数定義を見つける</li>
+<li>その中に <code>next_field</code> や <code>parse_uint</code> の呼び出しが<strong>残っていない</strong>こと（同じ翻訳単位内なのでインライン化済み）</li>
+<li>一方、<code>std::string_view::find</code> にあたる標準ライブラリの呼び出しがどう扱われているか（マングル名は <code>llvm-undname</code> で戻せます）</li>
+</ol>
+
+<p>次に、同じことを <code>main.cpp</code> でやってみます。</p>
+
+<pre><code>clang-cl /c /O2 /std:c++23 /Iinclude src\main.cpp ^
+  /clang:-emit-llvm /clang:-S</code></pre>
+
+<p><code>main.ll</code> の中で <code>parse_line</code> を探すと、今度は <code>call</code> 命令として<strong>残っている</strong>はずです。定義が別の翻訳単位にあるため、中身が見えず、インライン化できないからです。</p>
+
+<div class="box note">
+<span class="t">これが「翻訳単位の壁」の正体</span>
+<p><code>tokenizer.ll</code> の中では消えている呼び出しが、<code>main.ll</code> の中では残っている。この差が、第 4 部で LTO を導入する動機のすべてです。第 20 章では、LTO を有効にしたあとの IR を同じ方法で取り出し、この <code>call</code> がどうなるかを確認します。<strong>いま生成した <code>main.ll</code> は保存しておいてください。</strong></p>
+</div>
+
+<h2>7.7 まとめ</h2>
+
+<ul>
+<li>最適化のほとんどは<strong>ミドルエンド</strong>で LLVM IR に対して行われる。言語も CPU も関係ない層である</li>
+<li>LTO も PGO も新しい最適化ではない。ミドルエンドに<strong>機会</strong>と<strong>情報</strong>を与える仕組みである</li>
+<li>IR は <code>/clang:-emit-llvm /clang:-S</code> でテキストとして取り出せる</li>
+<li>最適化の第一歩は <code>mem2reg</code> / <code>sroa</code> による「メモリからレジスタへ」の変換</li>
+<li>パスの大半は <code>-O1</code> で揃う。<code>-O2</code> は 9 つほど、<code>-O3</code> はわずか 3 つを追加するだけ</li>
+<li><code>hot-cold-split</code> や <code>chr</code> のように、<strong>プロファイルがないと働かないパス</strong>が最初から用意されている</li>
+</ul>
+
+<p class="next"><strong>次章では</strong>、IR よりもう一段下、実際に生成された機械語を見る方法を扱います。<code>/FA</code> によるアセンブリリスト、<code>llvm-objdump</code> による逆アセンブル、Visual Studio の逆アセンブルウィンドウ。三つの手段の使い分けと、最適化の痕跡をどこに探せばよいかを整理します。</p>
+
+</div>
+</body>
+</html>

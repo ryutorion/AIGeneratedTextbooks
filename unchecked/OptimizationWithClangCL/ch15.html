@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第15章 ベンチマークの取り方 — Clang最適化入門</title>
+<style>
+:root{
+  --ink:#1b1d21; --sub:#5c626b; --line:#dfe3e8; --bg:#fff;
+  --code-bg:#f5f7f9; --code-ink:#22262b; --accent:#2f5d8a;
+  --note-bg:#eef4fa; --note-line:#4a80b5;
+  --warn-bg:#fdf4ec; --warn-line:#c07830;
+  --tip-bg:#eef7f1; --tip-line:#4a8c5f;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Meiryo",system-ui,sans-serif;
+  font-size:16px; line-height:1.9; text-align:justify;
+}
+.book{max-width:46rem; margin:0 auto; padding:3rem 1.25rem 6rem}
+.chapno{font-size:.82rem; letter-spacing:.18em; color:var(--accent); font-weight:700; margin:0 0 .4rem}
+h1{font-size:1.85rem; line-height:1.45; margin:0 0 .6rem; letter-spacing:.01em}
+.lead{color:var(--sub); font-size:1.02rem; margin:0 0 2.5rem; padding-bottom:2rem; border-bottom:2px solid var(--line)}
+h2{font-size:1.32rem; margin:3.2rem 0 1rem; padding-bottom:.45rem; border-bottom:1px solid var(--line); letter-spacing:.01em}
+h3{font-size:1.08rem; margin:2.2rem 0 .7rem; color:#2c3239}
+h4{font-size:.98rem; margin:1.6rem 0 .5rem; color:#3a4048}
+p{margin:0 0 1.1rem}
+ul,ol{margin:0 0 1.2rem; padding-left:1.5rem}
+li{margin:.4rem 0}
+code{
+  font-family:"Cascadia Mono","Consolas","SF Mono",monospace;
+  font-size:.88em; background:var(--code-bg); padding:.12em .38em;
+  border-radius:3px; border:1px solid var(--line); word-break:break-all;
+}
+pre{
+  background:var(--code-bg); color:var(--code-ink); border:1px solid var(--line);
+  border-left:3px solid var(--accent); border-radius:4px;
+  padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.6;
+}
+pre code{background:none; border:none; padding:0; font-size:.85rem; word-break:normal}
+.cap{font-size:.83rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+.box{border-radius:4px; padding:.95rem 1.15rem; margin:1.6rem 0; font-size:.95rem}
+.box p:last-child{margin-bottom:0}
+.box .t{font-weight:700; font-size:.86rem; letter-spacing:.06em; display:block; margin-bottom:.4rem}
+.note{background:var(--note-bg); border-left:4px solid var(--note-line)}
+.note .t{color:var(--note-line)}
+.warn{background:var(--warn-bg); border-left:4px solid var(--warn-line)}
+.warn .t{color:var(--warn-line)}
+.tip{background:var(--tip-bg); border-left:4px solid var(--tip-line)}
+.tip .t{color:var(--tip-line)}
+table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+th{background:var(--code-bg); font-weight:700}
+figure{margin:2rem 0}
+figure svg{display:block; width:100%; height:auto}
+figcaption{font-size:.83rem; color:var(--sub); text-align:center; margin-top:.7rem}
+.goal{border:1px solid var(--line); border-top:3px solid var(--accent); border-radius:4px; padding:1.1rem 1.3rem; margin:0 0 2.4rem; background:#fbfcfd}
+.goal h2{margin:0 0 .6rem; font-size:1rem; border:none; padding:0; letter-spacing:.06em}
+.goal ul{margin-bottom:0}
+.next{margin-top:3.5rem; padding-top:1.4rem; border-top:2px solid var(--line); color:var(--sub); font-size:.95rem}
+.next strong{color:var(--ink)}
+.chk{list-style:none; padding-left:0}
+.chk li{padding-left:1.7rem; position:relative}
+.chk li::before{content:"\2610"; position:absolute; left:.2rem; color:var(--accent); font-size:1.05rem}
+.path{font-size:.93rem; color:var(--sub); background:var(--code-bg); border:1px solid var(--line); border-radius:3px; padding:.5rem .8rem; margin:0 0 1.2rem}
+.partend{margin-top:3rem; padding:1.2rem 1.4rem; border:2px solid var(--accent); border-radius:5px; background:#fbfcfd}
+.partend h3{margin-top:0; color:var(--accent)}
+.real{border-left-color:var(--tip-line)}
+@media (prefers-color-scheme:dark){
+  :root{
+    --ink:#e6e8ea; --sub:#a2a9b2; --line:#333940; --bg:#16181b;
+    --code-bg:#1e2126; --code-ink:#dfe3e8; --accent:#7fb0dd;
+    --note-bg:#1b2530; --note-line:#5f96c9;
+    --warn-bg:#2b2118; --warn-line:#d09154;
+    --tip-bg:#182619; --tip-line:#6aad7d;
+  }
+  h3{color:#d5d9dd} h4{color:#c3c9cf}
+  .goal,.partend{background:#1a1d21}
+}
+</style>
+</head>
+<body>
+<div class="book">
+
+<p class="chapno">第 15 章</p>
+<h1>ベンチマークの取り方<br>— ばらつき・ウォームアップ・有意差の判定</h1>
+<p class="lead">第 1 章で「測っていない最適化」を戒めました。しかし測り方が悪ければ、測らないのと大差ありません。この章では、同じバイナリの実行時間がどれだけ揺れるかを実測し、その揺れの中で「速くなった」と言うための手順を確定させます。第 3 部の締めくくりです。</p>
+
+<div class="goal">
+<h2>この章のゴール</h2>
+<ul>
+<li>自分の環境の<strong>ノイズ床</strong>を測る</li>
+<li>ばらつきの原因と、Windows でできる対策を知る</li>
+<li>交互実行（A/B インターリーブ）がなぜ効くのかを理解する</li>
+<li>本書で使う計測スクリプトを用意する</li>
+<li>「差が無い」と正しく言えるようになる</li>
+</ul>
+</div>
+
+<h2>15.1 まず、何もしないで測ってみる</h2>
+
+<p>最適化の話をする前に、実験をひとつ。<strong>まったく同じバイナリ</strong>を 30 回続けて実行し、報告された <code>elapsed</code> を集めます。コードは一行も変えていません。理屈のうえでは、30 回とも同じ時間になるはずです。</p>
+
+<pre><code>n = 30
+最小       443.5 ms
+中央値     453.9 ms
+平均       461.0 ms
+最大       551.9 ms
+標準偏差    20.4 ms
+
+最大 / 最小 = 1.244   ← 24.4% の開き</code></pre>
+<p class="cap">同一バイナリを 30 回実行した結果（実測の一例）</p>
+
+<p><strong>同じバイナリで 24% の開きが出ました。</strong></p>
+
+<p>この事実の意味は重大です。もし「最適化前」を 1 回、「最適化後」を 1 回だけ実行して比べていたら、何もしていないのに「20% 速くなった」という結論を出せてしまいます。逆に、本当に 10% 速くなった改善を「効果なし」と切り捨てることもできます。</p>
+
+<div class="box warn">
+<span class="t">1 回の実行時間を比べてはいけません</span>
+<p>これが本書で最も重要な計測上の約束です。第 4 部以降、LTO や PGO の効果を測るときは必ず複数回実行し、この章で決める手順に従います。</p>
+</div>
+
+<p>もう少し数字を見ると、性質が分かります。</p>
+
+<pre><code>最も速かった 5 回 : 443.5  449.1  449.2  449.3  449.4
+最も遅かった 5 回 : 477.1  479.2  483.8  487.9  551.9</code></pre>
+
+<p>速い側は 449 ミリ秒付近に密集していますが、遅い側は散らばっていて、551.9 という飛び抜けた値もあります。これは<strong>ノイズが一方向にしか働かない</strong>ことを示しています。何かが邪魔をすれば遅くなりますが、邪魔が入らないからといって理論値より速くなることはありません。</p>
+
+<h2>15.2 ばらつきの原因</h2>
+
+<table>
+<thead><tr><th>原因</th><th>内容</th></tr></thead>
+<tbody>
+<tr><td>CPU 周波数の変動</td><td>ターボブースト、省電力状態からの復帰、温度による低下</td></tr>
+<tr><td>他プロセスとの競合</td><td>ウイルス対策ソフト、インデックス作成、更新のダウンロード</td></tr>
+<tr><td>スケジューリング</td><td>どのコアに割り当てられるか。P コア／E コアの違い</td></tr>
+<tr><td>キャッシュの状態</td><td>直前に何が動いていたかで、L3 キャッシュの中身が変わる</td></tr>
+<tr><td>ページフォルト</td><td>初回アクセス時に物理メモリを割り当てるコスト</td></tr>
+<tr><td>メモリの配置</td><td>ASLR により、実行のたびにアドレスが変わる。キャッシュの当たり方が変わる</td></tr>
+<tr><td>ディスクキャッシュ</td><td>実行ファイルや入力データが OS のキャッシュに載っているかどうか</td></tr>
+</tbody>
+</table>
+
+<h2>15.3 Windows でできる対策</h2>
+
+<p>ノイズを完全に消すことはできませんが、減らすことはできます。</p>
+
+<h4>電源プランを高パフォーマンスにする</h4>
+<p>コントロールパネルの電源オプションで「高パフォーマンス」を選び、詳細設定で「プロセッサの電源管理 &gt; 最小のプロセッサの状態」を 100% にします。周波数の上下によるばらつきが小さくなります。ノート PC の場合は<strong>必ず電源に接続してください</strong>。バッテリー駆動では話になりません。</p>
+
+<h4>ウイルス対策ソフトの除外設定</h4>
+<p>ビルド出力フォルダを除外に登録します。実行ファイルを作り直すたびにスキャンが走ると、初回実行が大きく遅くなります。</p>
+
+<h4>デバッガから実行しない</h4>
+<p>Visual Studio の <kbd>F5</kbd> ではなく、コマンドプロンプトから直接起動します。デバッガがアタッチされていると、ヒープの動作が変わり（デバッグヒープ）、例外処理にフックが入ります。<kbd>Ctrl</kbd>+<kbd>F5</kbd>（デバッグなしで開始）でも構いませんが、コマンドラインから測るほうが自動化しやすいでしょう。</p>
+
+<h4>優先度とアフィニティ（効果は限定的）</h4>
+<pre><code>:: 高優先度で、コア 0〜3 に固定して実行する
+start /high /affinity F /wait ClangOptLab.exe</code></pre>
+<p>固定すると再現性は上がりますが、そのコアが E コアだった場合など、本番とは違う条件になることもあります。まずは電源プランとデバッガの二つを押さえるだけで十分です。</p>
+
+<h4>他のことをしない</h4>
+<p>測っている間にブラウザを触らない、ビルドを走らせない。当たり前ですが、いちばん効きます。</p>
+
+<h2>15.4 どの統計量を使うべきか</h2>
+
+<p>「最小値を使え」「いや中央値だ」という議論があります。実際に確かめてみましょう。5 回を 1 組として 6 組取り、それぞれの最小値・中央値・平均を比べた結果です。</p>
+
+<table>
+<thead><tr><th>組</th><th>最小</th><th>中央値</th><th>平均</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>475.1</td><td>476.3</td><td>481.0</td></tr>
+<tr><td>2</td><td>483.5</td><td>488.1</td><td>487.9</td></tr>
+<tr><td>3</td><td>473.5</td><td>476.3</td><td>476.7</td></tr>
+<tr><td>4</td><td>479.0</td><td>482.2</td><td>486.0</td></tr>
+<tr><td>5</td><td>458.0</td><td>463.6</td><td>463.6</td></tr>
+<tr><td>6</td><td>462.6</td><td>467.8</td><td>466.6</td></tr>
+<tr><td colspan="4" style="background:#f5f7f9"><strong>組の間のばらつき</strong></td></tr>
+<tr><td>—</td><td>2.07%</td><td>1.89%</td><td>2.10%</td></tr>
+</tbody>
+</table>
+<p class="cap">実測の一例</p>
+
+<p>結果は<strong>どれもほぼ同じ</strong>でした。最小値を使えば安定する、という単純な話ではありません。</p>
+
+<p>表をよく見ると理由が分かります。組 1〜4 は 473〜483 ミリ秒あたり、組 5〜6 は 458〜467 ミリ秒あたりに固まっています。<strong>組の中でのばらつきではなく、組と組の間で全体が動いている</strong>のです。測定を続けるうちにマシンの状態が変わった、いわゆるドリフトです。</p>
+
+<div class="box note">
+<span class="t">ドリフトは統計量の選択では消せません</span>
+<p>ランダムなノイズなら、たくさん測って平均や最小を取れば減らせます。しかしドリフト——時間とともに環境がじわじわ変わる現象——は、同じ条件で何回測っても消えません。「最適化前を 10 回測ってから、最適化後を 10 回測る」という順番で比較すると、この差をまるごと拾ってしまいます。</p>
+</div>
+
+<h2>15.5 交互実行という解決策</h2>
+
+<p>ドリフトへの対処は単純です。<strong>A と B を交互に実行する。</strong></p>
+
+<pre><code>× A A A A A  B B B B B     ドリフトが A と B の差として現れる
+○ A B A B A B A B A B      ドリフトが A にも B にも等しくかかる</code></pre>
+
+<p>効果を確かめるため、<strong>同じバイナリを二つ用意して</strong>（片方をコピーしただけ）交互に 10 回ずつ実行してみます。中身が同一なので、正しく測れていれば差は 0 になるはずです。</p>
+
+<pre><code>A の最小値 : 449.0 ms
+B の最小値 : 451.9 ms
+差         : 2.9 ms （0.65%）</code></pre>
+<p class="cap">同一バイナリ同士の交互実行（実測の一例）</p>
+
+<p>0.65% まで縮みました。別々に測ったときの 2% から、大きく改善しています。</p>
+
+<div class="box tip">
+<span class="t">この 0.65% が「ノイズ床」です</span>
+<p>差が無いことが分かっているもの同士を比べて出た差。これが、その環境・その手順で測れる限界です。<strong>今後、これより小さい差は「差が無い」と扱います。</strong></p>
+<p>ノイズ床は環境ごとに違います。必ず自分の環境で測ってください。そして、測定手順を変えたら測り直してください。</p>
+</div>
+
+<h2>15.6 計測スクリプト</h2>
+
+<p>ここまでの内容——ウォームアップ、交互実行、最小値での比較——を実装したスクリプトです。第 4 部以降、これを使い続けます。</p>
+
+<pre><code>"""2 つのビルドを交互に実行し、最小値で比較する。"""
+import argparse, re, statistics as st, subprocess, sys
+
+PAT = re.compile(r'elapsed\s*:\s*([\d.]+)\s*ms')
+
+def run_once(exe, args):
+    out = subprocess.run([exe, *args], capture_output=True, text=True).stdout
+    m = PAT.search(out)
+    if not m:
+        sys.exit(f'{exe}: elapsed 行が見つかりません')
+    return float(m.group(1))
+
+def main():
+    p = argparse.ArgumentParser()
+    p.add_argument('exe_a')
+    p.add_argument('exe_b', nargs='?')
+    p.add_argument('-n', type=int, default=10, help='各ビルドの実行回数')
+    p.add_argument('-w', type=int, default=2, help='捨てるウォームアップ回数')
+    p.add_argument('--args', nargs='*', default=[])
+    a = p.parse_args()
+
+    for _ in range(a.w):                      # ウォームアップ
+        run_once(a.exe_a, a.args)
+        if a.exe_b:
+            run_once(a.exe_b, a.args)
+
+    A, B = [], []
+    for _ in range(a.n):                      # 交互に走らせて環境の変動を打ち消す
+        A.append(run_once(a.exe_a, a.args))
+        if a.exe_b:
+            B.append(run_once(a.exe_b, a.args))
+
+    def report(name, v):
+        print(f'{name:&lt;12} n={len(v)}  最小 {min(v):7.1f}  中央値 {st.median(v):7.1f}  '
+              f'最大 {max(v):7.1f}  ばらつき {(max(v)/min(v)-1)*100:4.1f}%')
+
+    report(a.exe_a, A)
+    if not B:
+        return
+    report(a.exe_b, B)
+    d = (min(B) - min(A)) / min(A) * 100
+    print(f'\n最小値の差: {d:+.2f}%  ({min(B)-min(A):+.1f} ms)')
+    print('※ 空試験で出た差より小さければ「差は測れなかった」と判断する')
+
+if __name__ == '__main__':
+    main()</code></pre>
+<p class="cap">リスト 15-1　bench.py</p>
+
+<h3>15.6.1 使い方</h3>
+
+<pre><code>:: 1 つのビルドを測る
+python bench.py x64\Release\ClangOptLab.exe -n 10 --args 200000 50
+
+:: 2 つのビルドを比べる
+python bench.py baseline\ClangOptLab.exe lto\ClangOptLab.exe -n 10 --args 200000 50</code></pre>
+
+<p>出力はこうなります。</p>
+
+<pre><code>baseline\ClangOptLab.exe  n=8  最小   474.1  中央値   476.9  最大   486.5  ばらつき  2.6%
+lto\ClangOptLab.exe       n=8  最小   471.7  中央値   474.8  最大   476.3  ばらつき  1.0%
+
+最小値の差: -0.51%  (-2.4 ms)
+※ 空試験で出た差より小さければ「差は測れなかった」と判断する</code></pre>
+
+<div class="box warn">
+<span class="t">ウォームアップを捨てる理由</span>
+<p>初回の実行は、実行ファイルのディスク読み込み、ページフォルト、ウイルス対策ソフトのスキャンなどで確実に遅くなります。この値を含めると最大値が跳ね上がり、ばらつきの評価を狂わせます。スクリプトでは最初の 2 回を捨てています。</p>
+</div>
+
+<h2>15.7 空試験を必ず行う</h2>
+
+<p>新しい環境で測り始めるとき、あるいは久しぶりに測るときは、<strong>まず空試験</strong>をしてください。</p>
+
+<pre><code>:: 同じ exe をコピーして、それ同士を比べる
+copy x64\Release\ClangOptLab.exe x64\Release\ClangOptLab_copy.exe
+python bench.py x64\Release\ClangOptLab.exe x64\Release\ClangOptLab_copy.exe -n 10 --args 200000 50</code></pre>
+
+<p>ここで出た差が、あなたの環境のノイズ床です。<strong>この数字をメモしてください。</strong> 第 4 部以降、「LTO で 0.8% 速くなった」という結果が出たとき、ノイズ床が 0.65% なら「たぶん差は無い」、0.1% なら「差はありそうだ」と判断できます。</p>
+
+<h2>15.8 報告の仕方</h2>
+
+<p>本書では、性能の変化を次の形で書きます。</p>
+
+<table>
+<thead><tr><th>× 避ける書き方</th><th>○ 本書の書き方</th></tr></thead>
+<tbody>
+<tr><td>「LTO で 5% 速くなりました」</td><td>「最小値で 5.2% 短縮（n=10、交互実行、ノイズ床 0.7%）」</td></tr>
+<tr><td>「効果がありませんでした」</td><td>「差は 0.3% で、ノイズ床（0.7%）を下回った。この環境では差は測れなかった」</td></tr>
+<tr><td>「劇的に速くなりました」</td><td>数字を書く</td></tr>
+</tbody>
+</table>
+
+<p>「差が測れなかった」は「効果が無い」とは違います。測定精度が足りないのか、本当に差が無いのか、この題材では効かないだけなのか——それを区別するには、より長く走らせるか、プロファイラで内訳を見るか、第 10 章の最適化レコードで<strong>コンパイラの判断が変わったかどうか</strong>を確認します。</p>
+
+<div class="box tip">
+<span class="t">時間が動かなくても、判断は変わっているかもしれません</span>
+<p>これが本書で最適化レコードを重視する理由です。実行時間は環境ノイズに埋もれますが、「インライン化された箇所が 4 件増えた」という事実にノイズはありません。<strong>時間で語れないときは、コンパイラの判断で語る。</strong> 第 4 部以降、この二本立てで評価していきます。</p>
+</div>
+
+<h2>15.9 ハンズオン</h2>
+
+<ol>
+<li>電源プランを高パフォーマンスにする（ノート PC なら電源に接続する）</li>
+<li>リスト 15-1 の <code>bench.py</code> を作る</li>
+<li>LogLab を 1 つだけ渡して 20 回実行し、ばらつきの割合を確認する</li>
+<li>exe をコピーして空試験を行い、<strong>ノイズ床をメモする</strong></li>
+<li>参考までに、Visual Studio から <kbd>F5</kbd> で起動した場合の実行時間も見てみる（コマンドラインより遅いはずです）</li>
+</ol>
+
+<h2>15.10 まとめ</h2>
+
+<ul>
+<li>同じバイナリを 30 回実行すると、<strong>最大 24% の開き</strong>が出た。1 回の実行を比べるのは無意味である</li>
+<li>ノイズは一方向にしか働かない。邪魔が入れば遅くなるだけで、速くはならない</li>
+<li>最小値・中央値・平均のどれを選んでも、<strong>ドリフトは消せない</strong></li>
+<li>解決策は<strong>交互実行</strong>。同一バイナリ同士の差が 2% から 0.65% に縮んだ</li>
+<li>新しい環境ではまず<strong>空試験</strong>を行い、ノイズ床を把握する。それより小さい差は報告しない</li>
+<li>報告には必ず「何回」「どう測ったか」「ノイズ床」を添える</li>
+<li>時間で語れないときは、最適化レコードで<strong>コンパイラの判断の変化</strong>を語る</li>
+</ul>
+
+<div class="partend">
+<h3>第 3 部を終えて — 準備完了</h3>
+<p>ここまでで、最適化を評価するための材料がすべて揃いました。手元にあるはずのものを確認してください。</p>
+<ul>
+<li><strong>ベースラインの実行時間</strong>と <strong>checksum</strong>（第 4 章）</li>
+<li><strong><code>baseline_O2_calls.txt</code></strong> — <code>call</code> 命令の一覧（第 8 章）</li>
+<li><strong><code>records_O2.txt</code></strong> — 最適化レコードの集計。特に <code>NoDefinition</code> の件数（第 10 章）</li>
+<li><strong>プロファイルの上位 5 関数</strong>と割合（第 12 章または第 13 章）</li>
+<li><strong><code>baseline_O2.etl</code></strong> — トレースそのもの（第 13 章）</li>
+<li><strong>ノイズ床</strong>（第 15 章）</li>
+</ul>
+<p>これらが、次の 27 章にわたって「何がどう変わったか」を語るための基準になります。ここまで一度も最適化オプションを足していないことに注意してください。<code>/O2</code> のままです。</p>
+<p>第 4 部からは、いよいよ LTO を有効にします。第 9 章で見た <code>function definition is not available</code> というリマークが消えるのか。第 8 章で数えた翻訳単位をまたぐ <code>call</code> が減るのか。そして実行時間はノイズ床を超えて動くのか。すべて、いま揃えた道具で確かめられます。</p>
+</div>
+
+<p class="next"><strong>次章から第 4 部</strong>です。まず LTO とは何か——なぜ <code>.obj</code> 単位の最適化では足りないのかを、第 7 章で見た IR の話とつなげて整理します。そのうえで第 17 章で Full LTO を、第 19 章で ThinLTO を実際に有効にします。</p>
+
+</div>
+</body>
+</html>

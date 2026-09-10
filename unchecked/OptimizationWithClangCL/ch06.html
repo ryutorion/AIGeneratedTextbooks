@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第6章 /O2 の正体 — Clang最適化入門</title>
+<style>
+:root{
+  --ink:#1b1d21; --sub:#5c626b; --line:#dfe3e8; --bg:#fff;
+  --code-bg:#f5f7f9; --code-ink:#22262b; --accent:#2f5d8a;
+  --note-bg:#eef4fa; --note-line:#4a80b5;
+  --warn-bg:#fdf4ec; --warn-line:#c07830;
+  --tip-bg:#eef7f1; --tip-line:#4a8c5f;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Meiryo",system-ui,sans-serif;
+  font-size:16px; line-height:1.9; text-align:justify;
+}
+.book{max-width:46rem; margin:0 auto; padding:3rem 1.25rem 6rem}
+.chapno{font-size:.82rem; letter-spacing:.18em; color:var(--accent); font-weight:700; margin:0 0 .4rem}
+h1{font-size:1.85rem; line-height:1.45; margin:0 0 .6rem; letter-spacing:.01em}
+.lead{color:var(--sub); font-size:1.02rem; margin:0 0 2.5rem; padding-bottom:2rem; border-bottom:2px solid var(--line)}
+h2{font-size:1.32rem; margin:3.2rem 0 1rem; padding-bottom:.45rem; border-bottom:1px solid var(--line); letter-spacing:.01em}
+h3{font-size:1.08rem; margin:2.2rem 0 .7rem; color:#2c3239}
+h4{font-size:.98rem; margin:1.6rem 0 .5rem; color:#3a4048}
+p{margin:0 0 1.1rem}
+ul,ol{margin:0 0 1.2rem; padding-left:1.5rem}
+li{margin:.4rem 0}
+code{
+  font-family:"Cascadia Mono","Consolas","SF Mono",monospace;
+  font-size:.88em; background:var(--code-bg); padding:.12em .38em;
+  border-radius:3px; border:1px solid var(--line); word-break:break-all;
+}
+pre{
+  background:var(--code-bg); color:var(--code-ink); border:1px solid var(--line);
+  border-left:3px solid var(--accent); border-radius:4px;
+  padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.6;
+}
+pre code{background:none; border:none; padding:0; font-size:.85rem; word-break:normal}
+.cap{font-size:.83rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+.box{border-radius:4px; padding:.95rem 1.15rem; margin:1.6rem 0; font-size:.95rem}
+.box p:last-child{margin-bottom:0}
+.box .t{font-weight:700; font-size:.86rem; letter-spacing:.06em; display:block; margin-bottom:.4rem}
+.note{background:var(--note-bg); border-left:4px solid var(--note-line)}
+.note .t{color:var(--note-line)}
+.warn{background:var(--warn-bg); border-left:4px solid var(--warn-line)}
+.warn .t{color:var(--warn-line)}
+.tip{background:var(--tip-bg); border-left:4px solid var(--tip-line)}
+.tip .t{color:var(--tip-line)}
+table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+th{background:var(--code-bg); font-weight:700}
+figure{margin:2rem 0}
+figure svg{display:block; width:100%; height:auto}
+figcaption{font-size:.83rem; color:var(--sub); text-align:center; margin-top:.7rem}
+.goal{border:1px solid var(--line); border-top:3px solid var(--accent); border-radius:4px; padding:1.1rem 1.3rem; margin:0 0 2.4rem; background:#fbfcfd}
+.goal h2{margin:0 0 .6rem; font-size:1rem; border:none; padding:0; letter-spacing:.06em}
+.goal ul{margin-bottom:0}
+.next{margin-top:3.5rem; padding-top:1.4rem; border-top:2px solid var(--line); color:var(--sub); font-size:.95rem}
+.next strong{color:var(--ink)}
+.chk{list-style:none; padding-left:0}
+.chk li{padding-left:1.7rem; position:relative}
+.chk li::before{content:"\2610"; position:absolute; left:.2rem; color:var(--accent); font-size:1.05rem}
+.path{font-size:.93rem; color:var(--sub); background:var(--code-bg); border:1px solid var(--line); border-radius:3px; padding:.5rem .8rem; margin:0 0 1.2rem}
+.partend{margin-top:3rem; padding:1.2rem 1.4rem; border:2px solid var(--accent); border-radius:5px; background:#fbfcfd}
+.partend h3{margin-top:0; color:var(--accent)}
+.real{border-left-color:var(--tip-line)}
+@media (prefers-color-scheme:dark){
+  :root{
+    --ink:#e6e8ea; --sub:#a2a9b2; --line:#333940; --bg:#16181b;
+    --code-bg:#1e2126; --code-ink:#dfe3e8; --accent:#7fb0dd;
+    --note-bg:#1b2530; --note-line:#5f96c9;
+    --warn-bg:#2b2118; --warn-line:#d09154;
+    --tip-bg:#182619; --tip-line:#6aad7d;
+  }
+  h3{color:#d5d9dd} h4{color:#c3c9cf}
+  .goal,.partend{background:#1a1d21}
+}
+</style>
+</head>
+<body>
+<div class="book">
+
+<p class="chapno">第 6 章</p>
+<h1><code>/O2</code> の正体<br>— clang-cl と MSVC のオプション対応関係</h1>
+<p class="lead">本書はこれから多くのオプションを追加していきます。その前に、clang-cl がオプションをどう解釈するのかを押さえておきます。ここを飛ばすと「書いたのに効かない」という、気づきにくい失敗を繰り返すことになります。</p>
+
+<div class="goal">
+<h2>この章のゴール</h2>
+<ul>
+<li>clang-cl が持つ「二重の語彙」を理解する</li>
+<li><code>/O2</code> が LLVM 内部で何になるかを自分で確認する</li>
+<li><code>/clang:</code> と <code>-mllvm</code> の使い分けを覚える</li>
+<li><strong>黙って無視されるオプション</strong>の存在を知り、検出できるようにする</li>
+</ul>
+</div>
+
+<h2>6.1 clang-cl は「MSVC の顔をした Clang」</h2>
+
+<p><code>clang-cl.exe</code> は、Clang 本体とは別のコンパイラではありません。同じ Clang に、MSVC 互換のコマンドライン解釈をかぶせたドライバです。つまり内部では、受け取った <code>/O2</code> のような MSVC 形式のオプションを Clang 内部の形式に翻訳しています。</p>
+
+<p>この構造から、二つのことが導かれます。</p>
+
+<ul>
+<li>MSVC のオプションがすべて対応しているわけではない（対応表に無いものは無視される）</li>
+<li>Clang 固有の機能を使うには、MSVC 形式ではない書き方が必要になる</li>
+</ul>
+
+<p>本書で扱う LTO や PGO は、まさにこの「Clang 固有の機能」です。書き方の作法をここで固めます。</p>
+
+<h3>6.1.1 翻訳結果を確認する — <code>-###</code></h3>
+
+<p><code>-###</code> を付けると、コンパイルを実行せずに「実際に起動されるコマンドと引数」を表示できます。オプションの効果を確認する最も確実な手段です。</p>
+
+<pre><code>clang-cl /c /O2 src\tokenizer.cpp -###</code></pre>
+
+<p>出力は長いので、興味のある部分だけ取り出します。</p>
+
+<pre><code>:: Developer Command Prompt
+clang-cl /c /O2 src\tokenizer.cpp -### 2&gt;&amp;1 | findstr /C:"-O"</code></pre>
+
+<pre><code># Developer PowerShell
+(clang-cl /c /O2 src\tokenizer.cpp -### 2&gt;&amp;1) -split ' ' | Select-String '^"-O'</code></pre>
+
+<div class="box tip">
+<span class="t">この確認手段を覚えておいてください</span>
+<p>本書ではこれ以降、「オプションが効いているか」を疑うたびに <code>-###</code> に戻ってきます。第 3 章のビルドログ確認が「どのオプションが渡ったか」を見るものだとすれば、<code>-###</code> は「渡ったオプションが内部で何になったか」を見るものです。</p>
+</div>
+
+<h2>6.2 <code>/O2</code> は <code>-O2</code> だった</h2>
+
+<p>実際に確認すると、MSVC 形式の最適化オプションは次のように翻訳されています。</p>
+
+<table>
+<thead><tr><th>clang-cl に渡すもの</th><th>内部で使われる Clang の最適化レベル</th><th>備考</th></tr></thead>
+<tbody>
+<tr><td><code>/Od</code></td><td><code>-O0</code></td><td>最適化なし</td></tr>
+<tr><td><code>/O1</code></td><td><strong><code>-Os</code></strong></td><td>速度ではなく<strong>サイズ</strong>優先。<code>-O1</code> ではない</td></tr>
+<tr><td><code>/O2</code></td><td><code>-O2</code></td><td>本書の出発点</td></tr>
+<tr><td><code>/Ox</code></td><td><code>-O2</code></td><td><code>/O2</code> と同じ</td></tr>
+<tr><td><code>/Ot</code></td><td><code>-O2</code></td><td>単独で指定した場合</td></tr>
+</tbody>
+</table>
+
+<p>注目すべきは <code>/O1</code> です。MSVC における <code>/O1</code> は「サイズ優先の最適化」なので、clang-cl はこれを <code>-O1</code> ではなく <code>-Os</code> に対応づけています。「レベルを一段下げたつもり」で <code>/O1</code> を指定すると、意味が変わることになります。</p>
+
+<h2>6.3 <code>-O3</code> の罠</h2>
+
+<p>ここで多くの人がつまずきます。「<code>/O2</code> が <code>-O2</code> なら、<code>-O3</code> を指定すればもっと最適化されるのでは」と考えて、次のように書きます。</p>
+
+<pre><code>clang-cl /c -O3 src\tokenizer.cpp</code></pre>
+
+<p>これは<strong>動きません</strong>。正確には、エラーにはならないのに何の効果もありません。<code>-###</code> で確認すると、内部には <code>-O</code> がひとつも渡っていないことが分かります。つまり最適化レベルは <code>-O0</code> のままです。</p>
+
+<p>唯一の手がかりは、次の警告です。</p>
+
+<pre><code>clang-cl: warning: argument unused during compilation: '-O3' [-Wunused-command-line-argument]</code></pre>
+
+<div class="box warn">
+<span class="t">この警告は MSBuild のビルドでは埋もれます</span>
+<p>Visual Studio の出力ウィンドウは既定で詳細度が低く、警告の数も多いため、この一行に気づくのは困難です。「最適化オプションを足したのに速くならない」と悩んだときは、まず <code>-###</code> で内部の <code>-O</code> レベルを確認してください。<strong>足したつもりのオプションが、足した瞬間に最適化を無効化していた</strong>という事態は実際に起こります。</p>
+</div>
+
+<p>正しい書き方は次のとおりです。</p>
+
+<pre><code>clang-cl /c /clang:-O3 src\tokenizer.cpp</code></pre>
+
+<h2>6.4 オプションの渡し方 — 三つの流儀</h2>
+
+<p>clang-cl に対するオプションの渡し方は三種類あります。この区別が本書の残り全体で効いてきます。</p>
+
+<figure>
+<svg viewBox="0 0 720 300" role="img" aria-label="clang-cl に対する三種類のオプションの渡し方と、それぞれが届く先を示した図">
+  <defs>
+    <marker id="a6" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
+      <path d="M0,0 L9,4.5 L0,9 z" fill="#2f5d8a"/>
+    </marker>
+  </defs>
+  <text x="20" y="26" font-size="12.5" font-weight="700" fill="#2f5d8a" font-family="sans-serif">オプションはどこまで届くか</text>
+
+  <rect x="20" y="46" width="212" height="52" rx="4" fill="#f5f7f9" stroke="#dfe3e8"/>
+  <text x="126" y="68" font-size="12" text-anchor="middle" font-weight="700" font-family="monospace" fill="#1b1d21">/O2  /Zi  /Ob2</text>
+  <text x="126" y="87" font-size="10.5" text-anchor="middle" font-family="sans-serif" fill="#5c626b">(a) MSVC 形式</text>
+
+  <rect x="20" y="118" width="212" height="52" rx="4" fill="#eef4fa" stroke="#4a80b5"/>
+  <text x="126" y="140" font-size="12" text-anchor="middle" font-weight="700" font-family="monospace" fill="#1b1d21">/clang:-Rpass=inline</text>
+  <text x="126" y="159" font-size="10.5" text-anchor="middle" font-family="sans-serif" fill="#5c626b">(b) Clang 形式（確実）</text>
+
+  <rect x="20" y="190" width="212" height="52" rx="4" fill="#fdf4ec" stroke="#c07830"/>
+  <text x="126" y="212" font-size="12" text-anchor="middle" font-weight="700" font-family="monospace" fill="#1b1d21">-mllvm -inline-threshold=…</text>
+  <text x="126" y="231" font-size="10.5" text-anchor="middle" font-family="sans-serif" fill="#5c626b">(c) LLVM 内部オプション</text>
+
+  <rect x="300" y="82" width="150" height="124" rx="4" fill="#f5f7f9" stroke="#dfe3e8"/>
+  <text x="375" y="130" font-size="12.5" text-anchor="middle" font-weight="700" font-family="monospace" fill="#1b1d21">clang-cl</text>
+  <text x="375" y="150" font-size="10.5" text-anchor="middle" font-family="sans-serif" fill="#5c626b">ドライバ</text>
+  <text x="375" y="168" font-size="10.5" text-anchor="middle" font-family="sans-serif" fill="#5c626b">（オプションの翻訳）</text>
+
+  <rect x="518" y="46" width="182" height="80" rx="4" fill="#eef4fa" stroke="#4a80b5"/>
+  <text x="609" y="72" font-size="12" text-anchor="middle" font-weight="700" font-family="monospace" fill="#1b1d21">clang -cc1</text>
+  <text x="609" y="92" font-size="10.5" text-anchor="middle" font-family="sans-serif" fill="#5c626b">フロントエンド</text>
+  <text x="609" y="110" font-size="10.5" text-anchor="middle" font-family="sans-serif" fill="#5c626b">(a)(b) はここまで</text>
+
+  <rect x="518" y="162" width="182" height="80" rx="4" fill="#fdf4ec" stroke="#c07830"/>
+  <text x="609" y="188" font-size="12" text-anchor="middle" font-weight="700" font-family="monospace" fill="#1b1d21">LLVM 最適化パス</text>
+  <text x="609" y="208" font-size="10.5" text-anchor="middle" font-family="sans-serif" fill="#5c626b">ミドルエンド</text>
+  <text x="609" y="226" font-size="10.5" text-anchor="middle" font-family="sans-serif" fill="#5c626b">(c) はここに直接届く</text>
+
+  <line x1="236" y1="72" x2="296" y2="110" stroke="#2f5d8a" stroke-width="1.5" marker-end="url(#a6)"/>
+  <line x1="236" y1="144" x2="296" y2="144" stroke="#2f5d8a" stroke-width="1.5" marker-end="url(#a6)"/>
+  <line x1="236" y1="216" x2="296" y2="178" stroke="#c07830" stroke-width="1.5" marker-end="url(#a6)"/>
+  <line x1="452" y1="120" x2="514" y2="92" stroke="#2f5d8a" stroke-width="1.5" marker-end="url(#a6)"/>
+  <line x1="452" y1="168" x2="514" y2="196" stroke="#c07830" stroke-width="1.5" marker-end="url(#a6)"/>
+
+  <text x="20" y="278" font-size="11" fill="#5c626b" font-family="sans-serif">(a) の対応表に無いオプションは翻訳されず、警告だけ出して消える。これが 6.3 節の罠の正体。</text>
+</svg>
+<figcaption>図 6-1　三種類のオプションの渡し方と、それぞれが届く先</figcaption>
+</figure>
+
+<h3>6.4.1 (a) MSVC 形式 — そのまま書く</h3>
+
+<p><code>/O2</code>、<code>/Zi</code>、<code>/Ob2</code>、<code>/EHsc</code> など。Visual Studio のプロパティページが生成するのはすべてこの形式です。<strong>clang-cl の対応表に載っているものだけ</strong>が翻訳されます。</p>
+
+<h3>6.4.2 (b) Clang 形式 — <code>/clang:</code> を付ける</h3>
+
+<p><code>/clang:</code> に続けて書いたものは、翻訳されずにそのまま Clang のフロントエンドに渡されます。</p>
+
+<pre><code>/clang:-O3
+/clang:-Rpass=inline
+/clang:-fsave-optimization-record</code></pre>
+
+<p>ここで重要な事実があります。<strong>一部の <code>-f</code> 系オプションは <code>/clang:</code> なしでも通りますが、通らないものもあります。</strong> しかも通らない場合はエラーではなく警告です。実測した結果が次の表です。</p>
+
+<table>
+<thead><tr><th>オプション</th><th><code>/clang:</code> なしで直接渡す</th></tr></thead>
+<tbody>
+<tr><td><code>-flto=thin</code></td><td>通る</td></tr>
+<tr><td><code>-fprofile-generate</code> / <code>-fprofile-use=</code></td><td>通る</td></tr>
+<tr><td><code>-fcs-profile-generate</code></td><td>通る</td></tr>
+<tr><td><code>-fwhole-program-vtables</code></td><td>通る</td></tr>
+<tr><td><code>-fprofile-update=atomic</code></td><td>通る</td></tr>
+<tr><td><code>-mllvm &lt;opt&gt;</code></td><td>通る</td></tr>
+<tr><td><strong><code>-Rpass=...</code></strong></td><td><strong>通らない</strong>（<code>unknown argument ignored in clang-cl</code>）</td></tr>
+<tr><td><strong><code>-fsave-optimization-record</code></strong></td><td><strong>通らない</strong>（同上）</td></tr>
+<tr><td><strong><code>-O3</code></strong></td><td><strong>通らない</strong>（<code>argument unused</code>）</td></tr>
+</tbody>
+</table>
+
+<div class="box note">
+<span class="t">本書の方針：Clang 形式には常に <code>/clang:</code> を付ける</span>
+<p>どれが通ってどれが通らないかを暗記する必要はありません。<strong>Clang 形式のオプションには一律で <code>/clang:</code> を付ける</strong>と決めてしまえば、この問題は起きません。<code>/clang:-flto=thin</code> のように、通るものに付けても問題ありません。本書では以後この書き方に統一します。</p>
+</div>
+
+<h3>6.4.3 (c) LLVM 内部オプション — <code>-mllvm</code></h3>
+
+<p>フロントエンドではなく、LLVM の最適化パスそのものが持つ内部オプションを触るための入口です。第 11 章で使う <code>-inline-threshold</code> がこれにあたります。</p>
+
+<pre><code>-mllvm -inline-threshold=500</code></pre>
+
+<div class="box warn">
+<span class="t"><code>-mllvm</code> は非公式な裏口です</span>
+<p>これらは LLVM の開発者向けデバッグオプションであり、互換性の保証がありません。オプション名も既定値も、LLVM のバージョンが上がると予告なく変わりえます。実験や調査には有用ですが、製品のビルド設定に恒久的に残すべきものではありません。第 11 章でこの点を改めて扱います。</p>
+</div>
+
+<h2>6.5 <code>/Ob</code> — インライン展開のレベル</h2>
+
+<p>最適化レベルとは別に、インライン展開だけを制御するオプションがあります。LogLab のような小さな関数が多いコードでは、これが効きます。</p>
+
+<table>
+<thead><tr><th>オプション</th><th>意味</th><th>実測（<code>/O2</code> と併用）</th></tr></thead>
+<tbody>
+<tr><td><code>/Ob0</code></td><td>インライン展開を行わない</td><td>展開されない</td></tr>
+<tr><td><code>/Ob1</code></td><td><code>inline</code> 指定のあるものだけ</td><td>展開されない</td></tr>
+<tr><td><code>/Ob2</code></td><td>コンパイラの判断で展開（Release の既定）</td><td>展開される</td></tr>
+<tr><td><code>/Ob3</code></td><td><code>/Ob2</code> より積極的</td><td>展開される</td></tr>
+</tbody>
+</table>
+
+<p>実測の欄は、次のような小さなコードで <code>-Rpass=inline</code>（第 9 章）を使って確認した結果です。</p>
+
+<pre><code>int helper(int a, int b) { return a * b + 7; }
+int caller(int n) {
+    int s = 0;
+    for (int i = 0; i &lt; n; ++i) s += helper(i, s);
+    return s;
+}</code></pre>
+
+<p><code>/Ob0</code> は「インライン化を止めたときの挙動」を調べる道具として便利です。ある関数がインライン化に依存して速くなっているのかどうかを、切り分けるのに使えます。</p>
+
+<h2>6.6 その他の主要な対応</h2>
+
+<p>本書で登場する範囲のオプションをまとめておきます。</p>
+
+<table>
+<thead><tr><th>やりたいこと</th><th>clang-cl での書き方</th><th>登場章</th></tr></thead>
+<tbody>
+<tr><td>最適化レベルを上げる</td><td><code>/clang:-O3</code></td><td>本章</td></tr>
+<tr><td>デバッグ情報を付ける</td><td><code>/Zi</code> または <code>/Z7</code></td><td>第 14 章</td></tr>
+<tr><td>最適化リマークを出す</td><td><code>/clang:-Rpass=...</code></td><td>第 9 章</td></tr>
+<tr><td>最適化レコードを保存する</td><td><code>/clang:-fsave-optimization-record</code></td><td>第 10 章</td></tr>
+<tr><td>アセンブリリストを出す</td><td><code>/FA</code></td><td>第 8 章</td></tr>
+<tr><td>LLVM IR を出す</td><td><code>/clang:-emit-llvm /clang:-S</code></td><td>第 7 章</td></tr>
+<tr><td>ThinLTO を有効にする</td><td><code>/clang:-flto=thin</code></td><td>第 19 章</td></tr>
+<tr><td>PGO の計装ビルド</td><td><code>/clang:-fprofile-generate</code></td><td>第 26 章</td></tr>
+<tr><td>PGO の最適化ビルド</td><td><code>/clang:-fprofile-use=app.profdata</code></td><td>第 31 章</td></tr>
+<tr><td>命令セットを指定する</td><td><code>/arch:AVX2</code></td><td>—</td></tr>
+<tr><td>浮動小数点の扱い</td><td><code>/fp:precise</code>（既定）/ <code>/fp:fast</code></td><td>—</td></tr>
+</tbody>
+</table>
+
+<div class="box warn">
+<span class="t"><code>/fp:fast</code> について</span>
+<p>浮動小数点の再結合を許すオプションは、確かに速くなることがありますが、計算結果が変わります。第 4 章で用意したチェックサムのような検証手段が、まさにこういうときのためにあります。本書は LTO・PGO を主題とするため <code>/fp:fast</code> は扱いませんが、もし試すなら「結果が変わってもよいのか」を先に確認してください。</p>
+</div>
+
+<h2>6.7 MSBuild でこれらを書く</h2>
+
+<p>プロパティページに対応する項目が無いオプションは、次の場所に書きます。</p>
+
+<p class="path"><strong>構成プロパティ &gt; C/C++ &gt; コマンド ライン &gt; 追加のオプション</strong></p>
+
+<p>複数書く場合は空白またはあらためて改行で区切ります。第 3 章で確認したとおり、ここに書いた内容がコマンドラインの末尾に付きます。<strong>後から来たオプションが優先される</strong>ため、たとえばプロパティページで <code>/O2</code> を選んだうえで、ここに <code>/clang:-O3</code> を書けば <code>-O3</code> が使われます。</p>
+
+<h3>6.7.1 ハンズオン — 確認してみる</h3>
+
+<p>LogLab のプロジェクトで、追加のオプションに次を書いてビルドし直してください。</p>
+
+<pre><code>/clang:-O3</code></pre>
+
+<p>ビルドログ（第 3 章 3.5.2 節）で <code>clang-cl.exe</code> の行を確認し、末尾に <code>/clang:-O3</code> が付いていることを見ます。そのうえで実行し、チェックサムが <code>0x0e8685105a08f105</code> のまま変わらないことを確認してください。</p>
+
+<p>実行時間はどうでしょうか。おそらく、目に見えるほどの差は出ません。<strong><code>-O3</code> は <code>-O2</code> より少しだけ積極的なだけで、劇的な違いはありません。</strong> なぜそうなのかは次章のパイプラインの話で分かります。確認できたら <code>/clang:-O3</code> は消して、<code>/O2</code> に戻しておいてください。</p>
+
+<h2>6.8 まとめ</h2>
+
+<ul>
+<li>clang-cl は MSVC 形式のオプションを Clang 内部の形式に<strong>翻訳する</strong>。対応表に無いものは黙って消える</li>
+<li><code>/O2</code> → <code>-O2</code>、<code>/O1</code> → <strong><code>-Os</code></strong>（<code>-O1</code> ではない）、<code>/Od</code> → <code>-O0</code></li>
+<li><code>clang-cl -O3</code> は<strong>効かない</strong>。<code>/clang:-O3</code> と書く。警告は出るが埋もれやすい</li>
+<li>Clang 形式のオプションには一律 <code>/clang:</code> を付ける、と決めてしまうのが安全</li>
+<li>LLVM のパス内部を触るのは <code>-mllvm</code>。ただし互換性の保証はない</li>
+<li>疑わしいときは <code>-###</code> で「内部で何になったか」を確認する</li>
+</ul>
+
+<p class="next"><strong>次章では</strong>、その <code>-O2</code> が具体的に何をしているのかを見ます。LLVM の最適化パイプラインの構造、<code>-O1</code> から <code>-O2</code>、<code>-O3</code> へと何が足されていくのか、そしてなぜ <code>-O3</code> にしても大して変わらないのか。パイプラインを実際に表示させて確認します。</p>
+
+</div>
+</body>
+</html>

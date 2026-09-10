@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第40章 CMake で同じ構成を再現する — Clang最適化入門</title>
+<style>
+:root{
+  --ink:#1b1d21; --sub:#5c626b; --line:#dfe3e8; --bg:#fff;
+  --code-bg:#f5f7f9; --code-ink:#22262b; --accent:#2f5d8a;
+  --note-bg:#eef4fa; --note-line:#4a80b5;
+  --warn-bg:#fdf4ec; --warn-line:#c07830;
+  --tip-bg:#eef7f1; --tip-line:#4a8c5f;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Meiryo",system-ui,sans-serif;
+  font-size:16px; line-height:1.9; text-align:justify;
+}
+.book{max-width:46rem; margin:0 auto; padding:3rem 1.25rem 6rem}
+.chapno{font-size:.82rem; letter-spacing:.18em; color:var(--accent); font-weight:700; margin:0 0 .4rem}
+h1{font-size:1.85rem; line-height:1.45; margin:0 0 .6rem; letter-spacing:.01em}
+.lead{color:var(--sub); font-size:1.02rem; margin:0 0 2.5rem; padding-bottom:2rem; border-bottom:2px solid var(--line)}
+h2{font-size:1.32rem; margin:3.2rem 0 1rem; padding-bottom:.45rem; border-bottom:1px solid var(--line); letter-spacing:.01em}
+h3{font-size:1.08rem; margin:2.2rem 0 .7rem; color:#2c3239}
+h4{font-size:.98rem; margin:1.6rem 0 .5rem; color:#3a4048}
+p{margin:0 0 1.1rem}
+ul,ol{margin:0 0 1.2rem; padding-left:1.5rem}
+li{margin:.4rem 0}
+code{
+  font-family:"Cascadia Mono","Consolas","SF Mono",monospace;
+  font-size:.88em; background:var(--code-bg); padding:.12em .38em;
+  border-radius:3px; border:1px solid var(--line); word-break:break-all;
+}
+pre{
+  background:var(--code-bg); color:var(--code-ink); border:1px solid var(--line);
+  border-left:3px solid var(--accent); border-radius:4px;
+  padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.6;
+}
+pre code{background:none; border:none; padding:0; font-size:.85rem; word-break:normal}
+.cap{font-size:.83rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+.box{border-radius:4px; padding:.95rem 1.15rem; margin:1.6rem 0; font-size:.95rem}
+.box p:last-child{margin-bottom:0}
+.box .t{font-weight:700; font-size:.86rem; letter-spacing:.06em; display:block; margin-bottom:.4rem}
+.note{background:var(--note-bg); border-left:4px solid var(--note-line)}
+.note .t{color:var(--note-line)}
+.warn{background:var(--warn-bg); border-left:4px solid var(--warn-line)}
+.warn .t{color:var(--warn-line)}
+.tip{background:var(--tip-bg); border-left:4px solid var(--tip-line)}
+.tip .t{color:var(--tip-line)}
+table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+th{background:var(--code-bg); font-weight:700}
+figure{margin:2rem 0}
+figure svg{display:block; width:100%; height:auto}
+figcaption{font-size:.83rem; color:var(--sub); text-align:center; margin-top:.7rem}
+.goal{border:1px solid var(--line); border-top:3px solid var(--accent); border-radius:4px; padding:1.1rem 1.3rem; margin:0 0 2.4rem; background:#fbfcfd}
+.goal h2{margin:0 0 .6rem; font-size:1rem; border:none; padding:0; letter-spacing:.06em}
+.goal ul{margin-bottom:0}
+.next{margin-top:3.5rem; padding-top:1.4rem; border-top:2px solid var(--line); color:var(--sub); font-size:.95rem}
+.next strong{color:var(--ink)}
+.chk{list-style:none; padding-left:0}
+.chk li{padding-left:1.7rem; position:relative}
+.chk li::before{content:"\2610"; position:absolute; left:.2rem; color:var(--accent); font-size:1.05rem}
+.path{font-size:.93rem; color:var(--sub); background:var(--code-bg); border:1px solid var(--line); border-radius:3px; padding:.5rem .8rem; margin:0 0 1.2rem}
+.partend{margin-top:3rem; padding:1.2rem 1.4rem; border:2px solid var(--accent); border-radius:5px; background:#fbfcfd}
+.partend h3{margin-top:0; color:var(--accent)}
+.real{border-left-color:var(--tip-line)}
+@media (prefers-color-scheme:dark){
+  :root{
+    --ink:#e6e8ea; --sub:#a2a9b2; --line:#333940; --bg:#16181b;
+    --code-bg:#1e2126; --code-ink:#dfe3e8; --accent:#7fb0dd;
+    --note-bg:#1b2530; --note-line:#5f96c9;
+    --warn-bg:#2b2118; --warn-line:#d09154;
+    --tip-bg:#182619; --tip-line:#6aad7d;
+  }
+  h3{color:#d5d9dd} h4{color:#c3c9cf}
+  .goal,.partend{background:#1a1d21}
+}
+</style>
+</head>
+<body>
+<div class="book">
+
+<p class="chapno">第 40 章</p>
+<h1>CMake で同じ構成を再現する</h1>
+<p class="lead">本書は MSBuild を主軸にしてきましたが、CMake を使うプロジェクトも多いはずです。同じことを CMake で表現します。LTO には専用の仕組みがあり、PGO は自前で組むことになります。</p>
+
+<div class="goal">
+<h2>この章のゴール</h2>
+<ul>
+<li>CMake から ClangCL を使う</li>
+<li>CMake の LTO 機能を使う</li>
+<li>PGO の三段階を CMake で表現する</li>
+<li>MSBuild との対応を把握する</li>
+</ul>
+</div>
+
+<h2>40.1 ClangCL を使う設定</h2>
+
+<p>二つの方法があります。</p>
+
+<h3>40.1.1 Visual Studio ジェネレータ ＋ ツールセット指定</h3>
+
+<pre><code>cmake -S . -B build -G "Visual Studio 18 2026" -A x64 -T ClangCL</code></pre>
+
+<p><code>-T ClangCL</code> が、第 3 章でプロパティページから選んだ「プラットフォーム ツールセット」に対応します。生成されるのは <code>.sln</code> と <code>.vcxproj</code> なので、実質的に第 39 章と同じ土台になります。</p>
+
+<h3>40.1.2 Ninja ジェネレータ ＋ コンパイラ指定</h3>
+
+<pre><code>cmake -S . -B build -G Ninja ^
+      -DCMAKE_C_COMPILER=clang-cl ^
+      -DCMAKE_CXX_COMPILER=clang-cl ^
+      -DCMAKE_LINKER=lld-link ^
+      -DCMAKE_BUILD_TYPE=Release</code></pre>
+
+<p>ビルドが速く、CI との相性もよい方法です。<strong>Developer Command Prompt から実行してください</strong>（第 2 章）。環境変数が設定されていないと、標準ライブラリのヘッダが見つかりません。</p>
+
+<div class="box tip">
+<span class="t">どちらを選ぶか</span>
+<p>Visual Studio でデバッグしながら開発するなら前者、CI やコマンドライン中心なら後者。本書の内容はどちらでも成立しますが、<strong>PGO の三段階をスクリプト化するなら Ninja のほうが素直</strong>です。ビルドディレクトリを分けるだけで構成を切り替えられます。</p>
+</div>
+
+<h2>40.2 基本の CMakeLists.txt</h2>
+
+<pre><code>cmake_minimum_required(VERSION 3.25)
+project(ClangOptLab CXX)
+
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+add_executable(ClangOptLab
+    src/generator.cpp
+    src/tokenizer.cpp
+    src/filter.cpp
+    src/stats.cpp
+    src/main.cpp
+)
+target_include_directories(ClangOptLab PRIVATE include)
+
+# Release でもデバッグ情報を残す（第 3 章・第 14 章）
+if(MSVC)
+    target_compile_options(ClangOptLab PRIVATE $&lt;$&lt;CONFIG:Release&gt;:/Zi&gt;)
+    target_link_options(ClangOptLab PRIVATE $&lt;$&lt;CONFIG:Release&gt;:/DEBUG&gt;)
+endif()</code></pre>
+<p class="cap">リスト 40-1　CMakeLists.txt（基本形）</p>
+
+<h2>40.3 LTO</h2>
+
+<p>CMake には LTO のための標準的な仕組みがあります。</p>
+
+<pre><code>include(CheckIPOSupported)
+check_ipo_supported(RESULT ipo_ok OUTPUT ipo_msg)
+
+if(ipo_ok)
+    set_property(TARGET ClangOptLab PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+else()
+    message(WARNING "LTO は利用できません: ${ipo_msg}")
+endif()</code></pre>
+
+<p>実際に生成されるコマンドラインを確認すると、Clang に対しては <code>-flto=thin</code> が渡されます。<strong>CMake の既定は ThinLTO です</strong>（第 19 章で推奨した選択と一致します）。</p>
+
+<pre><code>$ cmake --build build -- VERBOSE=1 | grep flto
+  -flto=thin</code></pre>
+
+<h3>40.3.1 Full LTO にしたい場合</h3>
+
+<p><code>INTERPROCEDURAL_OPTIMIZATION</code> は方式を選べないので、Full LTO を使うなら直接指定します。</p>
+
+<pre><code>target_compile_options(ClangOptLab PRIVATE /clang:-flto)
+target_link_options(ClangOptLab PRIVATE /opt:lldlto=2)</code></pre>
+
+<h3>40.3.2 ThinLTO のキャッシュ</h3>
+
+<pre><code>target_link_options(ClangOptLab PRIVATE
+    "/lldltocache:${CMAKE_BINARY_DIR}/ltocache"
+    "/lldltocachepolicy:cache_size_bytes=2g:prune_after=168h"
+)</code></pre>
+
+<div class="box warn">
+<span class="t"><code>INTERPROCEDURAL_OPTIMIZATION</code> と手動指定を混ぜない</span>
+<p>両方を書くと <code>-flto=thin</code> と <code>-flto</code> が両方渡り、後勝ちで意図が読めない状態になります（第 6 章）。<strong>どちらか一方に統一してください。</strong></p>
+</div>
+
+<h2>40.4 PGO</h2>
+
+<p>CMake には PGO のための標準機能がありません。オプションを自分で組み立てます。</p>
+
+<pre><code># PGO のモードを外から指定する
+set(PGO_MODE "off" CACHE STRING "off / generate / use / cs-generate")
+set(PROFILE_DATA "${CMAKE_SOURCE_DIR}/app.profdata" CACHE FILEPATH "")
+set(PROFILE_DIR  "${CMAKE_BINARY_DIR}/prof")
+
+if(PGO_MODE STREQUAL "generate")
+    target_compile_options(ClangOptLab PRIVATE
+        "/clang:-fprofile-generate=${PROFILE_DIR}")
+    target_link_directories(ClangOptLab PRIVATE "${CLANG_RT_LIB_DIR}")
+
+elseif(PGO_MODE STREQUAL "use")
+    if(NOT EXISTS "${PROFILE_DATA}")
+        message(FATAL_ERROR "プロファイルがありません: ${PROFILE_DATA}")
+    endif()
+    target_compile_options(ClangOptLab PRIVATE
+        "/clang:-fprofile-use=${PROFILE_DATA}"
+        "/clang:-Werror=backend-plugin")
+
+elseif(PGO_MODE STREQUAL "cs-generate")
+    target_compile_options(ClangOptLab PRIVATE
+        "/clang:-fprofile-use=${PROFILE_DATA}"
+        "/clang:-fcs-profile-generate=${CMAKE_BINARY_DIR}/csprof")
+endif()</code></pre>
+<p class="cap">リスト 40-2　PGO の切り替え</p>
+
+<p>ビルドディレクトリを分けて使います。</p>
+
+<pre><code>cmake -S . -B build-instr -G Ninja -DCMAKE_CXX_COMPILER=clang-cl ^
+      -DCMAKE_BUILD_TYPE=Release -DPGO_MODE=generate
+cmake --build build-instr
+
+cmake -S . -B build-pgo -G Ninja -DCMAKE_CXX_COMPILER=clang-cl ^
+      -DCMAKE_BUILD_TYPE=Release -DPGO_MODE=use
+cmake --build build-pgo</code></pre>
+
+<div class="box tip">
+<span class="t">プロファイルランタイムのライブラリを探す</span>
+<p>第 26 章で扱った <code>clang_rt.profile-x86_64.lib</code> の場所を、CMake で見つけておくと親切です。</p>
+<pre><code>find_path(CLANG_RT_LIB_DIR clang_rt.profile-x86_64.lib
+    PATHS
+        "$ENV{VCINSTALLDIR}Tools/Llvm/x64/lib/clang/*/lib/windows"
+        "C:/Program Files/LLVM/lib/clang/*/lib/windows"
+)
+if(NOT CLANG_RT_LIB_DIR AND PGO_MODE STREQUAL "generate")
+    message(FATAL_ERROR "プロファイルランタイムが見つかりません")
+endif()</code></pre>
+<p>見つからないまま計装ビルドを試みると、第 26 章の分かりにくいリンクエラーになります。設定の段階で止めたほうが親切です。</p>
+</div>
+
+<h2>40.5 三段階を回すスクリプト</h2>
+
+<pre><code>@echo off
+:: build-pgo.cmd （CMake / Ninja 版）
+setlocal
+set ROOT=%~dp0
+set CM=cmake -S "%ROOT%" -G Ninja -DCMAKE_CXX_COMPILER=clang-cl -DCMAKE_BUILD_TYPE=Release
+
+echo ===== [1/4] 計装ビルド =====
+%CM% -B "%ROOT%build-instr" -DPGO_MODE=generate || exit /b 1
+cmake --build "%ROOT%build-instr" || exit /b 1
+
+echo ===== [2/4] トレーニング =====
+if exist "%ROOT%prof" rmdir /s /q "%ROOT%prof"
+mkdir "%ROOT%prof"
+set LLVM_PROFILE_FILE=%ROOT%prof\run-%%p.profraw
+call "%ROOT%train.cmd" "%ROOT%build-instr\ClangOptLab.exe" || exit /b 1
+set LLVM_PROFILE_FILE=
+
+echo ===== [3/4] マージ =====
+llvm-profdata merge -sparse -output="%ROOT%app.profdata" "%ROOT%prof\*.profraw" || exit /b 1
+
+echo ===== [4/4] 出荷用ビルド =====
+%CM% -B "%ROOT%build-opt" -DPGO_MODE=use || exit /b 1
+cmake --build "%ROOT%build-opt" || exit /b 1
+
+echo 完了: build-opt\ClangOptLab.exe
+endlocal</code></pre>
+<p class="cap">リスト 40-3　build-pgo.cmd（CMake 版）</p>
+
+<h2>40.6 プリセットにまとめる</h2>
+
+<p><code>CMakePresets.json</code> を使うと、コマンドラインが短くなります。</p>
+
+<pre><code>{
+  "version": 6,
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "cacheVariables": {
+        "CMAKE_CXX_COMPILER": "clang-cl",
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "instr",
+      "inherits": "base",
+      "binaryDir": "${sourceDir}/build-instr",
+      "cacheVariables": { "PGO_MODE": "generate" }
+    },
+    {
+      "name": "opt",
+      "inherits": "base",
+      "binaryDir": "${sourceDir}/build-opt",
+      "cacheVariables": { "PGO_MODE": "use", "ENABLE_LTO": "ON" }
+    }
+  ]
+}</code></pre>
+<p class="cap">リスト 40-4　CMakePresets.json</p>
+
+<pre><code>cmake --preset instr &amp;&amp; cmake --build build-instr
+cmake --preset opt   &amp;&amp; cmake --build build-opt</code></pre>
+
+<h2>40.7 MSBuild との対応</h2>
+
+<table>
+<thead><tr><th>やりたいこと</th><th>MSBuild（第 39 章）</th><th>CMake</th></tr></thead>
+<tbody>
+<tr><td>ツールセットの選択</td><td>プラットフォーム ツールセット</td><td><code>-T ClangCL</code> または <code>CMAKE_CXX_COMPILER</code></td></tr>
+<tr><td>構成の切り替え</td><td>ビルド構成（<code>Release-Opt</code> など）</td><td>ビルドディレクトリ ＋ キャッシュ変数</td></tr>
+<tr><td>共通設定の切り出し</td><td>プロパティシート（<code>.props</code>）</td><td>関数、<code>INTERFACE</code> ライブラリ、<code>include()</code></td></tr>
+<tr><td>LTO</td><td><code>/clang:-flto=thin</code> を追加のオプションに</td><td><code>INTERPROCEDURAL_OPTIMIZATION</code></td></tr>
+<tr><td>任意のオプション</td><td>追加のオプション</td><td><code>target_compile_options</code></td></tr>
+<tr><td>リンカのオプション</td><td>リンカーの追加のオプション</td><td><code>target_link_options</code></td></tr>
+<tr><td>条件分岐</td><td><code>Condition="..."</code></td><td><code>if()</code></td></tr>
+<tr><td>コマンドライン</td><td><code>/p:Configuration=...</code></td><td><code>--preset ...</code></td></tr>
+</tbody>
+</table>
+
+<h2>40.8 CMake ならではの注意点</h2>
+
+<h4>キャッシュが残る</h4>
+<p><code>PGO_MODE</code> を変えて同じビルドディレクトリを使い回すと、キャッシュ変数が残って意図しない組み合わせになることがあります。<strong>モードごとにビルドディレクトリを分ける</strong>のが確実です。</p>
+
+<h4>ジェネレータ式のクォート</h4>
+<p><code>/clang:-fprofile-use=...</code> のようにコロンを含むオプションは、ジェネレータ式（<code>$&lt;...&gt;</code>）の中で使うと構文が壊れます。<code>SHELL:</code> プレフィックスや、素直な <code>if()</code> による分岐を使ってください。</p>
+
+<h4>パスの空白</h4>
+<p><code>C:\Program Files\LLVM</code> のように空白を含むパスは、必ずクォートしてください。リスト 40-2 で <code>"..."</code> を付けているのはそのためです。</p>
+
+<h2>40.9 ハンズオン</h2>
+
+<ol>
+<li>リスト 40-1 の <code>CMakeLists.txt</code> を作り、Ninja でビルドする</li>
+<li>checksum が変わらないことを確認する</li>
+<li><code>INTERPROCEDURAL_OPTIMIZATION</code> を有効にし、<code>VERBOSE=1</code> で <code>-flto=thin</code> が渡ることを確認する</li>
+<li>リスト 40-2 の <code>PGO_MODE</code> を追加する</li>
+<li><code>build-instr</code> と <code>build-opt</code> を作り、三段階を通す</li>
+<li>プロファイルを消して <code>PGO_MODE=use</code> を試し、設定段階でエラーになることを確認する</li>
+</ol>
+
+<h2>40.10 まとめ</h2>
+
+<ul>
+<li>ClangCL は <code>-T ClangCL</code>（VS ジェネレータ）か <code>CMAKE_CXX_COMPILER=clang-cl</code>（Ninja）で使う</li>
+<li>Ninja を使う場合は <strong>Developer Command Prompt から</strong></li>
+<li>LTO は <code>INTERPROCEDURAL_OPTIMIZATION</code> で有効になり、Clang では <strong><code>-flto=thin</code></strong> が渡る</li>
+<li>Full LTO やキャッシュは手動でオプションを指定する。<strong>両方を混ぜない</strong></li>
+<li>PGO の標準機能は無い。キャッシュ変数（<code>PGO_MODE</code>）とビルドディレクトリの分離で表現する</li>
+<li>プロファイルランタイムの場所は <code>find_path</code> で探し、無ければ設定段階で止める</li>
+<li><code>CMakePresets.json</code> でコマンドラインを短くできる</li>
+</ul>
+
+<p class="next"><strong>次章では</strong>、これらを CI に載せます。毎回トレーニングを回すのか、プロファイルを保管するのか。陳腐化をどう監視するか。そして——第 31 章で学んだ「効果は環境に依存する」という教訓を、CI の設計にどう反映するか。</p>
+
+</div>
+</body>
+</html>

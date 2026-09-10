@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第2章 Visual Studio 2026 と ClangCL のセットアップ — Clang最適化入門</title>
+<style>
+:root{
+  --ink:#1b1d21; --sub:#5c626b; --line:#dfe3e8; --bg:#fff;
+  --code-bg:#f5f7f9; --code-ink:#22262b; --accent:#2f5d8a;
+  --note-bg:#eef4fa; --note-line:#4a80b5;
+  --warn-bg:#fdf4ec; --warn-line:#c07830;
+  --tip-bg:#eef7f1; --tip-line:#4a8c5f;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Meiryo",system-ui,sans-serif;
+  font-size:16px; line-height:1.9; text-align:justify;
+}
+.book{max-width:46rem; margin:0 auto; padding:3rem 1.25rem 6rem}
+.chapno{font-size:.82rem; letter-spacing:.18em; color:var(--accent); font-weight:700; margin:0 0 .4rem}
+h1{font-size:1.85rem; line-height:1.45; margin:0 0 .6rem; letter-spacing:.01em}
+.lead{color:var(--sub); font-size:1.02rem; margin:0 0 2.5rem; padding-bottom:2rem; border-bottom:2px solid var(--line)}
+h2{font-size:1.32rem; margin:3.2rem 0 1rem; padding-bottom:.45rem; border-bottom:1px solid var(--line); letter-spacing:.01em}
+h3{font-size:1.08rem; margin:2.2rem 0 .7rem; color:#2c3239}
+h4{font-size:.98rem; margin:1.6rem 0 .5rem; color:#3a4048}
+p{margin:0 0 1.1rem}
+ul,ol{margin:0 0 1.2rem; padding-left:1.5rem}
+li{margin:.4rem 0}
+code{
+  font-family:"Cascadia Mono","Consolas","SF Mono",monospace;
+  font-size:.88em; background:var(--code-bg); padding:.12em .38em;
+  border-radius:3px; border:1px solid var(--line); word-break:break-all;
+}
+pre{
+  background:var(--code-bg); color:var(--code-ink); border:1px solid var(--line);
+  border-left:3px solid var(--accent); border-radius:4px;
+  padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.65;
+}
+pre code{background:none; border:none; padding:0; font-size:.86rem; word-break:normal}
+.cap{font-size:.83rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+.box{border-radius:4px; padding:.95rem 1.15rem; margin:1.6rem 0; font-size:.95rem}
+.box p:last-child{margin-bottom:0}
+.box .t{font-weight:700; font-size:.86rem; letter-spacing:.06em; display:block; margin-bottom:.4rem}
+.note{background:var(--note-bg); border-left:4px solid var(--note-line)}
+.note .t{color:var(--note-line)}
+.warn{background:var(--warn-bg); border-left:4px solid var(--warn-line)}
+.warn .t{color:var(--warn-line)}
+.tip{background:var(--tip-bg); border-left:4px solid var(--tip-line)}
+.tip .t{color:var(--tip-line)}
+table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+th{background:var(--code-bg); font-weight:700}
+figure{margin:2rem 0}
+figure svg{display:block; width:100%; height:auto}
+figcaption{font-size:.83rem; color:var(--sub); text-align:center; margin-top:.7rem}
+.goal{border:1px solid var(--line); border-top:3px solid var(--accent); border-radius:4px; padding:1.1rem 1.3rem; margin:0 0 2.4rem; background:#fbfcfd}
+.goal h2{margin:0 0 .6rem; font-size:1rem; border:none; padding:0; letter-spacing:.06em}
+.goal ul{margin-bottom:0}
+.next{margin-top:3.5rem; padding-top:1.4rem; border-top:2px solid var(--line); color:var(--sub); font-size:.95rem}
+.next strong{color:var(--ink)}
+.chk{list-style:none; padding-left:0}
+.chk li{padding-left:1.7rem; position:relative}
+.chk li::before{content:"☐"; position:absolute; left:.2rem; color:var(--accent); font-size:1.05rem}
+@media (prefers-color-scheme:dark){
+  :root{
+    --ink:#e6e8ea; --sub:#a2a9b2; --line:#333940; --bg:#16181b;
+    --code-bg:#1e2126; --code-ink:#dfe3e8; --accent:#7fb0dd;
+    --note-bg:#1b2530; --note-line:#5f96c9;
+    --warn-bg:#2b2118; --warn-line:#d09154;
+    --tip-bg:#182619; --tip-line:#6aad7d;
+  }
+  h3{color:#d5d9dd} h4{color:#c3c9cf}
+  .goal{background:#1a1d21}
+}
+</style>
+</head>
+<body>
+<div class="book">
+
+<p class="chapno">第 2 章</p>
+<h1>Visual Studio 2026 と ClangCL のセットアップ</h1>
+<p class="lead">ClangCL は Visual Studio に同梱されていますが、既定ではインストールされません。この章では必要なコンポーネントを入れ、コマンドラインからバージョンを確認し、必要に応じて公式 LLVM に差し替えるところまでを行います。</p>
+
+<div class="goal">
+<h2>この章のゴール</h2>
+<ul>
+<li>ClangCL に必要な二つのインストーラコンポーネントを入れる</li>
+<li>同梱 LLVM がどこに置かれるかを自分の目で確認する</li>
+<li><code>clang-cl --version</code> の出力を読めるようになる</li>
+<li>公式 LLVM に差し替える方法（<code>LLVMInstallDir</code>）を知る</li>
+</ul>
+</div>
+
+<h2>2.1 二つのコンポーネントが必要</h2>
+
+<p>ClangCL を使うには、Visual Studio インストーラで<strong>二つ</strong>のコンポーネントを入れる必要があります。片方だけでは動きません。</p>
+
+<table>
+<thead><tr><th>コンポーネント</th><th>入るもの</th><th>これが無いと</th></tr></thead>
+<tbody>
+<tr><td>C++ Clang Compiler for Windows<br>（Windows 用 C++ Clang コンパイラ）</td><td><code>clang-cl.exe</code>、<code>lld-link.exe</code> ほか LLVM のツール群</td><td>コンパイラ本体が存在しない</td></tr>
+<tr><td>MSBuild support for LLVM (clang-cl) toolset<br>（LLVM (clang-cl) ツールセットの MSBuild サポート）</td><td>MSBuild 用のツールセット定義（<code>.props</code> / <code>.targets</code>）</td><td>プロジェクトのプラットフォームツールセットに「LLVM (clang-cl)」が出てこない</td></tr>
+</tbody>
+</table>
+
+<h4>手順</h4>
+<ol>
+<li>スタートメニューから <strong>Visual Studio Installer</strong> を起動します</li>
+<li>Visual Studio 2026 の <strong>変更</strong> をクリックします</li>
+<li><strong>個別のコンポーネント</strong> タブを開きます</li>
+<li>検索ボックスに <code>clang</code> と入力します</li>
+<li>上の表の二つにチェックを入れ、<strong>変更</strong> を実行します</li>
+</ol>
+
+<div class="box note">
+<span class="t">コンポーネント名の表記ゆれ</span>
+<p>コンポーネントの表示名は Visual Studio のバージョンや表示言語によって細かく異なります（2019 では「C++ Clang tools for Windows」「C++ Clang-cl for v142 build tools」という名前でした）。名前を厳密に探すより、検索ボックスに <code>clang</code> と入れて出てきたものを見るほうが確実です。コンパイラ本体とツールセット統合の二つがある、という点だけ押さえてください。</p>
+</div>
+
+<div class="box tip">
+<span class="t">ついでに入れておくもの</span>
+<p>第 3 部で計測に使うため、「デスクトップ開発 C++」ワークロード内の <strong>C++ プロファイル ツール</strong> も入れておくと後がスムーズです。PIX for Windows は Visual Studio とは別に配布されているため、第 12 章で改めて導入します。</p>
+</div>
+
+<h2>2.2 どこに入ったかを確認する</h2>
+
+<p>インストールが終わったら、実際にファイルがどこに置かれたかを確認します。GUI ではなくコマンドラインで確認するのは、これ以降の章でツールを直接叩くことが多いからです。</p>
+
+<p>スタートメニューから <strong>Developer Command Prompt for VS 2026</strong>（または <strong>Developer PowerShell for VS 2026</strong>）を開きます。通常のコマンドプロンプトではなく、必ずこちらを使ってください。ツールへのパスや環境変数は、この開発者用シェルが設定してくれます。</p>
+
+<pre><code>:: Developer Command Prompt の場合
+echo %VCINSTALLDIR%
+dir "%VCINSTALLDIR%Tools\Llvm\x64\bin"</code></pre>
+
+<pre><code># Developer PowerShell の場合
+$env:VCINSTALLDIR
+Get-ChildItem "$env:VCINSTALLDIR\Tools\Llvm\x64\bin"</code></pre>
+
+<p>同梱の LLVM は次の場所に配置されます。</p>
+
+<table>
+<thead><tr><th>パス</th><th>中身</th></tr></thead>
+<tbody>
+<tr><td><code>%VCINSTALLDIR%Tools\Llvm\x64\bin\</code></td><td>64 ビット版のツール（本書ではこちらを使います）</td></tr>
+<tr><td><code>%VCINSTALLDIR%Tools\Llvm\bin\</code></td><td>32 ビット版のツール</td></tr>
+</tbody>
+</table>
+
+<div class="box warn">
+<span class="t">末尾のバックスラッシュに注意</span>
+<p><code>%VCINSTALLDIR%</code> は末尾に <code>\</code> が付いた状態で定義されています。そのため <code>%VCINSTALLDIR%Tools\Llvm</code> のように、区切り文字を重ねずに連結します。<code>%VCINSTALLDIR%\Tools\Llvm</code> と書くと <code>\\</code> になりますが、Windows は多くの場合これを許容してしまうため、間違いに気づきにくいところです。</p>
+</div>
+
+<figure>
+<svg viewBox="0 0 720 330" role="img" aria-label="Visual Studio に同梱される LLVM の配置と、公式 LLVM への差し替え経路を示した図">
+  <defs>
+    <marker id="ar2" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
+      <path d="M0,0 L9,4.5 L0,9 z" fill="#2f5d8a"/>
+    </marker>
+    <marker id="ar2b" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
+      <path d="M0,0 L9,4.5 L0,9 z" fill="#c07830"/>
+    </marker>
+  </defs>
+
+  <rect x="20" y="20" width="330" height="180" rx="5" fill="#f5f7f9" stroke="#dfe3e8"/>
+  <text x="36" y="44" font-size="12.5" font-weight="700" fill="#2f5d8a" font-family="sans-serif">Visual Studio 2026 同梱（既定）</text>
+  <text x="36" y="70" font-size="11.5" font-family="monospace" fill="#1b1d21">%VCINSTALLDIR%</text>
+  <text x="48" y="90" font-size="11.5" font-family="monospace" fill="#1b1d21">└ Tools\Llvm\x64\bin\</text>
+  <text x="72" y="112" font-size="11.5" font-family="monospace" fill="#5c626b">clang-cl.exe</text>
+  <text x="72" y="131" font-size="11.5" font-family="monospace" fill="#5c626b">lld-link.exe</text>
+  <text x="72" y="150" font-size="11.5" font-family="monospace" fill="#5c626b">llvm-lib.exe</text>
+  <text x="72" y="169" font-size="11.5" font-family="monospace" fill="#5c626b">llvm-objdump.exe …</text>
+  <text x="36" y="190" font-size="11" fill="#5c626b" font-family="sans-serif">VS のリリースに追随（バージョンは選べない）</text>
+
+  <rect x="390" y="20" width="310" height="180" rx="5" fill="#fdf4ec" stroke="#c07830"/>
+  <text x="406" y="44" font-size="12.5" font-weight="700" fill="#c07830" font-family="sans-serif">公式 LLVM（任意・差し替え）</text>
+  <text x="406" y="70" font-size="11.5" font-family="monospace" fill="#1b1d21">C:\Program Files\LLVM\</text>
+  <text x="418" y="90" font-size="11.5" font-family="monospace" fill="#1b1d21">└ bin\</text>
+  <text x="442" y="112" font-size="11.5" font-family="monospace" fill="#5c626b">clang-cl.exe</text>
+  <text x="442" y="131" font-size="11.5" font-family="monospace" fill="#5c626b">llvm-profdata.exe</text>
+  <text x="442" y="150" font-size="11.5" font-family="monospace" fill="#5c626b">llvm-cov.exe …</text>
+  <text x="406" y="190" font-size="11" fill="#5c626b" font-family="sans-serif">最新版を自分で選べる</text>
+
+  <rect x="180" y="248" width="360" height="58" rx="5" fill="#eef4fa" stroke="#4a80b5"/>
+  <text x="200" y="272" font-size="12.5" font-weight="700" fill="#1b1d21" font-family="sans-serif">Directory.Build.props</text>
+  <text x="200" y="293" font-size="11.5" font-family="monospace" fill="#5c626b">&lt;LLVMInstallDir&gt; / &lt;LLVMToolsVersion&gt;</text>
+
+  <path d="M185,205 L280,244" stroke="#2f5d8a" stroke-width="1.6" fill="none" marker-end="url(#ar2)"/>
+  <path d="M545,205 L450,244" stroke="#c07830" stroke-width="1.6" fill="none" stroke-dasharray="5,4" marker-end="url(#ar2b)"/>
+  <text x="556" y="232" font-size="11" fill="#c07830" font-family="sans-serif">指定すると</text>
+  <text x="556" y="247" font-size="11" fill="#c07830" font-family="sans-serif">こちらを使う</text>
+</svg>
+<figcaption>図 2-1　同梱 LLVM の配置と、公式 LLVM への差し替え</figcaption>
+</figure>
+
+<h2>2.3 バージョンを確認する</h2>
+
+<p>開発者用シェルで次を実行します。</p>
+
+<pre><code>clang-cl --version</code></pre>
+
+<p>次のような出力が返ってきます（数値は環境によって異なります）。</p>
+
+<pre><code>clang version 21.1.0
+Target: x86_64-pc-windows-msvc
+Thread model: posix
+InstalledDir: C:\Program Files\Microsoft Visual Studio\2026\Community\VC\Tools\Llvm\x64\bin</code></pre>
+
+<p>三行それぞれに意味があります。</p>
+
+<table>
+<thead><tr><th>行</th><th>読み方</th></tr></thead>
+<tbody>
+<tr><td><code>clang version</code></td><td>LLVM のバージョン。本書では <strong>LLVM 18 以降</strong>を前提にします。特に CSPGO 関連は版によって挙動が変わるため、この数字は控えておいてください</td></tr>
+<tr><td><code>Target</code></td><td><code>x86_64-pc-windows-msvc</code> であること。<code>-gnu</code> で終わっている場合は MinGW 版の Clang を拾っています</td></tr>
+<tr><td><code>InstalledDir</code></td><td>いま動いている <code>clang-cl.exe</code> の実体の場所。差し替えを行ったときはここで確認します</td></tr>
+</tbody>
+</table>
+
+<div class="box warn">
+<span class="t">Target が <code>-gnu</code> になっていたら</span>
+<p>MinGW / MSYS2 経由で Clang を入れていると、<code>PATH</code> の順序次第でそちらが先に見つかります。本書のツールセットは MSVC の標準ライブラリと ABI を共有する <code>*-windows-msvc</code> 版が前提です。<code>where clang-cl</code> でどれが選ばれているかを確認してください。</p>
+</div>
+
+<p>ついでに、後の章で使うツールの存在も確認しておきましょう。</p>
+
+<pre><code>where clang-cl
+where lld-link
+where llvm-profdata
+where llvm-cov
+where llvm-objdump</code></pre>
+
+<p>ここで <code>llvm-profdata</code> や <code>llvm-cov</code> が見つからないことがあります。同梱される LLVM は完全なフルセットとは限らないためです。この場合の対処が次節です（詳しくは第 5 章で改めて扱います）。</p>
+
+<h2>2.4 公式 LLVM に差し替える</h2>
+
+<p>Visual Studio 同梱の LLVM は、Visual Studio のリリースサイクルに縛られます。バージョンを自分で選べませんし、含まれるツールも Microsoft が選んだ範囲です。本書の後半で扱う CSPGO のように比較的新しい機能を試すときや、<code>llvm-profdata</code> が同梱されていないときは、公式 LLVM を別に入れて差し替えるのが確実です。</p>
+
+<h3>2.4.1 公式 LLVM のインストール</h3>
+
+<p>LLVM の公式リリースページ（GitHub の <code>llvm/llvm-project</code> の Releases）から Windows 用インストーラを入手するか、winget を使います。</p>
+
+<pre><code>winget install LLVM.LLVM</code></pre>
+
+<p>既定では <code>C:\Program Files\LLVM\</code> に入ります。インストーラの「Add LLVM to the system PATH」は、本書では<strong>オフのまま</strong>にしておくことをおすすめします。オンにすると同梱版と公式版のどちらが使われているのか分かりにくくなり、切り分けが難しくなるためです。</p>
+
+<h3>2.4.2 Directory.Build.props で切り替える</h3>
+
+<p>Visual Studio のインストールディレクトリを書き換える必要はありません。MSBuild のプロパティで指定できます。ソリューションファイルと同じフォルダに <code>Directory.Build.props</code> という名前でファイルを作り、次の内容を書きます。</p>
+
+<pre><code>&lt;Project&gt;
+  &lt;PropertyGroup&gt;
+    &lt;LLVMInstallDir&gt;C:\Program Files\LLVM&lt;/LLVMInstallDir&gt;
+    &lt;LLVMToolsVersion&gt;21.1.0&lt;/LLVMToolsVersion&gt;
+  &lt;/PropertyGroup&gt;
+&lt;/Project&gt;</code></pre>
+<p class="cap">リスト 2-1　Directory.Build.props</p>
+
+<table>
+<thead><tr><th>プロパティ</th><th>意味</th></tr></thead>
+<tbody>
+<tr><td><code>LLVMInstallDir</code></td><td>使用する LLVM のルートディレクトリ（<code>bin</code> の親）</td></tr>
+<tr><td><code>LLVMToolsVersion</code></td><td>使用する LLVM のバージョン。同一ルート下に複数バージョンがある場合の選択に使われます</td></tr>
+</tbody>
+</table>
+
+<p><code>Directory.Build.props</code> は MSBuild が自動的に読み込む特別なファイルで、そのフォルダ以下のすべてのプロジェクトに設定が適用されます。<code>.vcxproj</code> を直接編集しなくて済むので、リポジトリを共有する場合にも扱いやすい方法です。</p>
+
+<div class="box warn">
+<span class="t">新しすぎる LLVM は壊れることがあります</span>
+<p>ClangCL は MSVC の標準ライブラリ（MSVC STL）と Windows SDK のヘッダをそのまま使います。これらは Clang の特定バージョンに合わせて調整されているため、極端に新しい／古い LLVM を組み合わせると、標準ヘッダのコンパイルエラーという分かりにくい形で失敗することがあります。まずは同梱版で第 5 部まで進み、必要になった時点で差し替えるのが安全です。</p>
+</div>
+
+<h3>2.4.3 差し替わったことを確認する</h3>
+
+<p>差し替えたつもりで差し替わっていない、というのはよくある事故です。次章でプロジェクトを作ったら、ビルド出力の詳細度を上げて、実際に起動された <code>clang-cl.exe</code> のフルパスを確認してください。手順は第 3 章 3.5 節で扱います。</p>
+
+<h2>2.5 セットアップ確認チェックリスト</h2>
+
+<p>次章に進む前に、以下がすべて満たされていることを確認してください。</p>
+
+<ul class="chk">
+<li>Visual Studio Installer で clang 関連の二つのコンポーネントにチェックが入っている</li>
+<li>Developer Command Prompt for VS 2026 が起動できる</li>
+<li><code>clang-cl --version</code> がバージョンを表示する</li>
+<li>その <code>Target</code> が <code>x86_64-pc-windows-msvc</code> である</li>
+<li><code>where lld-link</code> でリンカが見つかる</li>
+<li><code>clang version</code> の数値をメモした（後の章で参照します）</li>
+</ul>
+
+<h2>2.6 よくあるつまずき</h2>
+
+<h4>プラットフォームツールセットに「LLVM (clang-cl)」が出てこない</h4>
+<p>MSBuild サポートのコンポーネントが入っていません。コンパイラ本体だけを入れた場合に起きます。Visual Studio Installer に戻り、二つ目のコンポーネントを追加してください。追加後は Visual Studio の再起動が必要です。</p>
+
+<h4><code>clang-cl</code> が「内部コマンドまたは外部コマンド〜ではありません」と言われる</h4>
+<p>通常のコマンドプロンプトを使っています。Developer Command Prompt for VS 2026 を使ってください。同梱の LLVM は システムの <code>PATH</code> には登録されません。</p>
+
+<h4><code>%VCINSTALLDIR%</code> が空</h4>
+<p>同じく、開発者用シェルではないシェルを使っています。あるいは Visual Studio Installer での変更後にシェルを開き直していません。</p>
+
+<h4>32 ビット版のツールを拾っている</h4>
+<p><code>InstalledDir</code> が <code>Tools\Llvm\bin</code>（<code>x64</code> が無い）になっている場合です。本書は x64 ターゲットで進めるため、<code>Tools\Llvm\x64\bin</code> 側を使ってください。開発者用シェルにも「x64 Native Tools Command Prompt」など複数の種類があるので、起動したものを確認します。</p>
+
+<h2>2.7 まとめ</h2>
+
+<ul>
+<li>ClangCL には<strong>コンパイラ本体</strong>と<strong>MSBuild ツールセット統合</strong>の二つのコンポーネントが必要</li>
+<li>同梱 LLVM は <code>%VCINSTALLDIR%Tools\Llvm\x64\bin\</code> に置かれ、システムの <code>PATH</code> には入らない</li>
+<li>作業はすべて <strong>Developer Command Prompt / Developer PowerShell for VS 2026</strong> から行う</li>
+<li><code>clang-cl --version</code> の <code>Target</code> が <code>x86_64-pc-windows-msvc</code> であることを確認する</li>
+<li>公式 LLVM への差し替えは <code>Directory.Build.props</code> の <code>LLVMInstallDir</code> / <code>LLVMToolsVersion</code> で行う</li>
+</ul>
+
+<p class="next"><strong>次章では</strong>、実際に Visual Studio でプロジェクトを作り、プラットフォームツールセットを LLVM (clang-cl) に切り替えます。C++23 の設定、リリース構成の確認、そして「実際に clang-cl にどんな引数が渡っているか」をビルドログから読み取る方法まで扱います。あわせて、ClangCL が既定で <code>lld-link</code> を使うという事実を確認します。これは第 4 部の LTO で効いてきます。</p>
+
+</div>
+</body>
+</html>

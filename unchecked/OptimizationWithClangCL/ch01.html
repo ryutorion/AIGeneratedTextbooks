@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第1章 本書の狙いと進め方 — Clang最適化入門</title>
+<style>
+:root{
+  --ink:#1b1d21; --sub:#5c626b; --line:#dfe3e8; --bg:#fff;
+  --code-bg:#f5f7f9; --code-ink:#22262b; --accent:#2f5d8a;
+  --note-bg:#eef4fa; --note-line:#4a80b5;
+  --warn-bg:#fdf4ec; --warn-line:#c07830;
+  --tip-bg:#eef7f1; --tip-line:#4a8c5f;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Meiryo",system-ui,sans-serif;
+  font-size:16px; line-height:1.9; text-align:justify;
+}
+.book{max-width:46rem; margin:0 auto; padding:3rem 1.25rem 6rem}
+.chapno{font-size:.82rem; letter-spacing:.18em; color:var(--accent); font-weight:700; margin:0 0 .4rem}
+h1{font-size:1.85rem; line-height:1.45; margin:0 0 .6rem; letter-spacing:.01em}
+.lead{color:var(--sub); font-size:1.02rem; margin:0 0 2.5rem; padding-bottom:2rem; border-bottom:2px solid var(--line)}
+h2{font-size:1.32rem; margin:3.2rem 0 1rem; padding-bottom:.45rem; border-bottom:1px solid var(--line); letter-spacing:.01em}
+h3{font-size:1.08rem; margin:2.2rem 0 .7rem; color:#2c3239}
+h4{font-size:.98rem; margin:1.6rem 0 .5rem; color:#3a4048}
+p{margin:0 0 1.1rem}
+ul,ol{margin:0 0 1.2rem; padding-left:1.5rem}
+li{margin:.4rem 0}
+code{
+  font-family:"Cascadia Mono","Consolas","SF Mono",monospace;
+  font-size:.88em; background:var(--code-bg); padding:.12em .38em;
+  border-radius:3px; border:1px solid var(--line); word-break:break-all;
+}
+pre{
+  background:var(--code-bg); color:var(--code-ink); border:1px solid var(--line);
+  border-left:3px solid var(--accent); border-radius:4px;
+  padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.65;
+}
+pre code{background:none; border:none; padding:0; font-size:.86rem; word-break:normal}
+.cap{font-size:.83rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+.box{border-radius:4px; padding:.95rem 1.15rem; margin:1.6rem 0; font-size:.95rem}
+.box p:last-child{margin-bottom:0}
+.box .t{font-weight:700; font-size:.86rem; letter-spacing:.06em; display:block; margin-bottom:.4rem}
+.note{background:var(--note-bg); border-left:4px solid var(--note-line)}
+.note .t{color:var(--note-line)}
+.warn{background:var(--warn-bg); border-left:4px solid var(--warn-line)}
+.warn .t{color:var(--warn-line)}
+.tip{background:var(--tip-bg); border-left:4px solid var(--tip-line)}
+.tip .t{color:var(--tip-line)}
+table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+th{background:var(--code-bg); font-weight:700}
+figure{margin:2rem 0}
+figure svg{display:block; width:100%; height:auto}
+figcaption{font-size:.83rem; color:var(--sub); text-align:center; margin-top:.7rem}
+.goal{border:1px solid var(--line); border-top:3px solid var(--accent); border-radius:4px; padding:1.1rem 1.3rem; margin:0 0 2.4rem; background:#fbfcfd}
+.goal h2{margin:0 0 .6rem; font-size:1rem; border:none; padding:0; letter-spacing:.06em}
+.goal ul{margin-bottom:0}
+.next{margin-top:3.5rem; padding-top:1.4rem; border-top:2px solid var(--line); color:var(--sub); font-size:.95rem}
+.next strong{color:var(--ink)}
+.tu{overflow-x:auto}
+@media (prefers-color-scheme:dark){
+  :root{
+    --ink:#e6e8ea; --sub:#a2a9b2; --line:#333940; --bg:#16181b;
+    --code-bg:#1e2126; --code-ink:#dfe3e8; --accent:#7fb0dd;
+    --note-bg:#1b2530; --note-line:#5f96c9;
+    --warn-bg:#2b2118; --warn-line:#d09154;
+    --tip-bg:#182619; --tip-line:#6aad7d;
+  }
+  h3{color:#d5d9dd} h4{color:#c3c9cf}
+  .goal{background:#1a1d21}
+}
+</style>
+</head>
+<body>
+<div class="book">
+
+<p class="chapno">第 1 章</p>
+<h1>本書の狙いと進め方<br>— 「勘」ではなく「計測」で最適化する</h1>
+<p class="lead">最適化オプションは、付ければ付けるほど速くなるものではありません。本書は「効果を確認する手段」を先に用意し、そのうえで LTO・PGO・CSPGO を一つずつ導入していきます。この章では、その進め方と本書の前提を確認します。</p>
+
+<div class="goal">
+<h2>この章のゴール</h2>
+<ul>
+<li>本書が扱うもの／扱わないものを把握する</li>
+<li>LTO・PGO・CSPGO の関係を一枚の図で理解する</li>
+<li>MSVC ではなく ClangCL を使う理由を納得する</li>
+<li>以降の章で前提とする環境と作法を確認する</li>
+</ul>
+</div>
+
+<h2>1.1 最適化はどこで失敗するか</h2>
+
+<p>C++ のプロジェクトで「速くしてほしい」と言われたとき、まず何をするでしょうか。多くの場合、次のような手が打たれます。リリース構成が <code>/O2</code> になっているか確認する。インライン展開の設定を上げてみる。どこかで見た最適化オプションを追加してみる。ビルドして、実行して、「なんとなく速くなった気がする」ので、そのままコミットする。</p>
+
+<p>この流れには三つの罠があります。</p>
+
+<p><strong>第一に、測っていない。</strong> 実行時間は、同じバイナリを同じマシンで動かしても数パーセントは平気で揺れます。CPU の周波数制御、ページフォルト、他のプロセス、ディスクキャッシュ。1 回ずつ実行して比べた「速くなった気がする」は、その揺らぎと区別がついていません。</p>
+
+<p><strong>第二に、測る場所が違う。</strong> 小さなループだけを切り出したベンチマークは、本番のコードとはまったく別の挙動をします。命令キャッシュの状況も、分岐予測器の状態も、呼び出しの深さも違うからです。マイクロベンチで 3 倍速くなった関数が、アプリ全体では 0.2% しか効かない、というのはごく普通に起きます。</p>
+
+<p><strong>第三に、効いた理由が分からない。</strong> これがいちばん厄介です。理由が分からない改善は、再現できず、他のコードに横展開もできず、リファクタリングで簡単に失われます。半年後にそのオプションを見た人は、外していいのかどうかを判断できません。</p>
+
+<div class="box note">
+<span class="t">本書の立場</span>
+<p>最適化オプションは「効くらしいから入れる」ものではなく、「入れた結果こう変わった、と説明できる」ものです。本書では、あるオプションを紹介するたびに、その効果を確認する手段とセットで扱います。確認できない改善は、本書では改善として扱いません。</p>
+</div>
+
+<p>そのため本書は、第 2 部と第 3 部を丸ごと「観察と計測の準備」に充てています。LTO の話が始まるのは第 16 章です。遠回りに見えるかもしれませんが、この準備がないまま第 4 部以降に進むと、結局「なんとなく速くなった気がする」に戻ってしまいます。</p>
+
+<h2>1.2 本書が扱う三つの武器</h2>
+
+<p>コンパイラがどこまで賢く最適化できるかは、突き詰めると<strong>コンパイラがどれだけの情報を持っているか</strong>で決まります。本書で扱う三つの技術は、いずれも「コンパイラに渡す情報を増やす」ための仕組みです。</p>
+
+<figure>
+<svg viewBox="0 0 720 400" role="img" aria-label="最適化技術と、コンパイラが利用できる情報の範囲の関係を示した階段状の図">
+  <defs>
+    <marker id="ar1" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
+      <path d="M0,0 L9,4.5 L0,9 z" fill="#5c626b"/>
+    </marker>
+  </defs>
+  <text x="16" y="26" font-size="13" font-weight="700" fill="#2f5d8a" font-family="sans-serif">コンパイラが使える情報</text>
+  <line x1="16" y1="38" x2="16" y2="360" stroke="#5c626b" stroke-width="1.5" marker-end="url(#ar1)"/>
+  <text x="24" y="378" font-size="11" fill="#5c626b" font-family="sans-serif">多い</text>
+  <text x="24" y="52" font-size="11" fill="#5c626b" font-family="sans-serif">少ない</text>
+
+  <!-- step 1 -->
+  <rect x="60" y="52" width="620" height="66" rx="4" fill="#f5f7f9" stroke="#dfe3e8"/>
+  <text x="76" y="76" font-size="14" font-weight="700" fill="#1b1d21" font-family="sans-serif">/O2 — 翻訳単位の中だけ</text>
+  <text x="76" y="99" font-size="12" fill="#5c626b" font-family="sans-serif">その .cpp から見えるものだけで判断する。他の .cpp の関数は中身が分からない。</text>
+
+  <!-- step 2 -->
+  <rect x="60" y="130" width="620" height="66" rx="4" fill="#eef4fa" stroke="#4a80b5"/>
+  <text x="76" y="154" font-size="14" font-weight="700" fill="#1b1d21" font-family="sans-serif">LTO — プログラム全体</text>
+  <text x="76" y="177" font-size="12" fill="#5c626b" font-family="sans-serif">リンク時にまとめて見る。翻訳単位をまたぐインライン化、未使用コードの削除、仮想関数の解決。</text>
+
+  <!-- step 3 -->
+  <rect x="60" y="208" width="620" height="66" rx="4" fill="#eef7f1" stroke="#4a8c5f"/>
+  <text x="76" y="232" font-size="14" font-weight="700" fill="#1b1d21" font-family="sans-serif">PGO — 実行時に実際に起きたこと</text>
+  <text x="76" y="255" font-size="12" fill="#5c626b" font-family="sans-serif">どの分岐が成立したか、どの関数が何回呼ばれたか。「たぶん」ではなく実測に基づいて判断する。</text>
+
+  <!-- step 4 -->
+  <rect x="60" y="286" width="620" height="66" rx="4" fill="#fdf4ec" stroke="#c07830"/>
+  <text x="76" y="310" font-size="14" font-weight="700" fill="#1b1d21" font-family="sans-serif">CSPGO — 呼び出し文脈まで区別した事実</text>
+  <text x="76" y="333" font-size="12" fill="#5c626b" font-family="sans-serif">同じ関数でも「どこから呼ばれたか」で挙動が違う。インライン後の姿でもう一度プロファイルを取る。</text>
+</svg>
+<figcaption>図 1-1　最適化技術と、コンパイラが利用できる情報の範囲</figcaption>
+</figure>
+
+<h3>1.2.1 LTO — 翻訳単位の壁を越える</h3>
+
+<p>C++ のビルドは <code>.cpp</code> ごとに独立して行われます。<code>a.cpp</code> をコンパイルしているとき、コンパイラは <code>b.cpp</code> に書かれた関数の中身を知りません。ヘッダに書かれた関数ならインライン化できますが、<code>.cpp</code> に実装がある関数は「呼び出す」しかない。これが翻訳単位の壁です。</p>
+
+<p>LTO（Link Time Optimization）は、コンパイル時に機械語ではなく LLVM の中間表現（IR）を <code>.obj</code> に埋め込んでおき、リンク時にそれらをまとめて最適化します。壁が消えるので、翻訳単位をまたいだインライン化ができ、どこからも呼ばれていない関数を削除でき、仮想関数の呼び出し先を一つに絞れる場合もあります。</p>
+
+<h3>1.2.2 PGO — 実行時の事実を教える</h3>
+
+<p>次のようなコードを考えてみます。</p>
+
+<pre><code>if (auto* p = cache.find(key)) {
+    return decode(p);          // A
+} else {
+    return load_from_disk(key); // B
+}</code></pre>
+
+<p>A と B のどちらが「よく通る道」なのか、ソースコードだけを見て判断することはできません。キャッシュのヒット率が 99% ならほとんど A ですし、初回起動時なら B ばかりです。コンパイラは静的なヒューリスティクス（たとえば「ループは回りやすい」「<code>nullptr</code> チェックは成立しにくい」）で推測しますが、それはあくまで推測です。</p>
+
+<p>PGO（Profile-Guided Optimization）は、この推測を実測に置き換えます。まず計測用の情報を埋め込んだバイナリ（計装ビルド）を作り、代表的なワークロードで走らせて「どの分岐が何回成立したか」を記録します。その記録を読ませて本番用のビルドを行うと、コンパイラはよく通る道を優先してコードを配置し、めったに呼ばれない関数はインライン化の対象から外します。</p>
+
+<h3>1.2.3 CSPGO — 文脈を区別する</h3>
+
+<p>PGO のプロファイルには弱点があります。ある関数 <code>f()</code> の中の分岐が「70% は成立した」と記録されていても、その内訳が「呼び出し元 X からは常に成立、呼び出し元 Y からは常に不成立」なのかは分かりません。しかも <code>f()</code> がインライン展開されると、展開先ごとに本当は違う偏りを持つはずのコードが、平均された一つのプロファイルで最適化されてしまいます。</p>
+
+<p>CSPGO（Context-Sensitive PGO）は、インライン展開が済んだ後の姿でもう一度プロファイルを取り、呼び出し文脈ごとに区別された情報を得ます。手順が二段構えになるぶんコストは上がりますが、PGO が取りこぼしていた部分に届きます。詳しくは第 6 部で扱います。</p>
+
+<div class="box tip">
+<span class="t">三つの関係</span>
+<p>LTO・PGO・CSPGO は択一ではなく、重ねて使うものです。実務では「ThinLTO + PGO」がまず基本形になり、そのうえで CSPGO を足すかどうかを検討する、という順番になります。組み合わせ方と適用順序は第 38 章で扱います。</p>
+</div>
+
+<h2>1.3 なぜ MSVC ではなく ClangCL なのか</h2>
+
+<p>ここまで読んで、「それは MSVC にもある」と思われたかもしれません。そのとおりです。MSVC にも LTO 相当の <code>/GL</code> + <code>/LTCG</code> があり、PGO 相当の <code>/GENPROFILE</code> + <code>/USEPROFILE</code> があります。</p>
+
+<p>それでも本書が ClangCL を選ぶ理由は、<strong>速いから</strong>ではありません。<strong>中で何が起きたかを見せてくれるから</strong>です。</p>
+
+<table>
+<thead>
+<tr><th>やりたいこと</th><th>MSVC</th><th>Clang / ClangCL</th></tr>
+</thead>
+<tbody>
+<tr><td>翻訳単位をまたぐ最適化</td><td><code>/GL</code> + <code>/LTCG</code></td><td><code>-flto</code> / <code>-flto=thin</code></td></tr>
+<tr><td>プロファイルに基づく最適化</td><td><code>/GENPROFILE</code> + <code>/USEPROFILE</code></td><td><code>-fprofile-generate</code> + <code>-fprofile-use</code></td></tr>
+<tr><td>文脈を考慮した二段階 PGO</td><td>—</td><td><code>-fcs-profile-generate</code>（CSPGO）</td></tr>
+<tr><td>インライン化されたか／されなかったかの理由</td><td>限定的</td><td><code>-Rpass</code> / <code>-Rpass-missed</code> / <code>-Rpass-analysis</code></td></tr>
+<tr><td>最適化の判断を機械可読な形で保存</td><td>—</td><td><code>-fsave-optimization-record</code>（YAML）</td></tr>
+<tr><td>プロファイルそのものを人間が読む</td><td>限定的</td><td><code>llvm-profdata show</code> / <code>llvm-cov</code></td></tr>
+</tbody>
+</table>
+
+<p>下の三行が本書にとって決定的です。「なぜこの関数はインライン化されなかったのか」をコンパイラ自身に説明させられること、そして「プロファイルに何が記録されているのか」をテキストとして読めること。この二つがあるおかげで、本書は「オプションを入れたら速くなりました」で終わらずに済みます。</p>
+
+<div class="box note">
+<span class="t">MSVC を否定するものではありません</span>
+<p>本書は ClangCL を「学習と分析のための道具」として使います。ここで身につけた見方 — どこがホットで、なぜインライン化され、プロファイルが何を語っているか — は、MSVC に戻ったときにもそのまま役立ちます。実際、最終的に MSVC でビルドする製品に対して、調査だけ ClangCL で行うという使い方も十分ありえます。</p>
+</div>
+
+<h2>1.4 本書の前提</h2>
+
+<table>
+<thead><tr><th>項目</th><th>本書での前提</th></tr></thead>
+<tbody>
+<tr><td>IDE</td><td>Visual Studio 2026（Community 版で構いません）</td></tr>
+<tr><td>ツールセット</td><td>LLVM (clang-cl) — 通称 ClangCL</td></tr>
+<tr><td>言語標準</td><td>C++23</td></tr>
+<tr><td>C++ モジュール</td><td><strong>使いません</strong>（従来のヘッダ + <code>.cpp</code> 構成）</td></tr>
+<tr><td>ターゲット</td><td>x64 / Windows</td></tr>
+<tr><td>ビルド構成</td><td>MSBuild（<code>.vcxproj</code>）が主軸、CMake は第 40 章で補足</td></tr>
+<tr><td>計測ツール</td><td>llvm-profdata / llvm-cov、PIX for Windows、ETW + Windows Performance Analyzer</td></tr>
+</tbody>
+</table>
+
+<div class="box warn">
+<span class="t">モジュールを使わない理由</span>
+<p>C++20 モジュールは、それ自体がビルドシステムと密に絡む大きなテーマです。本書の主題である LTO・PGO とモジュールを同時に扱うと、問題が起きたときに「どちらが原因か」の切り分けが難しくなります。本書では従来の翻訳単位モデルに絞ります。むしろ「翻訳単位の壁」という概念が LTO の説明の土台になるため、この選択は本書にとって好都合でもあります。</p>
+</div>
+
+<h4>想定する読者</h4>
+<ul>
+<li>C++ の実務経験があり、Visual Studio でのビルドに慣れている</li>
+<li><code>/O2</code> は付けているが、その中身を説明したことはない</li>
+<li>プロファイラを使ったことはあるが、PGO は使ったことがない</li>
+</ul>
+
+<h4>本書が扱わないこと</h4>
+<ul>
+<li>アルゴリズムやデータ構造の改善（これはこれで重要ですが、別の話です）</li>
+<li>SIMD 組み込み関数の手書き最適化</li>
+<li>GPU / 描画の最適化</li>
+<li>Linux / macOS 向けのビルド（考え方は共通ですが、手順は Windows に絞ります）</li>
+</ul>
+
+<h2>1.5 本書の進み方</h2>
+
+<p>全 42 章は 7 つの部に分かれています。</p>
+
+<table>
+<thead><tr><th>部</th><th>章</th><th>内容</th></tr></thead>
+<tbody>
+<tr><td>第 1 部</td><td>1–5</td><td>準備。ClangCL のセットアップ、題材アプリ、LLVM 付属ツールの確認</td></tr>
+<tr><td>第 2 部</td><td>6–11</td><td><strong>観察の道具</strong>。最適化パイプライン、逆アセンブル、<code>-Rpass</code>、最適化レコード</td></tr>
+<tr><td>第 3 部</td><td>12–15</td><td><strong>計測の道具</strong>。PIX、ETW/WPA、シンボル解決、ベンチマークの読み方</td></tr>
+<tr><td>第 4 部</td><td>16–24</td><td>LTO</td></tr>
+<tr><td>第 5 部</td><td>25–34</td><td>PGO</td></tr>
+<tr><td>第 6 部</td><td>35–37</td><td>CSPGO</td></tr>
+<tr><td>第 7 部</td><td>38–42</td><td>三者の組み合わせ、MSBuild / CMake での構成、CI 運用</td></tr>
+</tbody>
+</table>
+
+<p>第 2 部と第 3 部で用意する道具は、第 4 部以降で繰り返し使います。特に <code>-Rpass</code>（第 9 章）と最適化レコード（第 10 章）は、LTO と PGO の効果を確認する主役になります。急いでいる方でも、この二つの章は飛ばさないでください。</p>
+
+<h2>1.6 数値についての約束</h2>
+
+<p>本書には「何秒かかった」という数値がしばしば出てきますが、これらは<strong>再現できません</strong>。CPU の世代、コア数、メモリ、電源プラン、他に動いているプロセス、Windows のバージョン — どれか一つ違えば結果は変わります。</p>
+
+<p>そこで本書は、次の書き方を徹底します。</p>
+
+<ul>
+<li>「◯% 速くなります」とは書きません</li>
+<li>代わりに「こう測ると、こういう差が確認できます」と書きます</li>
+<li>差が出ない場合、出ない理由の見当を付ける方法も併せて書きます</li>
+</ul>
+
+<p>最後の項目が重要です。最適化オプションは、効かないことも普通にあります。LTO を入れてもビルド時間だけ伸びて実行時間が変わらない、PGO を入れても誤差の範囲、ということは起こります。そのとき「効かなかった」で終わらせず、「なぜ効かなかったか」まで辿れるようになることが、本書の目標です。</p>
+
+<div class="box tip">
+<span class="t">手を動かしてください</span>
+<p>本書は読み物ではなくハンズオンです。各章は前の章で作ったプロジェクトを引き継いで進みます。第 3 章で作るプロジェクトと第 4 章で作る題材アプリは、最後の第 42 章まで使い続けます。ここだけは必ず手元で作ってください。</p>
+</div>
+
+<h2>1.7 まとめ</h2>
+
+<ul>
+<li>最適化の失敗は「測っていない」「測る場所が違う」「理由が分からない」の三つに集約される</li>
+<li>LTO・PGO・CSPGO は、いずれも<strong>コンパイラに渡す情報を増やす</strong>仕組みである</li>
+<li>ClangCL を選ぶのは速いからではなく、最適化の中身を観察する道具が揃っているから</li>
+<li>本書は「効果を確認する手段」を第 2 部・第 3 部で先に用意し、そのうえで最適化に進む</li>
+<li>本書の数値は再現できない。必ず自分の環境で測ること</li>
+</ul>
+
+<p class="next"><strong>次章では</strong>、Visual Studio 2026 に ClangCL をインストールし、コマンドラインからバージョンを確認できるところまで進みます。あわせて、Visual Studio に同梱される LLVM を公式版に差し替える方法も扱います。これは本書の後半、比較的新しい機能（特に CSPGO）を使うときに効いてきます。</p>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第10章 最適化レコードで記録する — Clang最適化入門</title>
+<style>
+:root{
+  --ink:#1b1d21; --sub:#5c626b; --line:#dfe3e8; --bg:#fff;
+  --code-bg:#f5f7f9; --code-ink:#22262b; --accent:#2f5d8a;
+  --note-bg:#eef4fa; --note-line:#4a80b5;
+  --warn-bg:#fdf4ec; --warn-line:#c07830;
+  --tip-bg:#eef7f1; --tip-line:#4a8c5f;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Meiryo",system-ui,sans-serif;
+  font-size:16px; line-height:1.9; text-align:justify;
+}
+.book{max-width:46rem; margin:0 auto; padding:3rem 1.25rem 6rem}
+.chapno{font-size:.82rem; letter-spacing:.18em; color:var(--accent); font-weight:700; margin:0 0 .4rem}
+h1{font-size:1.85rem; line-height:1.45; margin:0 0 .6rem; letter-spacing:.01em}
+.lead{color:var(--sub); font-size:1.02rem; margin:0 0 2.5rem; padding-bottom:2rem; border-bottom:2px solid var(--line)}
+h2{font-size:1.32rem; margin:3.2rem 0 1rem; padding-bottom:.45rem; border-bottom:1px solid var(--line); letter-spacing:.01em}
+h3{font-size:1.08rem; margin:2.2rem 0 .7rem; color:#2c3239}
+h4{font-size:.98rem; margin:1.6rem 0 .5rem; color:#3a4048}
+p{margin:0 0 1.1rem}
+ul,ol{margin:0 0 1.2rem; padding-left:1.5rem}
+li{margin:.4rem 0}
+code{
+  font-family:"Cascadia Mono","Consolas","SF Mono",monospace;
+  font-size:.88em; background:var(--code-bg); padding:.12em .38em;
+  border-radius:3px; border:1px solid var(--line); word-break:break-all;
+}
+pre{
+  background:var(--code-bg); color:var(--code-ink); border:1px solid var(--line);
+  border-left:3px solid var(--accent); border-radius:4px;
+  padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.6;
+}
+pre code{background:none; border:none; padding:0; font-size:.85rem; word-break:normal}
+.cap{font-size:.83rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+.box{border-radius:4px; padding:.95rem 1.15rem; margin:1.6rem 0; font-size:.95rem}
+.box p:last-child{margin-bottom:0}
+.box .t{font-weight:700; font-size:.86rem; letter-spacing:.06em; display:block; margin-bottom:.4rem}
+.note{background:var(--note-bg); border-left:4px solid var(--note-line)}
+.note .t{color:var(--note-line)}
+.warn{background:var(--warn-bg); border-left:4px solid var(--warn-line)}
+.warn .t{color:var(--warn-line)}
+.tip{background:var(--tip-bg); border-left:4px solid var(--tip-line)}
+.tip .t{color:var(--tip-line)}
+table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+th{background:var(--code-bg); font-weight:700}
+figure{margin:2rem 0}
+figure svg{display:block; width:100%; height:auto}
+figcaption{font-size:.83rem; color:var(--sub); text-align:center; margin-top:.7rem}
+.goal{border:1px solid var(--line); border-top:3px solid var(--accent); border-radius:4px; padding:1.1rem 1.3rem; margin:0 0 2.4rem; background:#fbfcfd}
+.goal h2{margin:0 0 .6rem; font-size:1rem; border:none; padding:0; letter-spacing:.06em}
+.goal ul{margin-bottom:0}
+.next{margin-top:3.5rem; padding-top:1.4rem; border-top:2px solid var(--line); color:var(--sub); font-size:.95rem}
+.next strong{color:var(--ink)}
+.chk{list-style:none; padding-left:0}
+.chk li{padding-left:1.7rem; position:relative}
+.chk li::before{content:"\2610"; position:absolute; left:.2rem; color:var(--accent); font-size:1.05rem}
+.path{font-size:.93rem; color:var(--sub); background:var(--code-bg); border:1px solid var(--line); border-radius:3px; padding:.5rem .8rem; margin:0 0 1.2rem}
+.partend{margin-top:3rem; padding:1.2rem 1.4rem; border:2px solid var(--accent); border-radius:5px; background:#fbfcfd}
+.partend h3{margin-top:0; color:var(--accent)}
+.real{border-left-color:var(--tip-line)}
+@media (prefers-color-scheme:dark){
+  :root{
+    --ink:#e6e8ea; --sub:#a2a9b2; --line:#333940; --bg:#16181b;
+    --code-bg:#1e2126; --code-ink:#dfe3e8; --accent:#7fb0dd;
+    --note-bg:#1b2530; --note-line:#5f96c9;
+    --warn-bg:#2b2118; --warn-line:#d09154;
+    --tip-bg:#182619; --tip-line:#6aad7d;
+  }
+  h3{color:#d5d9dd} h4{color:#c3c9cf}
+  .goal,.partend{background:#1a1d21}
+}
+</style>
+</head>
+<body>
+<div class="book">
+
+<p class="chapno">第 10 章</p>
+<h1>最適化レコードで記録する<br>— <code>-fsave-optimization-record</code> と opt-viewer</h1>
+<p class="lead">前章のリマークは、出力ウィンドウを流れて消えていきます。同じ情報を YAML ファイルとして保存できれば、集計もできますし、LTO の前後で比べることもできます。第 4 部以降で「何が変わったか」を語るための土台をここで作ります。</p>
+
+<div class="goal">
+<h2>この章のゴール</h2>
+<ul>
+<li>最適化レコードを出力し、置き場所を把握する</li>
+<li>YAML の構造を読めるようになる</li>
+<li>レコードを集計するスクリプトを用意する</li>
+<li>opt-viewer でソース上に重ねて表示する</li>
+<li>ビルド間で比較できる形に整える</li>
+</ul>
+</div>
+
+<h2>10.1 リマークでは足りない理由</h2>
+
+<p>第 9 章のリマークには三つの限界があります。</p>
+
+<ul>
+<li><strong>残らない。</strong> ビルドし直せば消えます。「先週のビルドではどうだったか」は分かりません</li>
+<li><strong>集計できない。</strong> 「インライン化されなかった箇所は全部でいくつか」を数えるには、テキストを正規表現で刻むしかありません</li>
+<li><strong>構造がない。</strong> <code>cost</code> や <code>threshold</code> は文章に埋め込まれた文字列であって、フィールドではありません</li>
+</ul>
+
+<p>最適化レコードは、まったく同じ情報を構造化された YAML として出力します。リマークが「画面に出す版」、レコードが「ファイルに残す版」だと考えてください。</p>
+
+<h2>10.2 出力する</h2>
+
+<pre><code>clang-cl /c /O2 /std:c++23 /Iinclude ^
+    /clang:-fsave-optimization-record src\tokenizer.cpp</code></pre>
+
+<p>オブジェクトファイルと同じ場所に <code>tokenizer.opt.yaml</code> が生成されます。</p>
+
+<div class="box warn">
+<span class="t">MSBuild では中間ディレクトリに出ます</span>
+<p>Visual Studio からビルドした場合、レコードは <code>.obj</code> と同じ場所、つまり <code>x64\Release\</code> の中に出力されます。プロジェクトのルートを探しても見つかりません。「リビルドすると消える場所」でもあるので、比較用に残したいときは別のフォルダにコピーしてください。</p>
+</div>
+
+<h3>10.2.1 出力先と対象を制御する</h3>
+
+<table>
+<thead><tr><th>オプション</th><th>効果</th></tr></thead>
+<tbody>
+<tr><td><code>/clang:-fsave-optimization-record</code></td><td>レコードを出力する（既定は YAML 形式）</td></tr>
+<tr><td><code>/clang:-foptimization-record-file=&lt;path&gt;</code></td><td>出力先を明示する</td></tr>
+<tr><td><code>/clang:-foptimization-record-passes=&lt;正規表現&gt;</code></td><td>記録するパスを絞る</td></tr>
+</tbody>
+</table>
+
+<p>絞り込みは実用上ほぼ必須です。<strong>LogLab の <code>tokenizer.cpp</code> ひとつで、レコードは約 100 KB になります。</strong> インライン化だけを追いたいなら、次のようにします。</p>
+
+<pre><code>/clang:-fsave-optimization-record
+/clang:-foptimization-record-passes=inline</code></pre>
+
+<h2>10.3 YAML の構造</h2>
+
+<p>実際のレコードから一件を抜き出したものです。</p>
+
+<pre><code>--- !Missed
+Pass:            inline
+Name:            NoDefinition
+DebugLoc:        { File: src\tokenizer.cpp, Line: 73, Column: 7 }
+Function:        '?parse_line@loglab@@YA_N...'
+Args:
+  - Callee:          '?find@...'
+  - String:          ' will not be inlined into '
+  - Caller:          '?parse_line@loglab@@YA_N...'
+    DebugLoc:        { File: src\tokenizer.cpp, Line: 71, Column: 0 }
+  - String:          ' because its definition is unavailable'
+...</code></pre>
+
+<table>
+<thead><tr><th>フィールド</th><th>意味</th></tr></thead>
+<tbody>
+<tr><td>ドキュメントのタグ</td><td><code>!Passed</code>（やった）／<code>!Missed</code>（やらなかった）／<code>!Analysis</code>（解析結果）</td></tr>
+<tr><td><code>Pass</code></td><td>パス名。<code>inline</code>、<code>loop-vectorize</code>、<code>licm</code> など</td></tr>
+<tr><td><code>Name</code></td><td>そのパスの中での事象の種類。<strong>集計するならこのフィールド</strong></td></tr>
+<tr><td><code>DebugLoc</code></td><td>ソース上の位置</td></tr>
+<tr><td><code>Function</code></td><td>対象の関数（マングル名）</td></tr>
+<tr><td><code>Args</code></td><td>リマークの文章を組み立てる部品。<code>Cost</code>、<code>Threshold</code> などがここに入る</td></tr>
+</tbody>
+</table>
+
+<p>前章で見たリマークの文章は、この <code>Args</code> を連結して作られています。つまりレコードのほうが<strong>元データ</strong>で、リマークはその整形結果です。</p>
+
+<h2>10.4 集計する</h2>
+
+<p>YAML のままでは読めないので、集計スクリプトを用意します。Python と PyYAML を使います。</p>
+
+<pre><code>pip install pyyaml</code></pre>
+
+<pre><code>import sys, collections, yaml
+
+# !Passed などのタグを保持したまま読み込むためのローダ
+class L(yaml.SafeLoader):
+    pass
+
+def keep_tag(loader, tag_suffix, node):
+    d = loader.construct_mapping(node, deep=True)
+    d['_kind'] = tag_suffix
+    return d
+
+L.add_multi_constructor('', keep_tag)
+
+counts = collections.Counter()
+for path in sys.argv[1:]:
+    with open(path, encoding='utf-8') as f:
+        for doc in yaml.load_all(f, Loader=L):
+            if not doc:
+                continue
+            counts[(doc.get('_kind'), doc.get('Pass'), doc.get('Name'))] += 1
+
+for (kind, p, n), v in counts.most_common(20):
+    print(f"{v:6}  {kind:&lt;10} {p:&lt;18} {n}")</code></pre>
+<p class="cap">リスト 10-1　summarize.py — レコードを種類別に数える</p>
+
+<pre><code>python summarize.py x64\Release\tokenizer.opt.yaml</code></pre>
+
+<p>LogLab の <code>tokenizer.cpp</code> に対する実行結果です。</p>
+
+<pre><code>    68  !Analysis  asm-printer        InstructionMix
+    43  !Passed    inline             Inlined
+     9  !Analysis  loop-vectorize     CantComputeNumberOfIterations
+     9  !Missed    loop-vectorize     MissedDetails
+     8  !Missed    slp-vectorizer     NotPossible
+     4  !Missed    inline             NoDefinition
+     4  !Passed    TTI                DontUnroll
+     3  !Analysis  loop-vectorize     NonReductionValueUsedOutsideLoop
+     2  !Missed    licm               LoadWithLoopInvariantAddressInvalidated
+     2  !Passed    licm               PromoteLoopAccessesToScalar
+     2  !Passed    licm               Hoisted
+     2  !Missed    gvn                LoadClobbered</code></pre>
+<p class="cap">実際の集計結果</p>
+
+<p>この一覧は、リマークを目で追うのとは比較にならないほど多くを語ります。</p>
+
+<div class="box tip">
+<span class="t">注目すべき一行</span>
+<p><code>!Missed inline NoDefinition</code> が <strong>4 件</strong>。これは「定義が見えないのでインライン化できなかった」箇所が 4 つあるという意味です。<strong>この数字が、LTO を導入したときに減るかどうか。</strong> それが第 20 章での評価軸になります。数値をメモしておいてください。</p>
+</div>
+
+<h3>10.4.1 プロジェクト全体で集計する</h3>
+
+<p>複数のレコードをまとめて渡せます。</p>
+
+<pre><code>python summarize.py x64\Release\*.opt.yaml &gt; records_O2.txt</code></pre>
+
+<p>この <code>records_O2.txt</code> が、第 2 部で作る最後のベースラインです。第 8 章の <code>baseline_O2_calls.txt</code> と並べて保管しておいてください。</p>
+
+<h2>10.5 opt-viewer で見る</h2>
+
+<p>集計は全体像を掴むのに向いていますが、「ソースのどこで何が起きたか」を見るには opt-viewer が便利です。ソースコードの各行に、その行で起きた最適化を重ねた HTML を生成します。</p>
+
+<h3>10.5.1 準備</h3>
+
+<p>opt-viewer は実行ファイルではなく Python スクリプト群です。LLVM のソースツリーの <code>llvm/tools/opt-viewer/</code> にあり、公式 Windows インストーラでは <code>share\opt-viewer\</code> に置かれることがあります。無ければ LLVM のソース配布物から取得してください。</p>
+
+<pre><code>pip install pyyaml pygments</code></pre>
+
+<h3>10.5.2 実行</h3>
+
+<pre><code>python "C:\Program Files\LLVM\share\opt-viewer\opt-viewer.py" ^
+    --output-dir html_O2 ^
+    x64\Release\tokenizer.opt.yaml</code></pre>
+
+<p><code>html_O2\index.html</code> をブラウザで開くと、最適化の件数が多い順に関数が並びます。関数名をクリックするとソースが表示され、各行の左側に <code>Inlined</code>、<code>NoDefinition</code>、<code>MissedDetails</code> といった事象が色分けで並びます。</p>
+
+<div class="box note">
+<span class="t">opt-viewer が無くても困りません</span>
+<p>本書の以降の章で opt-viewer は必須ではありません。前節の集計スクリプトのほうが、「前回と比べて何件減ったか」という本書の使い方には向いています。opt-viewer は「特定の関数を掘り下げたい」ときの道具だと考えてください。</p>
+</div>
+
+<h2>10.6 比較する運用にする</h2>
+
+<p>レコードの価値は、単発で読むことではなく<strong>比べること</strong>にあります。本書では以降、次の形で使います。</p>
+
+<table>
+<thead><tr><th>時点</th><th>保存するもの</th><th>比べる相手</th></tr></thead>
+<tbody>
+<tr><td>いま（<code>/O2</code> のみ）</td><td><code>records_O2.txt</code></td><td>—（基準）</td></tr>
+<tr><td>第 20 章（LTO 有効）</td><td><code>records_lto.txt</code></td><td><code>NoDefinition</code> が減ったか</td></tr>
+<tr><td>第 32 章（PGO 有効）</td><td><code>records_pgo.txt</code></td><td><code>Inlined</code> の内訳が変わったか、<code>hot-cold-split</code> が現れたか</td></tr>
+<tr><td>第 37 章（CSPGO）</td><td><code>records_cspgo.txt</code></td><td>PGO 版との差</td></tr>
+</tbody>
+</table>
+
+<p>ファイル名を決めて、プロジェクトの外の作業フォルダに置いておいてください。<code>x64\Release\</code> の中に置くと、リビルドで消えます。</p>
+
+<div class="box warn">
+<span class="t">LTO ではこれだけでは足りません</span>
+<p>ここで扱ったのは<strong>コンパイル時</strong>のレコードです。LTO を有効にすると最適化の主戦場はリンク時に移るため、コンパイル時のレコードには LTO による変化がほとんど現れません。リンク時のレコードをどう取るかは第 20 章で扱います。いまは「コンパイル時とリンク時は別物」という点だけ意識しておいてください。</p>
+</div>
+
+<h2>10.7 ハンズオン</h2>
+
+<ol>
+<li>LogLab のプロジェクトの <strong>追加のオプション</strong> に <code>/clang:-fsave-optimization-record</code> を追加してリビルドする</li>
+<li><code>x64\Release\</code> に <code>*.opt.yaml</code> が 5 つできていることを確認する</li>
+<li>リスト 10-1 の <code>summarize.py</code> を作る</li>
+<li>全 5 ファイルを渡して集計し、<code>records_O2.txt</code> として保存する</li>
+<li><code>!Missed inline NoDefinition</code> の件数をメモする</li>
+<li>追加のオプションからレコードの指定を消す（ビルドが遅くなるため）</li>
+</ol>
+
+<h2>10.8 まとめ</h2>
+
+<ul>
+<li>最適化レコードはリマークと同じ情報の<strong>構造化された版</strong>。むしろレコードが元データである</li>
+<li><code>/clang:-fsave-optimization-record</code> で <code>.obj</code> と同じ場所に <code>*.opt.yaml</code> が出る。MSBuild では中間ディレクトリ</li>
+<li>1 翻訳単位で 100 KB 規模。<code>-foptimization-record-passes=</code> で絞る</li>
+<li><code>Pass</code> と <code>Name</code> で集計すると全体像が一目で分かる</li>
+<li><strong><code>!Missed inline NoDefinition</code> の件数</strong>が、LTO の効果を測る最初の指標になる</li>
+<li>レコードは比較して初めて価値が出る。ベースラインを外部フォルダに保存しておく</li>
+<li>LTO のレコードはリンク時に別途取得する必要がある（第 20 章）</li>
+</ul>
+
+<p class="next"><strong>次章では</strong>、第 2 部の締めくくりとしてインライン化そのものを掘り下げます。<code>cost</code> と <code>threshold</code> のモデル、<code>-mllvm -inline-threshold</code> でしきい値を動かしたときに何が起きるか、そして<strong>なぜしきい値をいじるのが最後の手段なのか</strong>。第 5 部の PGO へ橋を渡す章になります。</p>
+
+</div>
+</body>
+</html>

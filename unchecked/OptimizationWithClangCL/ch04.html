@@ -1,0 +1,761 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第4章 題材アプリの用意 — Clang最適化入門</title>
+<style>
+:root{
+  --ink:#1b1d21; --sub:#5c626b; --line:#dfe3e8; --bg:#fff;
+  --code-bg:#f5f7f9; --code-ink:#22262b; --accent:#2f5d8a;
+  --note-bg:#eef4fa; --note-line:#4a80b5;
+  --warn-bg:#fdf4ec; --warn-line:#c07830;
+  --tip-bg:#eef7f1; --tip-line:#4a8c5f;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Meiryo",system-ui,sans-serif;
+  font-size:16px; line-height:1.9; text-align:justify;
+}
+.book{max-width:46rem; margin:0 auto; padding:3rem 1.25rem 6rem}
+.chapno{font-size:.82rem; letter-spacing:.18em; color:var(--accent); font-weight:700; margin:0 0 .4rem}
+h1{font-size:1.85rem; line-height:1.45; margin:0 0 .6rem; letter-spacing:.01em}
+.lead{color:var(--sub); font-size:1.02rem; margin:0 0 2.5rem; padding-bottom:2rem; border-bottom:2px solid var(--line)}
+h2{font-size:1.32rem; margin:3.2rem 0 1rem; padding-bottom:.45rem; border-bottom:1px solid var(--line); letter-spacing:.01em}
+h3{font-size:1.08rem; margin:2.2rem 0 .7rem; color:#2c3239}
+h4{font-size:.98rem; margin:1.6rem 0 .5rem; color:#3a4048}
+p{margin:0 0 1.1rem}
+ul,ol{margin:0 0 1.2rem; padding-left:1.5rem}
+li{margin:.4rem 0}
+code{
+  font-family:"Cascadia Mono","Consolas","SF Mono",monospace;
+  font-size:.88em; background:var(--code-bg); padding:.12em .38em;
+  border-radius:3px; border:1px solid var(--line); word-break:break-all;
+}
+pre{
+  background:var(--code-bg); color:var(--code-ink); border:1px solid var(--line);
+  border-left:3px solid var(--accent); border-radius:4px;
+  padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.6;
+}
+pre code{background:none; border:none; padding:0; font-size:.85rem; word-break:normal}
+.cap{font-size:.83rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+.box{border-radius:4px; padding:.95rem 1.15rem; margin:1.6rem 0; font-size:.95rem}
+.box p:last-child{margin-bottom:0}
+.box .t{font-weight:700; font-size:.86rem; letter-spacing:.06em; display:block; margin-bottom:.4rem}
+.note{background:var(--note-bg); border-left:4px solid var(--note-line)}
+.note .t{color:var(--note-line)}
+.warn{background:var(--warn-bg); border-left:4px solid var(--warn-line)}
+.warn .t{color:var(--warn-line)}
+.tip{background:var(--tip-bg); border-left:4px solid var(--tip-line)}
+.tip .t{color:var(--tip-line)}
+table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+th{background:var(--code-bg); font-weight:700}
+figure{margin:2rem 0}
+figure svg{display:block; width:100%; height:auto}
+figcaption{font-size:.83rem; color:var(--sub); text-align:center; margin-top:.7rem}
+.goal{border:1px solid var(--line); border-top:3px solid var(--accent); border-radius:4px; padding:1.1rem 1.3rem; margin:0 0 2.4rem; background:#fbfcfd}
+.goal h2{margin:0 0 .6rem; font-size:1rem; border:none; padding:0; letter-spacing:.06em}
+.goal ul{margin-bottom:0}
+.next{margin-top:3.5rem; padding-top:1.4rem; border-top:2px solid var(--line); color:var(--sub); font-size:.95rem}
+.next strong{color:var(--ink)}
+.chk{list-style:none; padding-left:0}
+.chk li{padding-left:1.7rem; position:relative}
+.chk li::before{content:"☐"; position:absolute; left:.2rem; color:var(--accent); font-size:1.05rem}
+.path{font-size:.93rem; color:var(--sub); background:var(--code-bg); border:1px solid var(--line); border-radius:3px; padding:.5rem .8rem; margin:0 0 1.2rem}
+@media (prefers-color-scheme:dark){
+  :root{
+    --ink:#e6e8ea; --sub:#a2a9b2; --line:#333940; --bg:#16181b;
+    --code-bg:#1e2126; --code-ink:#dfe3e8; --accent:#7fb0dd;
+    --note-bg:#1b2530; --note-line:#5f96c9;
+    --warn-bg:#2b2118; --warn-line:#d09154;
+    --tip-bg:#182619; --tip-line:#6aad7d;
+  }
+  h3{color:#d5d9dd} h4{color:#c3c9cf}
+  .goal{background:#1a1d21}
+}
+</style>
+</head>
+<body>
+<div class="book">
+
+<p class="chapno">第 4 章</p>
+<h1>題材アプリの用意<br>— 最適化の効果が見えるプログラムを作る</h1>
+<p class="lead">Hello World に LTO を掛けても何も起きません。最適化の効果を観察するには、それにふさわしい題材が必要です。この章では「なぜその条件が必要なのか」を確認しながら、本書を最後まで使い続けるサンプルアプリを作ります。</p>
+
+<div class="goal">
+<h2>この章のゴール</h2>
+<ul>
+<li>最適化の題材が満たすべき六つの条件を理解する</li>
+<li>題材アプリ「LogLab」を作り、ビルドして動かす</li>
+<li>ベースラインの実行時間とチェックサムを記録する</li>
+<li>ベンチマークが最適化に消されないための書き方を知る</li>
+</ul>
+</div>
+
+<h2>4.1 良い題材が満たすべき六つの条件</h2>
+
+<p>最適化の実験用プログラムには、満たすべき条件があります。どれか一つでも欠けると、本書の後半で「何も起きない」という壁にぶつかります。</p>
+
+<table>
+<thead><tr><th>#</th><th>条件</th><th>欠けるとどうなるか</th><th>効いてくる章</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>実行時間が十分に長い（数百ミリ秒以上）</td><td>計測ノイズに埋もれて差が読めない</td><td>第 15 章</td></tr>
+<tr><td>2</td><td>複数の翻訳単位に分かれている</td><td>翻訳単位の壁が無く、LTO が何もすることがない</td><td>第 4 部</td></tr>
+<tr><td>3</td><td>間接呼び出し（仮想関数）がある</td><td>デバーチャライズや間接呼び出しの最適化を観察できない</td><td>第 21・32 章</td></tr>
+<tr><td>4</td><td>分岐の成立率に偏りがある</td><td>PGO が教える情報が静的な推測と変わらない</td><td>第 5 部</td></tr>
+<tr><td>5</td><td>決定的である（毎回同じ結果）</td><td>実行ごとに結果が変わり、比較が成立しない</td><td>全章</td></tr>
+<tr><td>6</td><td>結果を検証できる</td><td>最適化でコードが壊れても気づけない</td><td>全章</td></tr>
+</tbody>
+</table>
+
+<p>特に 5 と 6 は軽視されがちですが、後になって効いてきます。最適化オプションを付けたら結果が変わった、というのは実際に起こります。原因はコンパイラのバグかもしれませんし、そもそも元のコードに未定義動作があってオプション次第で挙動が変わっただけかもしれません。いずれにせよ、<strong>気づける仕組みが無ければ気づけません</strong>。</p>
+
+<h2>4.2 題材 — 簡易ログ解析パイプライン「LogLab」</h2>
+
+<p>本書の題材は、テキストのログ行を解析して集計するプログラムです。実務でよく書くコードの形をしていて、上の六条件をすべて満たします。</p>
+
+<p>処理の流れはこうです。まず疑似ログを生成し（この部分は計測対象外）、各行をパースして構造体に直し、いくつかのフィルタを通し、通ったものを集計する。集計結果はチェックサムとして出力します。</p>
+
+<figure>
+<svg viewBox="0 0 720 330" role="img" aria-label="LogLab の処理パイプラインと、翻訳単位の境界を示した図">
+  <defs>
+    <marker id="ar4" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
+      <path d="M0,0 L9,4.5 L0,9 z" fill="#2f5d8a"/>
+    </marker>
+  </defs>
+
+  <text x="20" y="26" font-size="12.5" font-weight="700" fill="#2f5d8a" font-family="sans-serif">LogLab の処理パイプライン（点線は翻訳単位の境界）</text>
+
+  <rect x="20" y="52" width="130" height="72" rx="4" fill="#f5f7f9" stroke="#dfe3e8" stroke-dasharray="4,3"/>
+  <text x="85" y="76" font-size="12" text-anchor="middle" font-weight="700" font-family="monospace" fill="#1b1d21">generator.cpp</text>
+  <text x="85" y="96" font-size="10.5" text-anchor="middle" font-family="sans-serif" fill="#5c626b">疑似ログ生成</text>
+  <text x="85" y="113" font-size="10.5" text-anchor="middle" font-family="sans-serif" fill="#4a8c5f">計測対象外</text>
+
+  <rect x="196" y="52" width="130" height="72" rx="4" fill="#eef4fa" stroke="#4a80b5" stroke-dasharray="4,3"/>
+  <text x="261" y="76" font-size="12" text-anchor="middle" font-weight="700" font-family="monospace" fill="#1b1d21">tokenizer.cpp</text>
+  <text x="261" y="96" font-size="10.5" text-anchor="middle" font-family="sans-serif" fill="#5c626b">parse_line()</text>
+  <text x="261" y="113" font-size="10.5" text-anchor="middle" font-family="sans-serif" fill="#c07830">最もホット</text>
+
+  <rect x="372" y="52" width="130" height="72" rx="4" fill="#eef4fa" stroke="#4a80b5" stroke-dasharray="4,3"/>
+  <text x="437" y="76" font-size="12" text-anchor="middle" font-weight="700" font-family="monospace" fill="#1b1d21">filter.cpp</text>
+  <text x="437" y="96" font-size="10.5" text-anchor="middle" font-family="sans-serif" fill="#5c626b">仮想関数 accept()</text>
+  <text x="437" y="113" font-size="10.5" text-anchor="middle" font-family="sans-serif" fill="#c07830">間接呼び出し</text>
+
+  <rect x="548" y="52" width="130" height="72" rx="4" fill="#eef4fa" stroke="#4a80b5" stroke-dasharray="4,3"/>
+  <text x="613" y="76" font-size="12" text-anchor="middle" font-weight="700" font-family="monospace" fill="#1b1d21">stats.cpp</text>
+  <text x="613" y="96" font-size="10.5" text-anchor="middle" font-family="sans-serif" fill="#5c626b">集計 + チェックサム</text>
+  <text x="613" y="113" font-size="10.5" text-anchor="middle" font-family="sans-serif" fill="#c07830">稀な重い経路</text>
+
+  <line x1="152" y1="88" x2="192" y2="88" stroke="#2f5d8a" stroke-width="1.6" marker-end="url(#ar4)"/>
+  <line x1="328" y1="88" x2="368" y2="88" stroke="#2f5d8a" stroke-width="1.6" marker-end="url(#ar4)"/>
+  <line x1="504" y1="88" x2="544" y2="88" stroke="#2f5d8a" stroke-width="1.6" marker-end="url(#ar4)"/>
+
+  <rect x="196" y="168" width="482" height="52" rx="4" fill="#f5f7f9" stroke="#dfe3e8" stroke-dasharray="4,3"/>
+  <text x="437" y="190" font-size="12" text-anchor="middle" font-weight="700" font-family="monospace" fill="#1b1d21">main.cpp</text>
+  <text x="437" y="209" font-size="10.5" text-anchor="middle" font-family="sans-serif" fill="#5c626b">計測ループ（steady_clock で挟む）／結果の出力</text>
+  <path d="M261,128 L261,164" stroke="#2f5d8a" stroke-width="1.3" stroke-dasharray="3,3" fill="none"/>
+  <path d="M437,128 L437,164" stroke="#2f5d8a" stroke-width="1.3" stroke-dasharray="3,3" fill="none"/>
+  <path d="M613,128 L613,164" stroke="#2f5d8a" stroke-width="1.3" stroke-dasharray="3,3" fill="none"/>
+
+  <rect x="20" y="256" width="658" height="54" rx="4" fill="#eef7f1" stroke="#4a8c5f"/>
+  <text x="38" y="278" font-size="11.5" font-weight="700" fill="#4a8c5f" font-family="sans-serif">この構造がなぜ効くか</text>
+  <text x="38" y="298" font-size="11" fill="#5c626b" font-family="sans-serif">境界をまたぐ関数呼び出し → LTO の出番　／　仮想呼び出しと偏った分岐 → PGO・CSPGO の出番</text>
+</svg>
+<figcaption>図 4-1　LogLab の処理パイプラインと翻訳単位の境界</figcaption>
+</figure>
+
+<h3>4.2.1 各ファイルの役割</h3>
+
+<table>
+<thead><tr><th>ファイル</th><th>役割</th><th>最適化の観点での意味</th></tr></thead>
+<tbody>
+<tr><td><code>include/loglab.h</code></td><td>共通の型と宣言</td><td>実装はヘッダに置かない（＝翻訳単位の壁を作る）</td></tr>
+<tr><td><code>src/generator.cpp</code></td><td>決定的な疑似ログの生成</td><td>レベルの出現比率を意図的に偏らせてある</td></tr>
+<tr><td><code>src/tokenizer.cpp</code></td><td>行のパース</td><td>最もホットな処理。小さな関数の呼び出しが多い</td></tr>
+<tr><td><code>src/filter.cpp</code></td><td>フィルタ群（仮想関数）</td><td>間接呼び出しの発生源</td></tr>
+<tr><td><code>src/stats.cpp</code></td><td>集計とチェックサム</td><td>1000 行に 3 行程度しか通らない重い経路を含む</td></tr>
+<tr><td><code>src/main.cpp</code></td><td>計測ループと結果出力</td><td>生成処理を計測区間の外に出してある</td></tr>
+</tbody>
+</table>
+
+<div class="box note">
+<span class="t">実装をヘッダに置かない理由</span>
+<p>C++ では、ヘッダに書いた関数はどの翻訳単位からもインライン化できます。もし <code>parse_line()</code> をヘッダに書いてしまうと、LTO を使わなくてもインライン化されてしまい、第 4 部で「LTO で何が変わったか」を観察できません。本書の題材は<strong>意図的に</strong>、実装を <code>.cpp</code> 側に置いています。</p>
+</div>
+
+<h2>4.3 コード</h2>
+
+<p>プロジェクトのフォルダに <code>include</code> と <code>src</code> を作り、以下のファイルを配置します。第 3 章で作った <code>ClangOptLab.cpp</code> は削除して構いません。</p>
+
+<h3>4.3.1 include/loglab.h</h3>
+
+<pre><code>#pragma once
+
+#include &lt;cstddef&gt;
+#include &lt;cstdint&gt;
+#include &lt;memory&gt;
+#include &lt;string&gt;
+#include &lt;string_view&gt;
+#include &lt;vector&gt;
+
+namespace loglab {
+
+enum class Level : std::uint8_t {
+    Trace = 0, Debug = 1, Info = 2, Warn = 3, Error = 4
+};
+
+struct Record {
+    std::uint64_t    timestamp = 0;
+    Level            level     = Level::Trace;
+    std::uint32_t    code      = 0;
+    std::string_view component;
+    std::string_view message;
+};
+
+// --- generator.cpp -------------------------------------------------
+std::vector&lt;std::string&gt; generate_lines(std::size_t count, std::uint64_t seed);
+
+// --- tokenizer.cpp -------------------------------------------------
+bool parse_line(std::string_view line, Record&amp; out);
+
+// --- filter.cpp ----------------------------------------------------
+class Filter {
+public:
+    virtual ~Filter() = default;
+    virtual bool accept(const Record&amp; r) const = 0;
+    virtual const char* name() const = 0;
+};
+
+std::vector&lt;std::unique_ptr&lt;Filter&gt;&gt; make_filters();
+
+// --- stats.cpp -----------------------------------------------------
+class Stats {
+public:
+    void add(const Record&amp; r);
+    void report() const;
+
+    std::uint64_t checksum() const { return hash_; }
+    std::uint64_t accepted() const { return accepted_; }
+
+private:
+    void handle_error(const Record&amp; r);   // 稀にしか通らない経路
+
+    std::uint64_t hash_         = 14695981039346656037ull;
+    std::uint64_t accepted_     = 0;
+    std::uint64_t per_level_[5] = {};
+    std::uint64_t error_bytes_  = 0;
+};
+
+} // namespace loglab</code></pre>
+<p class="cap">リスト 4-1　include/loglab.h</p>
+
+<h3>4.3.2 src/generator.cpp</h3>
+
+<pre><code>#include "loglab.h"
+
+#include &lt;array&gt;
+#include &lt;charconv&gt;
+
+namespace loglab {
+namespace {
+
+// 決定的な擬似乱数（xorshift64*）。環境によらず同じ列を生成する。
+class Rng {
+public:
+    explicit Rng(std::uint64_t seed) : s_(seed ? seed : 0x9E3779B97F4A7C15ull) {}
+
+    std::uint64_t next()
+    {
+        s_ ^= s_ &gt;&gt; 12;
+        s_ ^= s_ &lt;&lt; 25;
+        s_ ^= s_ &gt;&gt; 27;
+        return s_ * 0x2545F4914F6CDD1Dull;
+    }
+
+    std::uint32_t below(std::uint32_t n) { return static_cast&lt;std::uint32_t&gt;(next() % n); }
+
+private:
+    std::uint64_t s_;
+};
+
+constexpr std::array&lt;const char*, 5&gt; kLevelNames{
+    "TRACE", "DEBUG", "INFO", "WARN", "ERROR"
+};
+
+constexpr std::array&lt;const char*, 6&gt; kComponents{
+    "net.socket", "net.http", "io.file", "io.cache", "gfx.device", "core.init"
+};
+
+constexpr std::array&lt;const char*, 6&gt; kMessages{
+    "connection established", "read completed", "cache entry evicted",
+    "handshake retried", "buffer resized", "device lost"
+};
+
+// レベルの出現比率を偏らせる。ERROR は 1000 行に 3 行程度。
+Level pick_level(Rng&amp; rng)
+{
+    const std::uint32_t r = rng.below(1000);
+    if (r &lt; 600) return Level::Info;
+    if (r &lt; 850) return Level::Debug;
+    if (r &lt; 960) return Level::Trace;
+    if (r &lt; 997) return Level::Warn;
+    return Level::Error;
+}
+
+void append_uint(std::string&amp; s, std::uint64_t v)
+{
+    char buf[24];
+    auto [ptr, ec] = std::to_chars(buf, buf + sizeof(buf), v);
+    s.append(buf, ptr);
+}
+
+} // namespace
+
+std::vector&lt;std::string&gt; generate_lines(std::size_t count, std::uint64_t seed)
+{
+    Rng rng(seed);
+
+    std::vector&lt;std::string&gt; lines;
+    lines.reserve(count);
+
+    std::uint64_t ts = 1'700'000'000'000ull;
+
+    for (std::size_t i = 0; i &lt; count; ++i) {
+        ts += 1 + rng.below(7);
+
+        const Level level = pick_level(rng);
+        const char* comp  = kComponents[rng.below(kComponents.size())];
+        const char* msg   = kMessages[rng.below(kMessages.size())];
+
+        // ERROR のときだけ 0 以外のコードが入る
+        const std::uint32_t code =
+            (level == Level::Error) ? (1000 + rng.below(9000)) : 0;
+
+        std::string line;
+        line.reserve(80);
+        append_uint(line, ts);
+        line.push_back(' ');
+        line.append(kLevelNames[static_cast&lt;std::size_t&gt;(level)]);
+        line.push_back(' ');
+        line.append(comp);
+        line.push_back(' ');
+        line.append(msg);
+        line.append(" code=");
+        append_uint(line, code);
+
+        lines.push_back(std::move(line));
+    }
+
+    return lines;
+}
+
+} // namespace loglab</code></pre>
+<p class="cap">リスト 4-2　src/generator.cpp</p>
+
+<p>生成される行は次のような形になります。</p>
+
+<pre><code>1700000000004 INFO net.socket connection established code=0
+1700000000009 DEBUG io.cache cache entry evicted code=0
+1700000000011 ERROR gfx.device device lost code=4821</code></pre>
+
+<h3>4.3.3 src/tokenizer.cpp</h3>
+
+<pre><code>#include "loglab.h"
+
+namespace loglab {
+namespace {
+
+// 空白で区切られた次のフィールドを切り出す。pos は呼び出しのたびに前進する。
+std::string_view next_field(std::string_view s, std::size_t&amp; pos)
+{
+    while (pos &lt; s.size() &amp;&amp; s[pos] == ' ') {
+        ++pos;
+    }
+    const std::size_t begin = pos;
+    while (pos &lt; s.size() &amp;&amp; s[pos] != ' ') {
+        ++pos;
+    }
+    return s.substr(begin, pos - begin);
+}
+
+bool parse_uint(std::string_view s, std::uint64_t&amp; out)
+{
+    if (s.empty()) {
+        return false;
+    }
+    std::uint64_t v = 0;
+    for (const char c : s) {
+        if (c &lt; '0' || c &gt; '9') {
+            return false;
+        }
+        v = v * 10 + static_cast&lt;std::uint64_t&gt;(c - '0');
+    }
+    out = v;
+    return true;
+}
+
+bool parse_level(std::string_view s, Level&amp; out)
+{
+    // 出現頻度の高い順に比較する
+    if (s == "INFO")  { out = Level::Info;  return true; }
+    if (s == "DEBUG") { out = Level::Debug; return true; }
+    if (s == "TRACE") { out = Level::Trace; return true; }
+    if (s == "WARN")  { out = Level::Warn;  return true; }
+    if (s == "ERROR") { out = Level::Error; return true; }
+    return false;
+}
+
+} // namespace
+
+bool parse_line(std::string_view line, Record&amp; out)
+{
+    std::size_t pos = 0;
+
+    if (!parse_uint(next_field(line, pos), out.timestamp)) {
+        return false;
+    }
+    if (!parse_level(next_field(line, pos), out.level)) {
+        return false;
+    }
+
+    out.component = next_field(line, pos);
+    if (out.component.empty()) {
+        return false;
+    }
+
+    // " code=" が現れるまでがメッセージ
+    const std::size_t msg_begin = pos + 1;
+    const std::size_t eq = line.find(" code=", pos);
+    if (eq == std::string_view::npos || msg_begin &gt; eq) {
+        return false;
+    }
+    out.message = line.substr(msg_begin, eq - msg_begin);
+
+    std::uint64_t code = 0;
+    if (!parse_uint(line.substr(eq + 6), code)) {
+        return false;
+    }
+    out.code = static_cast&lt;std::uint32_t&gt;(code);
+
+    return true;
+}
+
+} // namespace loglab</code></pre>
+<p class="cap">リスト 4-3　src/tokenizer.cpp</p>
+
+<div class="box tip">
+<span class="t">ここが最適化の観察ポイントになります</span>
+<p><code>next_field()</code>・<code>parse_uint()</code>・<code>parse_level()</code> は無名名前空間にある小さな関数で、同じ翻訳単位の <code>parse_line()</code> から呼ばれています。つまり <code>/O2</code> でもインライン化される可能性が高い。一方 <code>parse_line()</code> 自身は <code>main.cpp</code> から呼ばれるため、翻訳単位の壁を越えます。<strong>この壁がどうなるかが第 20 章の主題</strong>です。</p>
+</div>
+
+<h3>4.3.4 src/filter.cpp</h3>
+
+<pre><code>#include "loglab.h"
+
+namespace loglab {
+namespace {
+
+// ほとんどの行を通すフィルタ
+class LevelFilter final : public Filter {
+public:
+    bool accept(const Record&amp; r) const override
+    {
+        return static_cast&lt;int&gt;(r.level) &gt;= static_cast&lt;int&gt;(Level::Debug);
+    }
+    const char* name() const override { return "LevelFilter"; }
+};
+
+// 半分ほどを落とすフィルタ
+class ComponentFilter final : public Filter {
+public:
+    bool accept(const Record&amp; r) const override
+    {
+        return r.component.starts_with("net.") || r.component.starts_with("io.");
+    }
+    const char* name() const override { return "ComponentFilter"; }
+};
+
+// ほとんど何も落とさないフィルタ
+class MessageFilter final : public Filter {
+public:
+    bool accept(const Record&amp; r) const override
+    {
+        return !r.message.empty() &amp;&amp; r.message.find("lost") == std::string_view::npos;
+    }
+    const char* name() const override { return "MessageFilter"; }
+};
+
+} // namespace
+
+std::vector&lt;std::unique_ptr&lt;Filter&gt;&gt; make_filters()
+{
+    std::vector&lt;std::unique_ptr&lt;Filter&gt;&gt; v;
+    v.push_back(std::make_unique&lt;LevelFilter&gt;());
+    v.push_back(std::make_unique&lt;ComponentFilter&gt;());
+    v.push_back(std::make_unique&lt;MessageFilter&gt;());
+    return v;
+}
+
+} // namespace loglab</code></pre>
+<p class="cap">リスト 4-4　src/filter.cpp</p>
+
+<p>三つのフィルタは、それぞれ通過率が大きく違います。この差が、PGO を導入したときの間接呼び出し最適化に効いてきます。また、派生クラスがすべてこの <code>.cpp</code> の無名名前空間に閉じている点も重要です。<strong>プログラム全体を見渡せれば</strong>「<code>Filter</code> の実装はこの三つしかない」と結論できるからです。これができるのが LTO です（第 21 章）。</p>
+
+<h3>4.3.5 src/stats.cpp</h3>
+
+<pre><code>#include "loglab.h"
+
+#include &lt;cstdio&gt;
+
+namespace loglab {
+namespace {
+
+constexpr std::uint64_t kFnvPrime = 1099511628211ull;
+
+inline std::uint64_t mix(std::uint64_t h, std::uint64_t v)
+{
+    h ^= v;
+    h *= kFnvPrime;
+    return h;
+}
+
+} // namespace
+
+void Stats::add(const Record&amp; r)
+{
+    ++accepted_;
+    ++per_level_[static_cast&lt;std::size_t&gt;(r.level)];
+
+    hash_ = mix(hash_, r.timestamp);
+    hash_ = mix(hash_, static_cast&lt;std::uint64_t&gt;(r.level));
+    hash_ = mix(hash_, r.component.size());
+    hash_ = mix(hash_, r.message.size());
+    hash_ = mix(hash_, r.code);
+
+    // 1000 行に 3 行程度しか通らない経路。
+    // ここに [[unlikely]] は意図的に書かない（第 32 章で PGO に見つけさせる）。
+    if (r.level == Level::Error) {
+        handle_error(r);
+    }
+}
+
+void Stats::handle_error(const Record&amp; r)
+{
+    // 「稀だが重い」処理の代役。文字ごとに丁寧に走査する。
+    std::uint64_t h = hash_;
+    for (const char c : r.component) {
+        h = mix(h, static_cast&lt;std::uint64_t&gt;(static_cast&lt;unsigned char&gt;(c)));
+    }
+    for (const char c : r.message) {
+        h = mix(h, static_cast&lt;std::uint64_t&gt;(static_cast&lt;unsigned char&gt;(c)));
+    }
+    hash_ = mix(h, r.code);
+    error_bytes_ += r.component.size() + r.message.size();
+}
+
+void Stats::report() const
+{
+    static const char* const names[] = { "TRACE", "DEBUG", "INFO", "WARN", "ERROR" };
+    for (std::size_t i = 0; i &lt; 5; ++i) {
+        std::printf("  %-5s : %llu\n", names[i],
+                    static_cast&lt;unsigned long long&gt;(per_level_[i]));
+    }
+    std::printf("  error bytes : %llu\n",
+                static_cast&lt;unsigned long long&gt;(error_bytes_));
+}
+
+} // namespace loglab</code></pre>
+<p class="cap">リスト 4-5　src/stats.cpp</p>
+
+<div class="box note">
+<span class="t"><code>[[unlikely]]</code> を書かない理由</span>
+<p><code>if (r.level == Level::Error)</code> は 1000 回に 3 回しか成立しません。C++20 の <code>[[unlikely]]</code> 属性を書けば、コンパイラにその旨を伝えられます。しかしここでは<strong>あえて書きません</strong>。書かずにおくことで、第 32 章で「PGO がこの偏りを自力で発見し、<code>handle_error()</code> をコールドなコードとして配置し直す」様子を観察できるからです。手で属性を書く方法と PGO に任せる方法の比較も、その章で扱います。</p>
+</div>
+
+<h3>4.3.6 src/main.cpp</h3>
+
+<pre><code>#include "loglab.h"
+
+#include &lt;charconv&gt;
+#include &lt;chrono&gt;
+#include &lt;cstdio&gt;
+
+namespace {
+
+std::size_t arg_or(int argc, char** argv, int index, std::size_t fallback)
+{
+    if (index &gt;= argc) {
+        return fallback;
+    }
+    std::size_t v = fallback;
+    const std::string_view s{argv[index]};
+    const auto [ptr, ec] = std::from_chars(s.data(), s.data() + s.size(), v);
+    return (ec == std::errc{}) ? v : fallback;
+}
+
+} // namespace
+
+int main(int argc, char** argv)
+{
+    const std::size_t line_count = arg_or(argc, argv, 1, 200'000);
+    const std::size_t iterations = arg_or(argc, argv, 2, 50);
+
+    // 入力の生成は計測対象に含めない
+    const std::vector&lt;std::string&gt; lines = loglab::generate_lines(line_count, 20260910ull);
+    const std::vector&lt;std::unique_ptr&lt;loglab::Filter&gt;&gt; filters = loglab::make_filters();
+
+    loglab::Stats stats;
+
+    const auto begin = std::chrono::steady_clock::now();
+
+    for (std::size_t it = 0; it &lt; iterations; ++it) {
+        for (const std::string&amp; line : lines) {
+            loglab::Record rec;
+            if (!loglab::parse_line(line, rec)) {
+                continue;
+            }
+
+            bool accepted = true;
+            for (const auto&amp; f : filters) {
+                if (!f-&gt;accept(rec)) {
+                    accepted = false;
+                    break;
+                }
+            }
+            if (accepted) {
+                stats.add(rec);
+            }
+        }
+    }
+
+    const auto end = std::chrono::steady_clock::now();
+    const double ms = std::chrono::duration&lt;double, std::milli&gt;(end - begin).count();
+
+    std::printf("lines      : %llu x %llu iterations\n",
+                static_cast&lt;unsigned long long&gt;(line_count),
+                static_cast&lt;unsigned long long&gt;(iterations));
+    std::printf("accepted   : %llu\n",
+                static_cast&lt;unsigned long long&gt;(stats.accepted()));
+    std::printf("checksum   : 0x%016llx\n",
+                static_cast&lt;unsigned long long&gt;(stats.checksum()));
+    std::printf("elapsed    : %.1f ms\n", ms);
+    stats.report();
+
+    return 0;
+}</code></pre>
+<p class="cap">リスト 4-6　src/main.cpp</p>
+
+<h2>4.4 プロジェクトに追加する</h2>
+
+<ol>
+<li>ソリューションエクスプローラーでプロジェクトを右クリック → <strong>追加 &gt; 既存の項目</strong> で <code>src</code> 内の 5 つの <code>.cpp</code> を追加します</li>
+<li>同じ手順で <code>include/loglab.h</code> も追加します（ビルドには不要ですが、エディタから開けるようにするためです）</li>
+<li>ヘッダの検索パスを通します</li>
+</ol>
+
+<p class="path"><strong>構成プロパティ &gt; C/C++ &gt; 全般 &gt; 追加のインクルード ディレクトリ</strong><br>→ <code>$(ProjectDir)include;%(AdditionalIncludeDirectories)</code></p>
+
+<p>第 3 章で作った <code>ClangOptLab.cpp</code> がまだプロジェクトに残っていると <code>main</code> が二重定義になります。プロジェクトから除外するか、ファイルごと削除してください。</p>
+
+<div class="box warn">
+<span class="t">末尾の <code>%(AdditionalIncludeDirectories)</code> を消さない</span>
+<p>この記述は「既存の設定を引き継ぐ」という意味です。うっかり消すと、上位のプロパティシートで設定された検索パスが失われます。第 39 章でプロパティシートを導入したときに効いてくるので、いまのうちに癖をつけておいてください。</p>
+</div>
+
+<h2>4.5 ベースラインを取る</h2>
+
+<p>Release / x64 でビルドし、実行します。Visual Studio から実行するとコンソールがすぐ閉じるので、Developer Command Prompt から直接起動するほうが確実です。</p>
+
+<pre><code>cd x64\Release
+ClangOptLab.exe</code></pre>
+
+<p>次のような出力になります。</p>
+
+<pre><code>lines      : 200000 x 50 iterations
+accepted   : 4941900
+checksum   : 0x0e8685105a08f105
+elapsed    : 812.4 ms
+  TRACE : 0
+  DEBUG : 1398650
+  INFO  : 3320500
+  WARN  : 205550
+  ERROR : 17200
+  error bytes : 443400</code></pre>
+<p class="cap">実行結果の一例。<code>elapsed</code> は環境によって大きく変わります</p>
+
+<p>確認すべき点が三つあります。</p>
+
+<ol>
+<li><strong><code>checksum</code> と <code>accepted</code> は、あなたの環境でも上とまったく同じ値になるはずです。</strong> 疑似乱数のシードを固定してあるためです。違う値が出たら、コードの写し間違いを疑ってください</li>
+<li><code>TRACE</code> が 0 なのは正常です。<code>LevelFilter</code> が <code>Debug</code> 未満を落としているためです</li>
+<li><code>elapsed</code> が 100 ミリ秒を大きく下回る場合は、第 2 引数で反復回数を増やしてください（例：<code>ClangOptLab.exe 200000 200</code>）。逆に数秒かかりすぎる場合は減らします。<strong>500 ミリ秒から 2 秒の範囲</strong>に収めておくと、以降の章で扱いやすくなります</li>
+</ol>
+
+<div class="box tip">
+<span class="t">ベースラインを記録しておく</span>
+<p>この時点の <code>checksum</code> と <code>elapsed</code> をメモに残してください。<code>checksum</code> は「最適化でプログラムが壊れていないか」の判定に、<code>elapsed</code> は「何と比べて速くなったのか」の基準に、それぞれ最後の章まで使い続けます。ただし <code>elapsed</code> は 1 回の実行では信頼できません。適切な取り方は第 15 章で扱います。ここでは「だいたいこのくらい」で十分です。</p>
+</div>
+
+<h3>4.5.1 最適化が効いていることを確認する</h3>
+
+<p>念のため、最適化そのものが機能していることも見ておきましょう。プロパティで <strong>C/C++ &gt; 最適化 &gt; 最適化</strong> を一時的に <code>無効 (/Od)</code> にしてビルドし直し、実行してみてください。</p>
+
+<p>実行時間は数倍に伸びるはずです。そして <code>checksum</code> は<strong>変わりません</strong>。この二つが同時に成立していることが、題材として正しく機能している証拠です。確認できたら <code>/O2</code> に戻してください。</p>
+
+<h2>4.6 ベンチマークが最適化に消される問題</h2>
+
+<p>自作のベンチマークでよくある失敗が、<strong>測りたい処理をコンパイラに丸ごと削除される</strong>ことです。次のコードを考えてみます。</p>
+
+<pre><code>const auto begin = std::chrono::steady_clock::now();
+for (int i = 0; i &lt; 1000000; ++i) {
+    heavy_computation(i);       // 戻り値を誰も使っていない
+}
+const auto end = std::chrono::steady_clock::now();</code></pre>
+
+<p><code>heavy_computation()</code> に副作用が無く、その定義がコンパイラから見えていれば、この呼び出しはループごと削除されます。結果は「0.0 ミリ秒」。「劇的に速くなった」わけではなく、何も実行されていないだけです。</p>
+
+<p>LogLab では、次の三つでこれを防いでいます。</p>
+
+<table>
+<thead><tr><th>対策</th><th>該当箇所</th></tr></thead>
+<tbody>
+<tr><td>計算結果を必ず出力する</td><td><code>checksum</code> を <code>printf</code> している。ハッシュ値は全レコードに依存するため、どのレコードの処理も省略できない</td></tr>
+<tr><td>入力を実行時に決める</td><td>行数と反復回数をコマンドライン引数から取る。コンパイル時に畳み込めない</td></tr>
+<tr><td>計測対象外の処理を区間の外に出す</td><td><code>generate_lines()</code> を <code>steady_clock</code> の外で呼んでいる</td></tr>
+</tbody>
+</table>
+
+<div class="box warn">
+<span class="t">LTO を入れると、この問題は厳しくなります</span>
+<p>いまは <code>parse_line()</code> の実装が別の翻訳単位にあるため、<code>main.cpp</code> のコンパイル時点では「中で何をしているか分からない＝削除できない」という状態です。しかし第 4 部で LTO を有効にすると、コンパイラはプログラム全体を見渡せるようになります。<strong>LTO を入れた瞬間にベンチマークが消えて「無限に速く」なった</strong>、というのは実際に起こる事故です。結果を必ず使う、という原則は、LTO 導入後にこそ重要になります。</p>
+</div>
+
+<h2>4.7 チェックリスト</h2>
+
+<ul class="chk">
+<li><code>include</code> / <code>src</code> の 6 ファイルを配置し、プロジェクトに追加した</li>
+<li>追加のインクルードディレクトリに <code>$(ProjectDir)include</code> を設定した</li>
+<li>Release / x64 でビルドが通る</li>
+<li><code>checksum</code> が <code>0x0e8685105a08f105</code>、<code>accepted</code> が <code>4941900</code> になる</li>
+<li><code>elapsed</code> が 500 ミリ秒〜2 秒の範囲に収まるよう反復回数を調整した</li>
+<li><code>/Od</code> にすると遅くなり、<code>checksum</code> は変わらないことを確認した</li>
+<li>ベースラインの数値をメモに残した</li>
+</ul>
+
+<h2>4.8 まとめ</h2>
+
+<ul>
+<li>最適化の題材には<strong>六つの条件</strong>がある。特に「複数の翻訳単位」「間接呼び出し」「偏った分岐」は、LTO と PGO の効果を観察するための必須条件である</li>
+<li>実装をヘッダに置かないことで、翻訳単位の壁を意図的に作っている</li>
+<li>チェックサムは、最適化でプログラムが壊れていないことを確かめるための命綱である</li>
+<li>ベンチマークは<strong>結果を必ず使う</strong>。使わない計算は削除されうる。この危険は LTO を入れると増す</li>
+<li><code>/Od</code> と <code>/O2</code> で「時間は変わるがチェックサムは変わらない」ことが、題材が正しく機能している証拠</li>
+</ul>
+
+<p class="next"><strong>次章では</strong>、本書で使う LLVM 付属ツール（<code>llvm-profdata</code>、<code>llvm-cov</code>、<code>llvm-objdump</code> など）が揃っているかを確認します。特に PGO で使う <code>llvm-profdata</code> は環境によって同梱されていないことがあり、そのときの対処が必要です。あわせて「なぜコンパイラとツールのバージョンを揃える必要があるのか」も扱います。ここまでで第 1 部は完了です。</p>
+
+</div>
+</body>
+</html>

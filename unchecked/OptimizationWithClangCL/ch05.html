@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第5章 LLVM 付属ツールの確認 — Clang最適化入門</title>
+<style>
+:root{
+  --ink:#1b1d21; --sub:#5c626b; --line:#dfe3e8; --bg:#fff;
+  --code-bg:#f5f7f9; --code-ink:#22262b; --accent:#2f5d8a;
+  --note-bg:#eef4fa; --note-line:#4a80b5;
+  --warn-bg:#fdf4ec; --warn-line:#c07830;
+  --tip-bg:#eef7f1; --tip-line:#4a8c5f;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Meiryo",system-ui,sans-serif;
+  font-size:16px; line-height:1.9; text-align:justify;
+}
+.book{max-width:46rem; margin:0 auto; padding:3rem 1.25rem 6rem}
+.chapno{font-size:.82rem; letter-spacing:.18em; color:var(--accent); font-weight:700; margin:0 0 .4rem}
+h1{font-size:1.85rem; line-height:1.45; margin:0 0 .6rem; letter-spacing:.01em}
+.lead{color:var(--sub); font-size:1.02rem; margin:0 0 2.5rem; padding-bottom:2rem; border-bottom:2px solid var(--line)}
+h2{font-size:1.32rem; margin:3.2rem 0 1rem; padding-bottom:.45rem; border-bottom:1px solid var(--line); letter-spacing:.01em}
+h3{font-size:1.08rem; margin:2.2rem 0 .7rem; color:#2c3239}
+h4{font-size:.98rem; margin:1.6rem 0 .5rem; color:#3a4048}
+p{margin:0 0 1.1rem}
+ul,ol{margin:0 0 1.2rem; padding-left:1.5rem}
+li{margin:.4rem 0}
+code{
+  font-family:"Cascadia Mono","Consolas","SF Mono",monospace;
+  font-size:.88em; background:var(--code-bg); padding:.12em .38em;
+  border-radius:3px; border:1px solid var(--line); word-break:break-all;
+}
+pre{
+  background:var(--code-bg); color:var(--code-ink); border:1px solid var(--line);
+  border-left:3px solid var(--accent); border-radius:4px;
+  padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.6;
+}
+pre code{background:none; border:none; padding:0; font-size:.85rem; word-break:normal}
+.cap{font-size:.83rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+.box{border-radius:4px; padding:.95rem 1.15rem; margin:1.6rem 0; font-size:.95rem}
+.box p:last-child{margin-bottom:0}
+.box .t{font-weight:700; font-size:.86rem; letter-spacing:.06em; display:block; margin-bottom:.4rem}
+.note{background:var(--note-bg); border-left:4px solid var(--note-line)}
+.note .t{color:var(--note-line)}
+.warn{background:var(--warn-bg); border-left:4px solid var(--warn-line)}
+.warn .t{color:var(--warn-line)}
+.tip{background:var(--tip-bg); border-left:4px solid var(--tip-line)}
+.tip .t{color:var(--tip-line)}
+table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+th{background:var(--code-bg); font-weight:700}
+figure{margin:2rem 0}
+figure svg{display:block; width:100%; height:auto}
+figcaption{font-size:.83rem; color:var(--sub); text-align:center; margin-top:.7rem}
+.goal{border:1px solid var(--line); border-top:3px solid var(--accent); border-radius:4px; padding:1.1rem 1.3rem; margin:0 0 2.4rem; background:#fbfcfd}
+.goal h2{margin:0 0 .6rem; font-size:1rem; border:none; padding:0; letter-spacing:.06em}
+.goal ul{margin-bottom:0}
+.next{margin-top:3.5rem; padding-top:1.4rem; border-top:2px solid var(--line); color:var(--sub); font-size:.95rem}
+.next strong{color:var(--ink)}
+.chk{list-style:none; padding-left:0}
+.chk li{padding-left:1.7rem; position:relative}
+.chk li::before{content:"☐"; position:absolute; left:.2rem; color:var(--accent); font-size:1.05rem}
+.partend{margin-top:3rem; padding:1.2rem 1.4rem; border:2px solid var(--accent); border-radius:5px; background:#fbfcfd}
+.partend h3{margin-top:0; color:var(--accent)}
+@media (prefers-color-scheme:dark){
+  :root{
+    --ink:#e6e8ea; --sub:#a2a9b2; --line:#333940; --bg:#16181b;
+    --code-bg:#1e2126; --code-ink:#dfe3e8; --accent:#7fb0dd;
+    --note-bg:#1b2530; --note-line:#5f96c9;
+    --warn-bg:#2b2118; --warn-line:#d09154;
+    --tip-bg:#182619; --tip-line:#6aad7d;
+  }
+  h3{color:#d5d9dd} h4{color:#c3c9cf}
+  .goal,.partend{background:#1a1d21}
+}
+</style>
+</head>
+<body>
+<div class="book">
+
+<p class="chapno">第 5 章</p>
+<h1>LLVM 付属ツールの確認<br>— 最適化を観察するための道具箱</h1>
+<p class="lead">Clang の最適化を追いかける作業の大半は、コンパイラ本体ではなく周辺ツールが担います。この章では本書で使うツールを一通り確認し、足りないものがあれば補い、そして「なぜバージョンを揃える必要があるのか」を理解します。第 1 部の最後の章です。</p>
+
+<div class="goal">
+<h2>この章のゴール</h2>
+<ul>
+<li>本書で使う LLVM ツールと、それぞれの登場章を把握する</li>
+<li>手元の環境に何が入っていて何が無いかを確認する</li>
+<li>足りないツールを補う手順を知る</li>
+<li>コンパイラとツールのバージョンを揃えるべき理由を理解する</li>
+<li><code>llvm-objdump</code> で自作の実行ファイルを逆アセンブルしてみる</li>
+</ul>
+</div>
+
+<h2>5.1 本書で使うツール</h2>
+
+<table>
+<thead><tr><th>ツール</th><th>役割</th><th>主な登場章</th></tr></thead>
+<tbody>
+<tr><td><code>clang-cl</code></td><td>コンパイラ（MSVC 互換のコマンドライン）</td><td>全章</td></tr>
+<tr><td><code>lld-link</code></td><td>リンカ。LTO の実行主体でもある</td><td>第 4 部</td></tr>
+<tr><td><code>llvm-lib</code></td><td>ライブラリアン。ビットコードを含む <code>.lib</code> を扱える</td><td>第 22 章</td></tr>
+<tr><td><code>llvm-objdump</code></td><td>逆アセンブル。最適化の結果を機械語で確認する</td><td>第 8・20 章</td></tr>
+<tr><td><code>llvm-profdata</code></td><td>プロファイルのマージ・検査。<strong>PGO の心臓部</strong></td><td>第 29・30・36 章</td></tr>
+<tr><td><code>llvm-cov</code></td><td>プロファイルのカウンタをソース上に可視化する</td><td>第 30 章</td></tr>
+<tr><td><code>llvm-readobj</code></td><td>オブジェクトファイルの中身を調べる。ビットコードの確認に使う</td><td>第 17・22 章</td></tr>
+<tr><td><code>opt-viewer</code></td><td>最適化レコード（YAML）を HTML に整形する Python スクリプト群</td><td>第 10 章</td></tr>
+</tbody>
+</table>
+
+<p>この中で本書にとって特に重要なのは <code>llvm-profdata</code> です。第 5 部と第 6 部の作業は、ほぼすべてこのツールを経由します。逆に言うと、<strong><code>llvm-profdata</code> が無い環境では PGO の章に進めません</strong>。</p>
+
+<h2>5.2 何があるかを確認する</h2>
+
+<p>Developer Command Prompt for VS 2026 を開き、次を実行します。</p>
+
+<pre><code>where clang-cl
+where lld-link
+where llvm-lib
+where llvm-objdump
+where llvm-profdata
+where llvm-cov
+where llvm-readobj</code></pre>
+
+<p>PowerShell を使っているなら、まとめて確認できます。</p>
+
+<pre><code>@('clang-cl','lld-link','llvm-lib','llvm-objdump',
+  'llvm-profdata','llvm-cov','llvm-readobj') | ForEach-Object {
+    $p = (Get-Command $_ -ErrorAction SilentlyContinue).Source
+    '{0,-16} {1}' -f $_, ($p ? $p : '*** 見つかりません ***')
+}</code></pre>
+<p class="cap">リスト 5-1　ツールの存在を一括確認する（Developer PowerShell）</p>
+
+<p>すべて見つかれば、5.4 節まで飛ばして構いません。</p>
+
+<div class="box warn">
+<span class="t"><code>llvm-profdata</code> と <code>llvm-cov</code> が無いことがあります</span>
+<p>Visual Studio に同梱される LLVM は、LLVM プロジェクトのフルセットとは限りません。Microsoft がビルドとリンクに必要と判断した範囲が入っており、解析系のツールが省かれていることがあります。ここで見つからなかった場合は、次節の手順で補ってください。「自分の環境が壊れている」わけではありません。</p>
+</div>
+
+<h2>5.3 足りないツールを補う</h2>
+
+<p>第 2 章で触れた公式 LLVM を入れます。まだ入れていなければ、次のいずれかで導入します。</p>
+
+<pre><code>winget install LLVM.LLVM</code></pre>
+
+<p>あるいは GitHub の <code>llvm/llvm-project</code> の Releases から Windows 用インストーラを入手します。既定では <code>C:\Program Files\LLVM\</code> に入ります。</p>
+
+<p>ここで、<strong>二つの話を分けて考える</strong>のが大切です。</p>
+
+<table>
+<thead><tr><th></th><th>対象</th><th>切り替え方法</th></tr></thead>
+<tbody>
+<tr><td>(A) ビルドに使うコンパイラ・リンカ</td><td><code>clang-cl</code>、<code>lld-link</code>、<code>llvm-lib</code></td><td>MSBuild の <code>LLVMInstallDir</code>（第 2 章 2.4 節）</td></tr>
+<tr><td>(B) 手作業で叩く解析ツール</td><td><code>llvm-profdata</code>、<code>llvm-cov</code>、<code>llvm-objdump</code> ほか</td><td>シェルの <code>PATH</code></td></tr>
+</tbody>
+</table>
+
+<p>(B) だけが必要なら、(A) は同梱版のままで構いません。ただし<strong>その場合もバージョンは揃えるべき</strong>です。理由は次節で説明します。</p>
+
+<h3>5.3.1 PATH を通す</h3>
+
+<p>システムの環境変数を恒久的に書き換えるのは、後で「どのツールが使われているか分からない」状態を招きます。本書では、作業しているシェルの中だけで <code>PATH</code> を延長する方法を推奨します。</p>
+
+<pre><code>:: Developer Command Prompt（そのウィンドウの中だけ有効）
+set PATH=C:\Program Files\LLVM\bin;%PATH%
+where llvm-profdata</code></pre>
+
+<pre><code># Developer PowerShell（そのセッションの中だけ有効）
+$env:PATH = "C:\Program Files\LLVM\bin;" + $env:PATH
+where.exe llvm-profdata</code></pre>
+
+<div class="box tip">
+<span class="t">スクリプトにしておく</span>
+<p>この設定は第 5 部・第 6 部で毎回必要になります。<code>setup-env.cmd</code> のような短いバッチファイルをプロジェクトのルートに置いて、作業開始時に実行する習慣にしておくと楽です。第 41 章で CI に組み込むときも、この形がそのまま使えます。</p>
+</div>
+
+<h2>5.4 バージョンを揃える</h2>
+
+<p>ここは PGO でつまずく人がいちばん多いところです。先に理屈を押さえておきます。</p>
+
+<h3>5.4.1 プロファイルはバージョン付きのバイナリ形式</h3>
+
+<p>PGO で生成されるプロファイルデータ（<code>.profraw</code> / <code>.profdata</code>）は、人間が読めるテキストではなく、バージョン番号を持つバイナリ形式です。そしてこの形式は LLVM のバージョンによって変わります。</p>
+
+<p>PGO の作業では、<strong>二つの別々のプログラム</strong>がこのファイルを扱います。</p>
+
+<ul>
+<li>プロファイルを<strong>書く</strong>のは、<code>clang-cl</code> が実行ファイルに埋め込んだ<strong>プロファイルランタイム</strong></li>
+<li>プロファイルを<strong>読んでマージする</strong>のは、<code>llvm-profdata</code></li>
+</ul>
+
+<p>この二つのバージョンが食い違うと、次のようなエラーになります。</p>
+
+<pre><code>error: xxx.profraw: unsupported instrumentation profile format version</code></pre>
+
+<p>あるいは、マージ自体は通ったのに <code>-fprofile-use</code> で読み込む段階で拒否される、という形で現れることもあります。</p>
+
+<div class="box warn">
+<span class="t">鉄則：<code>clang-cl</code> と <code>llvm-profdata</code> のメジャーバージョンを揃える</span>
+<p>厳密に同一ビルドである必要はありませんが、メジャーバージョンが違う組み合わせは避けてください。同梱版の <code>clang-cl</code>（たとえば LLVM 21）と、後から入れた公式版の <code>llvm-profdata</code>（たとえば LLVM 24）を混ぜる、というのが典型的な事故です。</p>
+</div>
+
+<h3>5.4.2 バージョンを一覧する</h3>
+
+<p>作業を始める前に、次のコマンドで全ツールのバージョンを確認する習慣をつけてください。</p>
+
+<pre><code>clang-cl --version
+lld-link --version
+llvm-profdata --version
+llvm-cov --version</code></pre>
+
+<p>出力例です。</p>
+
+<pre><code>clang version 21.1.0
+Target: x86_64-pc-windows-msvc
+Thread model: posix
+InstalledDir: C:\Program Files\Microsoft Visual Studio\2026\Community\VC\Tools\Llvm\x64\bin
+
+LLVM (http://llvm.org/):
+  LLVM version 21.1.0
+  Optimized build.</code></pre>
+
+<p>数字の <code>21</code> の部分が揃っていることを確認します。揃っていなければ、<code>PATH</code> の順序を調整するか、第 2 章の <code>LLVMInstallDir</code> でコンパイラ側を公式版に寄せてください。</p>
+
+<h2>5.5 これらのツールが繋がる全体像</h2>
+
+<p>いま確認したツールは、ばらばらに存在しているわけではありません。第 5 部で行う PGO の作業は、これらを一本のパイプラインとして繋ぐことになります。先に全体像を見ておきましょう。</p>
+
+<figure>
+<svg viewBox="0 0 720 400" role="img" aria-label="PGO のデータフロー。計装ビルドから profraw を経て profdata を作り、最適化ビルドと可視化に使う流れ">
+  <defs>
+    <marker id="ar5" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
+      <path d="M0,0 L9,4.5 L0,9 z" fill="#2f5d8a"/>
+    </marker>
+    <marker id="ar5g" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
+      <path d="M0,0 L9,4.5 L0,9 z" fill="#4a8c5f"/>
+    </marker>
+  </defs>
+
+  <text x="20" y="26" font-size="12.5" font-weight="700" fill="#2f5d8a" font-family="sans-serif">PGO のデータフロー（第 5 部の全体像）</text>
+
+  <!-- row 1 -->
+  <rect x="20" y="46" width="150" height="56" rx="4" fill="#eef4fa" stroke="#4a80b5"/>
+  <text x="95" y="68" font-size="11.5" text-anchor="middle" font-weight="700" font-family="monospace" fill="#1b1d21">clang-cl</text>
+  <text x="95" y="87" font-size="10.5" text-anchor="middle" font-family="monospace" fill="#5c626b">-fprofile-generate</text>
+
+  <rect x="226" y="46" width="130" height="56" rx="4" fill="#f5f7f9" stroke="#dfe3e8"/>
+  <text x="291" y="70" font-size="11.5" text-anchor="middle" font-family="monospace" fill="#1b1d21">計装 .exe</text>
+  <text x="291" y="89" font-size="10.5" text-anchor="middle" font-family="sans-serif" fill="#5c626b">遅い／記録付き</text>
+
+  <rect x="412" y="46" width="150" height="56" rx="4" fill="#eef7f1" stroke="#4a8c5f"/>
+  <text x="487" y="68" font-size="11.5" text-anchor="middle" font-weight="700" font-family="sans-serif" fill="#1b1d21">トレーニング実行</text>
+  <text x="487" y="87" font-size="10.5" text-anchor="middle" font-family="sans-serif" fill="#5c626b">代表的なワークロード</text>
+
+  <rect x="600" y="46" width="100" height="56" rx="4" fill="#f5f7f9" stroke="#dfe3e8"/>
+  <text x="650" y="70" font-size="11.5" text-anchor="middle" font-family="monospace" fill="#1b1d21">*.profraw</text>
+  <text x="650" y="89" font-size="10.5" text-anchor="middle" font-family="sans-serif" fill="#5c626b">実行ごとに 1 個</text>
+
+  <line x1="172" y1="74" x2="222" y2="74" stroke="#2f5d8a" stroke-width="1.6" marker-end="url(#ar5)"/>
+  <line x1="358" y1="74" x2="408" y2="74" stroke="#2f5d8a" stroke-width="1.6" marker-end="url(#ar5)"/>
+  <line x1="564" y1="74" x2="596" y2="74" stroke="#2f5d8a" stroke-width="1.6" marker-end="url(#ar5)"/>
+
+  <!-- row 2 -->
+  <rect x="412" y="152" width="150" height="56" rx="4" fill="#eef4fa" stroke="#4a80b5"/>
+  <text x="487" y="174" font-size="11.5" text-anchor="middle" font-weight="700" font-family="monospace" fill="#1b1d21">llvm-profdata</text>
+  <text x="487" y="193" font-size="10.5" text-anchor="middle" font-family="monospace" fill="#5c626b">merge</text>
+
+  <rect x="226" y="152" width="130" height="56" rx="4" fill="#f5f7f9" stroke="#dfe3e8"/>
+  <text x="291" y="176" font-size="11.5" text-anchor="middle" font-family="monospace" fill="#1b1d21">app.profdata</text>
+  <text x="291" y="195" font-size="10.5" text-anchor="middle" font-family="sans-serif" fill="#5c626b">まとめたもの</text>
+
+  <path d="M650,106 L650,180 L566,180" stroke="#2f5d8a" stroke-width="1.6" fill="none" marker-end="url(#ar5)"/>
+  <line x1="408" y1="180" x2="360" y2="180" stroke="#2f5d8a" stroke-width="1.6" marker-end="url(#ar5)"/>
+
+  <!-- row 3 -->
+  <rect x="20" y="258" width="150" height="56" rx="4" fill="#eef4fa" stroke="#4a80b5"/>
+  <text x="95" y="280" font-size="11.5" text-anchor="middle" font-weight="700" font-family="monospace" fill="#1b1d21">clang-cl</text>
+  <text x="95" y="299" font-size="10.5" text-anchor="middle" font-family="monospace" fill="#5c626b">-fprofile-use=…</text>
+
+  <rect x="226" y="258" width="130" height="56" rx="4" fill="#eef7f1" stroke="#4a8c5f"/>
+  <text x="291" y="282" font-size="11.5" text-anchor="middle" font-weight="700" font-family="monospace" fill="#1b1d21">最適化 .exe</text>
+  <text x="291" y="301" font-size="10.5" text-anchor="middle" font-family="sans-serif" fill="#5c626b">これが成果物</text>
+
+  <rect x="412" y="258" width="150" height="56" rx="4" fill="#fdf4ec" stroke="#c07830"/>
+  <text x="487" y="280" font-size="11.5" text-anchor="middle" font-weight="700" font-family="monospace" fill="#1b1d21">llvm-cov / profdata</text>
+  <text x="487" y="299" font-size="10.5" text-anchor="middle" font-family="monospace" fill="#5c626b">show / overlap</text>
+
+  <rect x="600" y="258" width="100" height="56" rx="4" fill="#fdf4ec" stroke="#c07830"/>
+  <text x="650" y="282" font-size="11.5" text-anchor="middle" font-family="sans-serif" fill="#1b1d21">中身を読む</text>
+  <text x="650" y="301" font-size="10.5" text-anchor="middle" font-family="sans-serif" fill="#5c626b">第 30 章</text>
+
+  <path d="M258,214 L258,238 L95,238 L95,254" stroke="#2f5d8a" stroke-width="1.6" fill="none" marker-end="url(#ar5)"/>
+  <path d="M324,214 L324,238 L487,238 L487,254" stroke="#c07830" stroke-width="1.6" fill="none" stroke-dasharray="5,4" marker-end="url(#ar5)"/>
+  <line x1="172" y1="286" x2="222" y2="286" stroke="#2f5d8a" stroke-width="1.6" marker-end="url(#ar5)"/>
+  <line x1="564" y1="286" x2="596" y2="286" stroke="#c07830" stroke-width="1.6" marker-end="url(#ar5)"/>
+
+  <rect x="20" y="346" width="680" height="42" rx="4" fill="#f5f7f9" stroke="#dfe3e8"/>
+  <text x="38" y="372" font-size="11" fill="#5c626b" font-family="sans-serif">CSPGO（第 6 部）では、この流れがもう一周する。二周目のプロファイルも llvm-profdata でマージして合成する。</text>
+</svg>
+<figcaption>図 5-1　PGO のデータフローと、各段階で使うツール</figcaption>
+</figure>
+
+<p>いま全部を理解する必要はありません。<strong><code>llvm-profdata</code> がこの図の中心にいる</strong>ことだけ頭に入れておいてください。第 26 章からこの図に戻ってきます。</p>
+
+<h2>5.6 ハンズオン — <code>llvm-objdump</code> で覗いてみる</h2>
+
+<p>ツールが揃っていることの確認を兼ねて、第 4 章でビルドした実行ファイルを逆アセンブルしてみましょう。</p>
+
+<pre><code>cd x64\Release
+llvm-objdump -d --demangle ClangOptLab.exe &gt; disasm.txt</code></pre>
+
+<table>
+<thead><tr><th>オプション</th><th>意味</th></tr></thead>
+<tbody>
+<tr><td><code>-d</code></td><td>実行可能なセクションを逆アセンブルする</td></tr>
+<tr><td><code>--demangle</code></td><td>マングルされた C++ の名前を人間が読める形に戻す</td></tr>
+</tbody>
+</table>
+
+<p>出力は数万行になるので、ファイルに落としてエディタで開きます。<code>parse_line</code> で検索すると、次のような箇所が見つかるはずです（アドレスは環境によって変わります）。</p>
+
+<pre><code>    3766: e8 b5 05 00 00    callq  0x3d20 &lt;loglab::parse_line(std::basic_string_view&lt;char, ...&gt;, loglab::Record&amp;)&gt;
+    376b: 84 c0             testb  %al, %al
+    376d: 74 be             je     0x372d &lt;main+0x1fd&gt;
+    ...
+    3780: 49 8b 7d 00       movq   (%r13), %rdi
+    3784: 48 8b 07          movq   (%rdi), %rax
+    3787: 4c 89 e6          movq   %r12, %rsi
+    378a: ff 50 10          callq  *0x10(%rax)
+    378d: 84 c0             testb  %al, %al</code></pre>
+<p class="cap">出力の一例（<code>main</code> の内側）</p>
+
+<p>読み方はまだ分からなくて構いませんが、<strong>二種類の <code>callq</code> がある</strong>ことだけ見ておいてください。この対比が、本書の第 4 部と第 5 部の出発点になります。</p>
+
+<table>
+<thead><tr><th>命令</th><th>正体</th><th>本書での位置づけ</th></tr></thead>
+<tbody>
+<tr><td><code>callq 0x3d20 &lt;loglab::parse_line(...)&gt;</code></td><td>アドレスが確定した<strong>直接呼び出し</strong>。<code>main.cpp</code> から別の翻訳単位の関数を呼んでいる</td><td>翻訳単位の壁。LTO でこれが消えるかどうかを第 20 章で確認する</td></tr>
+<tr><td><code>callq *0x10(%rax)</code></td><td>レジスタが指す先を呼ぶ<strong>間接呼び出し</strong>。仮想関数テーブル経由の <code>Filter::accept()</code></td><td>デバーチャライズ（第 21 章）と間接呼び出しの最適化（第 32 章）の対象</td></tr>
+</tbody>
+</table>
+
+<div class="box tip">
+<span class="t">この <code>disasm.txt</code> は保存しておいてください</span>
+<p>第 20 章で LTO 有効時の逆アセンブルと差分を取ります。ファイル名を <code>disasm_baseline.txt</code> のように分かりやすく変えて、ベースラインとして残しておくと便利です。<code>fc</code> コマンドや Git の差分表示で比較できます。</p>
+</div>
+
+<h2>5.7 opt-viewer について</h2>
+
+<p>第 10 章で使う <code>opt-viewer</code> は、他のツールと違って単体の実行ファイルではなく、Python スクリプトの集まりです。LLVM のソース配布物または公式インストーラの <code>share\opt-viewer\</code> に置かれています。</p>
+
+<p>実行には Python 3 と、いくつかのパッケージ（PyYAML、Pygments）が必要です。</p>
+
+<pre><code>python --version
+pip install pyyaml pygments</code></pre>
+
+<p>使うのは第 10 章なので、いまは Python が入っているかだけ確認しておけば十分です。入っていなければ、その章までに用意してください。<code>opt-viewer</code> が無くても、最適化レコードの YAML を直接読むことはできます。</p>
+
+<h2>5.8 チェックリスト</h2>
+
+<ul class="chk">
+<li><code>clang-cl</code>、<code>lld-link</code>、<code>llvm-lib</code> が見つかる</li>
+<li><code>llvm-objdump</code>、<code>llvm-readobj</code> が見つかる</li>
+<li><strong><code>llvm-profdata</code> と <code>llvm-cov</code> が見つかる</strong>（無ければ公式 LLVM を導入した）</li>
+<li><code>clang-cl</code> と <code>llvm-profdata</code> のメジャーバージョンが一致している</li>
+<li><code>llvm-objdump -d --demangle</code> で <code>ClangOptLab.exe</code> を逆アセンブルできた</li>
+<li>その出力に直接呼び出しと間接呼び出しの両方があることを確認した</li>
+<li>ベースラインの逆アセンブル結果をファイルに保存した</li>
+</ul>
+
+<h2>5.9 まとめ</h2>
+
+<ul>
+<li>Clang の最適化を追う作業は、<strong>周辺ツールが主役</strong>。特に <code>llvm-profdata</code> は PGO の全工程に登場する</li>
+<li>Visual Studio 同梱の LLVM には解析系ツールが揃っていないことがある。その場合は公式 LLVM を入れて <code>PATH</code> で補う</li>
+<li>「ビルドに使うコンパイラ」と「手で叩く解析ツール」は切り替え方法が別（<code>LLVMInstallDir</code> と <code>PATH</code>）</li>
+<li>プロファイルデータはバージョン付きのバイナリ形式。<strong><code>clang-cl</code> と <code>llvm-profdata</code> のメジャーバージョンは揃える</strong></li>
+<li>逆アセンブルに現れる直接呼び出しと間接呼び出しの対比が、第 4 部・第 5 部の出発点になる</li>
+</ul>
+
+<div class="partend">
+<h3>第 1 部を終えて</h3>
+<p>ここまでで、ClangCL でビルドできる環境と、最適化の効果が観察できる題材と、それを調べるための道具が揃いました。まだ最適化オプションは一つも足していません。<code>/O2</code> のままです。</p>
+<p>第 2 部では、その <code>/O2</code> が何をしているのかを分解します。最適化パイプラインの構造、生成されたコードの読み方、そして「なぜこの関数はインライン化されなかったのか」をコンパイラ自身に説明させる方法。第 4 部で LTO を有効にしたとき、その効果を自分の目で確かめられるようにするための準備です。</p>
+</div>
+
+<p class="next"><strong>次章では</strong>、<code>/O2</code> というオプションの中身に踏み込みます。MSVC のオプションと Clang のオプションがどう対応しているのか、<code>/O2</code> は <code>-O2</code> と同じなのか、そして <code>clang-cl</code> が受け付ける <code>-f</code> 系オプションをどう書けばよいのか。本書でこれから追加していくオプションの、書き方の作法を固めます。</p>
+
+</div>
+</body>
+</html>

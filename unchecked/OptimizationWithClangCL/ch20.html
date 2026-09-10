@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第20章 LTO で何が変わったか — Clang最適化入門</title>
+<style>
+:root{
+  --ink:#1b1d21; --sub:#5c626b; --line:#dfe3e8; --bg:#fff;
+  --code-bg:#f5f7f9; --code-ink:#22262b; --accent:#2f5d8a;
+  --note-bg:#eef4fa; --note-line:#4a80b5;
+  --warn-bg:#fdf4ec; --warn-line:#c07830;
+  --tip-bg:#eef7f1; --tip-line:#4a8c5f;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Meiryo",system-ui,sans-serif;
+  font-size:16px; line-height:1.9; text-align:justify;
+}
+.book{max-width:46rem; margin:0 auto; padding:3rem 1.25rem 6rem}
+.chapno{font-size:.82rem; letter-spacing:.18em; color:var(--accent); font-weight:700; margin:0 0 .4rem}
+h1{font-size:1.85rem; line-height:1.45; margin:0 0 .6rem; letter-spacing:.01em}
+.lead{color:var(--sub); font-size:1.02rem; margin:0 0 2.5rem; padding-bottom:2rem; border-bottom:2px solid var(--line)}
+h2{font-size:1.32rem; margin:3.2rem 0 1rem; padding-bottom:.45rem; border-bottom:1px solid var(--line); letter-spacing:.01em}
+h3{font-size:1.08rem; margin:2.2rem 0 .7rem; color:#2c3239}
+h4{font-size:.98rem; margin:1.6rem 0 .5rem; color:#3a4048}
+p{margin:0 0 1.1rem}
+ul,ol{margin:0 0 1.2rem; padding-left:1.5rem}
+li{margin:.4rem 0}
+code{
+  font-family:"Cascadia Mono","Consolas","SF Mono",monospace;
+  font-size:.88em; background:var(--code-bg); padding:.12em .38em;
+  border-radius:3px; border:1px solid var(--line); word-break:break-all;
+}
+pre{
+  background:var(--code-bg); color:var(--code-ink); border:1px solid var(--line);
+  border-left:3px solid var(--accent); border-radius:4px;
+  padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.6;
+}
+pre code{background:none; border:none; padding:0; font-size:.85rem; word-break:normal}
+.cap{font-size:.83rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+.box{border-radius:4px; padding:.95rem 1.15rem; margin:1.6rem 0; font-size:.95rem}
+.box p:last-child{margin-bottom:0}
+.box .t{font-weight:700; font-size:.86rem; letter-spacing:.06em; display:block; margin-bottom:.4rem}
+.note{background:var(--note-bg); border-left:4px solid var(--note-line)}
+.note .t{color:var(--note-line)}
+.warn{background:var(--warn-bg); border-left:4px solid var(--warn-line)}
+.warn .t{color:var(--warn-line)}
+.tip{background:var(--tip-bg); border-left:4px solid var(--tip-line)}
+.tip .t{color:var(--tip-line)}
+table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+th{background:var(--code-bg); font-weight:700}
+figure{margin:2rem 0}
+figure svg{display:block; width:100%; height:auto}
+figcaption{font-size:.83rem; color:var(--sub); text-align:center; margin-top:.7rem}
+.goal{border:1px solid var(--line); border-top:3px solid var(--accent); border-radius:4px; padding:1.1rem 1.3rem; margin:0 0 2.4rem; background:#fbfcfd}
+.goal h2{margin:0 0 .6rem; font-size:1rem; border:none; padding:0; letter-spacing:.06em}
+.goal ul{margin-bottom:0}
+.next{margin-top:3.5rem; padding-top:1.4rem; border-top:2px solid var(--line); color:var(--sub); font-size:.95rem}
+.next strong{color:var(--ink)}
+.chk{list-style:none; padding-left:0}
+.chk li{padding-left:1.7rem; position:relative}
+.chk li::before{content:"\2610"; position:absolute; left:.2rem; color:var(--accent); font-size:1.05rem}
+.path{font-size:.93rem; color:var(--sub); background:var(--code-bg); border:1px solid var(--line); border-radius:3px; padding:.5rem .8rem; margin:0 0 1.2rem}
+.partend{margin-top:3rem; padding:1.2rem 1.4rem; border:2px solid var(--accent); border-radius:5px; background:#fbfcfd}
+.partend h3{margin-top:0; color:var(--accent)}
+.real{border-left-color:var(--tip-line)}
+@media (prefers-color-scheme:dark){
+  :root{
+    --ink:#e6e8ea; --sub:#a2a9b2; --line:#333940; --bg:#16181b;
+    --code-bg:#1e2126; --code-ink:#dfe3e8; --accent:#7fb0dd;
+    --note-bg:#1b2530; --note-line:#5f96c9;
+    --warn-bg:#2b2118; --warn-line:#d09154;
+    --tip-bg:#182619; --tip-line:#6aad7d;
+  }
+  h3{color:#d5d9dd} h4{color:#c3c9cf}
+  .goal,.partend{background:#1a1d21}
+}
+</style>
+</head>
+<body>
+<div class="book">
+
+<p class="chapno">第 20 章</p>
+<h1>LTO で何が変わったか<br>— 逆アセンブルとリマークで差分を確認する</h1>
+<p class="lead">第 2 部と第 3 部で揃えた道具を、すべて使う章です。<code>call</code> の数、コンパイラの判断、そして実行時間。三つの軸で LTO を評価します。結果は、正直に言えば期待どおりではありませんでした。それを含めて報告するのが本書の方針です。</p>
+
+<div class="goal">
+<h2>この章のゴール</h2>
+<ul>
+<li>リンク時のリマークを取得する</li>
+<li>LTO が何をインライン化したのかを特定する</li>
+<li>機械語の変化を数える</li>
+<li>実行時間を正しく比較し、<strong>差が無いときに正しくそう言う</strong></li>
+</ul>
+</div>
+
+<h2>20.1 三つの評価軸</h2>
+
+<table>
+<thead><tr><th>軸</th><th>見るもの</th><th>用意した章</th></tr></thead>
+<tbody>
+<tr><td>コンパイラの判断</td><td>リンク時のインライン化リマーク</td><td>第 9・10 章</td></tr>
+<tr><td>生成された機械語</td><td><code>call</code> 命令の数、<code>.text</code> サイズ</td><td>第 8 章</td></tr>
+<tr><td>実行時間</td><td>交互実行による最小値の比較</td><td>第 15 章</td></tr>
+</tbody>
+</table>
+
+<p>この順番には意味があります。<strong>下にいくほどノイズが大きい。</strong> 上の二つは決定的で、同じ入力なら必ず同じ結果になります。実行時間だけが確率的です。</p>
+
+<h2>20.2 リンク時のリマークを取る</h2>
+
+<p>第 16 章で触れたとおり、LTO を有効にすると最適化の主戦場はリンク時に移ります。第 9 章の <code>/clang:-Rpass=</code> はコンパイラ向けなので、リンク時には効きません。</p>
+
+<p>リンカ側では、<code>/mllvm:</code> を通して LLVM に直接指示します。</p>
+
+<p class="path"><strong>構成プロパティ &gt; リンカー &gt; コマンド ライン &gt; 追加のオプション</strong></p>
+
+<pre><code>/mllvm:-pass-remarks=inline</code></pre>
+
+<p>リンク時に、次のような行が出力されます。</p>
+
+<pre><code>app.cpp:4:0: '?scale@@YAHHH_N@Z' inlined into 'mainCRTStartup'
+  with (cost=-40, threshold=337) at callsite mainCRTStartup:2:0;</code></pre>
+
+<table>
+<thead><tr><th>オプション</th><th>意味</th></tr></thead>
+<tbody>
+<tr><td><code>/mllvm:-pass-remarks=&lt;regex&gt;</code></td><td>行われた最適化を報告する</td></tr>
+<tr><td><code>/mllvm:-pass-remarks-missed=&lt;regex&gt;</code></td><td>行われなかったものを報告する</td></tr>
+<tr><td><code>/mllvm:-pass-remarks-analysis=&lt;regex&gt;</code></td><td>解析結果を報告する</td></tr>
+</tbody>
+</table>
+
+<div class="box warn">
+<span class="t">位置情報にはデバッグ情報が必要です</span>
+<p>コンパイル時のリマーク（第 9 章）と違い、<strong>リンク時のリマークは <code>/Z7</code> と <code>/DEBUG</code> が無いと位置が出ません</strong>。次のようになってしまいます。</p>
+<pre><code>&lt;unknown&gt;:0:0: '?scale@@YAHHH_N@Z' inlined into 'mainCRTStartup' ...</code></pre>
+<p>第 3 章で Release 構成にもデバッグ情報を残す設定にしておいたのが、ここで効いてきます。</p>
+</div>
+
+<div class="box note">
+<span class="t">YAML では出せないのか</span>
+<p>リンカにも <code>/mllvm:-lto-pass-remarks-output=&lt;file&gt;</code> というオプションは存在します。ただし筆者が試した範囲では、このオプションを指定してもファイルが生成されませんでした（Full LTO / ThinLTO のどちらでも）。バージョンや構成によって挙動が変わる可能性はありますが、確実なのは<strong>標準エラー出力をファイルにリダイレクトする</strong>方法です。</p>
+<pre><code>lld-link ... /mllvm:-pass-remarks=inline 2&gt; link_remarks.txt</code></pre>
+<p>テキストなので、第 10 章のような YAML の集計はできませんが、行数を数えたり <code>findstr</code> で絞ったりするには十分です。</p>
+</div>
+
+<h2>20.3 何がインライン化されたのか</h2>
+
+<p>LogLab に対してリンク時のリマークを取り、<code>loglab</code> 名前空間の関数だけを抜き出した結果です。</p>
+
+<h3>20.3.1 Full LTO</h3>
+
+<pre><code>src/generator.cpp:70:11: 'std::vector&lt;std::string&gt;::reserve' inlined into 'loglab::generate_lines'
+src/main.cpp:29:44: 'loglab::generate_lines' inlined into 'main'
+src/main.cpp:30:66: 'loglab::make_filters()' inlined into 'main'
+src/main.cpp:39:18: 'loglab::parse_line(std::string_view, loglab::Record&)' inlined into 'main'
+src/main.cpp:51:23: 'loglab::Stats::add(loglab::Record const&)' inlined into 'main'
+src/main.cpp:67:11: 'loglab::Stats::report() const' inlined into 'main'</code></pre>
+
+<p><strong><code>parse_line</code> が <code>main</code> にインライン化されています。</strong></p>
+
+<p>第 9 章のハンズオンで、私たちは <code>main.cpp</code> のこの箇所に <code>function definition is not available</code> というリマークが出るのを確認しました。定義が別の翻訳単位にあるから展開できない、という報告でした。第 7 章では、<code>main.ll</code> の中に <code>call</code> が残っているのも見ました。</p>
+
+<p><strong>その壁が、実際に消えました。</strong> 第 4 部の目的は、この一行を出すことにあったと言ってもよいでしょう。</p>
+
+<h3>20.3.2 ThinLTO</h3>
+
+<pre><code>src/main.cpp:51:23: 'loglab::Stats::add(loglab::Record const&)' inlined into 'main'
+  with (cost=165, threshold=225)
+src/main.cpp:67:11: 'loglab::Stats::report() const' inlined into 'main'
+  with (cost=230, threshold=337)
+src/generator.cpp:70:11: 'std::vector&lt;std::string&gt;::reserve' inlined into 'loglab::generate_lines'</code></pre>
+
+<p><code>parse_line</code> はありません。第 18 章で説明したとおり、グローバル解析の段階で <code>main</code> のモジュールに <code>parse_line</code> を取り込む判断がされなかったためです。</p>
+
+<div class="box tip">
+<span class="t"><code>cost</code> の値の違いに注目</span>
+<p>Full LTO 側のリマークでは <code>cost</code> が <code>-12380</code> や <code>-14515</code> といった極端な負の値になっています。ThinLTO 側は <code>165</code> や <code>230</code> です。</p>
+<p>Full LTO では、プログラム全体が見えることで「この関数を呼んでいるのはここだけだ」と結論でき、展開すれば元の関数を丸ごと削除できると分かります。その削除ぶんの得が <code>cost</code> に大きな負の値として現れます。ThinLTO はその結論を出せないため、普通の見積もりになっています。<strong>数字が、二つの方式の見え方の違いをそのまま表しています。</strong></p>
+</div>
+
+<h2>20.4 機械語の変化</h2>
+
+<p>第 8 章で用意した手順で、三つのビルドを比べます。</p>
+
+<pre><code>llvm-objdump -d --demangle --x86-asm-syntax=intel --no-show-raw-insn ^
+    ClangOptLab.exe &gt; disasm_lto.txt
+
+:: loglab 名前空間への呼び出しを数える
+findstr /C:"call" disasm_lto.txt | findstr /C:"&lt;loglab::" | find /c /v ""</code></pre>
+
+<table>
+<thead><tr><th>ビルド</th><th><code>loglab::</code> への <code>call</code></th><th>全 <code>call</code> 命令</th><th><code>.text</code> サイズ</th><th>checksum</th></tr></thead>
+<tbody>
+<tr><td><code>/O2</code> のみ</td><td>12</td><td>100</td><td>8,103 B</td><td>一致</td></tr>
+<tr><td>ThinLTO</td><td>10</td><td>99</td><td>8,087 B</td><td>一致</td></tr>
+<tr><td>Full LTO</td><td><strong>6</strong></td><td>84</td><td>7,911 B</td><td>一致</td></tr>
+</tbody>
+</table>
+<p class="cap">実測の一例</p>
+
+<p>Full LTO で翻訳単位をまたぐ呼び出しが<strong>半減</strong>し、コードサイズも減りました。リマークで見た「5 つの関数がインライン化された」という事実と、きれいに対応しています。</p>
+
+<p>そして<strong>チェックサムは三つとも一致</strong>しています。プログラムの意味は変わっていません。</p>
+
+<h2>20.5 実行時間 — 期待した結果は出ませんでした</h2>
+
+<p>第 15 章の <code>bench.py</code> で測ります。まず空試験でノイズ床を確かめてから、比較します。</p>
+
+<pre><code>python bench.py builds\baseline\ClangOptLab.exe builds\baseline2\ClangOptLab.exe -n 10
+  最小値の差: -0.40%      &lt;- ノイズ床
+
+python bench.py builds\baseline\ClangOptLab.exe builds\lto_thin\ClangOptLab.exe -n 10
+  最小値の差: -0.35%
+
+python bench.py builds\baseline\ClangOptLab.exe builds\lto_full\ClangOptLab.exe -n 10
+  最小値の差: +3.46%      &lt;- ?</code></pre>
+
+<p>ThinLTO はノイズ床と同じ、つまり<strong>差は測れませんでした</strong>。そして Full LTO は <strong>3.46% 遅い</strong>という結果。<code>call</code> が半分になり、コードも小さくなったのに、遅くなった——？</p>
+
+<h3>20.5.1 繰り返す</h3>
+
+<p>第 15 章の教えに従い、繰り返します。</p>
+
+<pre><code>試行 1  最小値の差: +0.23%
+試行 2  最小値の差: -0.77%
+試行 3  最小値の差: +0.27%
+（A と B を入れ替えて）最小値の差: +0.62%</code></pre>
+
+<p><strong>+3.46% は再現しませんでした。</strong> 以降の測定はすべてノイズ床（0.4〜0.6%）と同程度に収まっています。最初の数字は測定の外れ値だったということです。</p>
+
+<div class="box warn">
+<span class="t">これが「1 回で判断してはいけない」の実例です</span>
+<p>もし試行 1 回で止めていたら、「Full LTO は LogLab を 3.5% 遅くする」という結論を本書に書いていたことになります。第 15 章で決めた手順——空試験でノイズ床を知り、交互に実行し、疑わしければ繰り返す——が、間違った結論を防ぎました。</p>
+<p>そして同時に、<strong>交互実行をしてもなお外れ値は出る</strong>ということも示しています。ノイズ床を大きく超える値が出たときは、喜ぶ前に、あるいは落胆する前に、もう一度測ってください。</p>
+</div>
+
+<h3>20.5.2 結論</h3>
+
+<p>本書の書き方（第 15 章 15.8 節）に従って報告します。</p>
+
+<blockquote style="border-left:3px solid var(--accent); padding-left:1rem; margin:1.5rem 0; color:var(--sub)">
+LogLab において、ThinLTO・Full LTO のいずれも、実行時間の差はノイズ床（0.4〜0.6%）を超えなかった。n=8〜10、交互実行、最小値比較。複数回の試行で確認。<strong>この環境・この題材では、LTO による実行時間の差は測れなかった。</strong>
+</blockquote>
+
+<h2>20.6 なぜ時間が動かなかったのか</h2>
+
+<p>「効かなかった」で終わらせず、理由の見当を付けるところまでが第 1 章の約束でした。考えられる要因を挙げます。</p>
+
+<h4>1. ホットループの中身がすでに最適化されていた</h4>
+<p>第 12・13 章のプロファイルで、時間の大半は <code>parse_line</code> の<strong>内部</strong>にありました。そして <code>parse_line</code> の中の <code>next_field</code> や <code>parse_uint</code> は、同じ翻訳単位にあるので <code>/O2</code> の時点ですでにインライン化されています。LTO が壊した壁は、<code>main</code> と <code>parse_line</code> の間の壁です。この呼び出しは 1 行につき 1 回、つまり 1000 万回発生しますが、呼び出し自体のコストは <code>parse_line</code> 内部の文字処理に比べれば小さい。</p>
+
+<h4>2. 呼び出しの回数に対して、削減されたコストが小さい</h4>
+<p>関数呼び出し 1 回のコストは数ナノ秒です。1000 万回でも数十ミリ秒。全体が 800 ミリ秒なら数パーセントですが、インライン化しても引数の準備や本体の実行は残るため、実際に浮くのはそのごく一部です。</p>
+
+<h4>3. インライン化が別の悪影響を持ち込んだ可能性</h4>
+<p><code>parse_line</code> が <code>main</code> に展開されると、<code>main</code> のループ本体が大きくなります。第 11 章で触れたレジスタ圧や命令キャッシュの問題が、インライン化の利得を相殺している可能性があります。</p>
+
+<h4>4. 題材が小さすぎる</h4>
+<p>LogLab は 5 翻訳単位、コード全体で <code>.text</code> が 8 KB です。命令キャッシュに全部載ってしまうので、コードサイズが減っても得がありません。<strong>LTO の効果が大きく出るのは、コードが大きく、呼び出しが多層で、翻訳単位が多いプログラム</strong>です。</p>
+
+<div class="box tip">
+<span class="t">これは LTO が無意味だという意味ではありません</span>
+<p>実際の製品コードで LTO が数パーセントの改善をもたらす例は多数あります。本書の題材で効果が測れなかったのは、題材の性質です。</p>
+<p>重要なのは、<strong>その判断を自分の環境と自分のコードで下せるようになること</strong>です。いま手元にあるのは「LTO を入れて、コンパイラの判断が確かに変わり、機械語も変わったが、この題材では時間に現れなかった」という、根拠のある事実です。「なんとなく速くなった気がする」よりはるかに価値があります。</p>
+</div>
+
+<h2>20.7 記録を残す</h2>
+
+<p>第 10 章で決めた形式で、この時点の状態を保存します。</p>
+
+<pre><code>records\
+  records_O2.txt          &lt;- 第 10 章
+  link_remarks_thin.txt   &lt;- 今回
+  link_remarks_full.txt   &lt;- 今回
+  disasm_calls_O2.txt     &lt;- 第 8 章
+  disasm_calls_thin.txt   &lt;- 今回
+  disasm_calls_full.txt   &lt;- 今回</code></pre>
+
+<p>第 5 部で PGO を導入したとき、そして第 38 章で LTO と PGO を組み合わせたとき、これらと比較することになります。</p>
+
+<h2>20.8 ハンズオン</h2>
+
+<ol>
+<li>リンカーの追加のオプションに <code>/mllvm:-pass-remarks=inline</code> を設定する</li>
+<li>ThinLTO でリビルドし、リマークを <code>link_remarks_thin.txt</code> に保存する</li>
+<li>Full LTO に切り替えて同じことをし、<code>link_remarks_full.txt</code> に保存する</li>
+<li>両者で <code>loglab::</code> を含む行を比較する</li>
+<li>三つのビルドの <code>call</code> 命令を数え、表を作る</li>
+<li>空試験でノイズ床を測ってから、<code>bench.py</code> で三つを比較する</li>
+<li>ノイズ床を超える差が出たら、<strong>もう一度測る</strong></li>
+</ol>
+
+<h2>20.9 まとめ</h2>
+
+<ul>
+<li>リンク時のリマークは <code>/mllvm:-pass-remarks=inline</code> で取る。位置情報には <code>/Z7</code> + <code>/DEBUG</code> が必要</li>
+<li>Full LTO は <code>parse_line</code> を含む 5 関数を <code>main</code> にインライン化した。<strong>第 9 章の <code>function definition is not available</code> が解消された</strong></li>
+<li>ThinLTO がインライン化したのは 2 関数。<code>parse_line</code> は取り込まれなかった</li>
+<li><code>loglab::</code> への <code>call</code> は 12 → 10（Thin）→ 6（Full）。<code>.text</code> も減った。checksum は不変</li>
+<li><strong>実行時間の差はノイズ床を超えなかった。</strong> 最初に出た +3.46% は再現せず、外れ値だった</li>
+<li>時間が動かない理由は、ホットな処理が翻訳単位内で完結していること、題材が小さいこと</li>
+<li>「効かなかった」ではなく「この環境・この題材では差が測れなかった。理由はこう考えられる」と報告する</li>
+</ul>
+
+<p class="next"><strong>次章では</strong>、LTO でしか実現できないもう一つの最適化——仮想関数のデバーチャライズを扱います。LogLab には <code>Filter::accept()</code> という間接呼び出しがあり、第 8 章の逆アセンブルにも <code>call qword ptr [rax + 0x10]</code> として現れていました。これを消せるのか。結論から言えば、LogLab では消せません。その理由が、この最適化の適用条件そのものを教えてくれます。</p>
+
+</div>
+</body>
+</html>

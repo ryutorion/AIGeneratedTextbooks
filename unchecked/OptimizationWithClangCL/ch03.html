@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第3章 最初のプロジェクト — Clang最適化入門</title>
+<style>
+:root{
+  --ink:#1b1d21; --sub:#5c626b; --line:#dfe3e8; --bg:#fff;
+  --code-bg:#f5f7f9; --code-ink:#22262b; --accent:#2f5d8a;
+  --note-bg:#eef4fa; --note-line:#4a80b5;
+  --warn-bg:#fdf4ec; --warn-line:#c07830;
+  --tip-bg:#eef7f1; --tip-line:#4a8c5f;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Meiryo",system-ui,sans-serif;
+  font-size:16px; line-height:1.9; text-align:justify;
+}
+.book{max-width:46rem; margin:0 auto; padding:3rem 1.25rem 6rem}
+.chapno{font-size:.82rem; letter-spacing:.18em; color:var(--accent); font-weight:700; margin:0 0 .4rem}
+h1{font-size:1.85rem; line-height:1.45; margin:0 0 .6rem; letter-spacing:.01em}
+.lead{color:var(--sub); font-size:1.02rem; margin:0 0 2.5rem; padding-bottom:2rem; border-bottom:2px solid var(--line)}
+h2{font-size:1.32rem; margin:3.2rem 0 1rem; padding-bottom:.45rem; border-bottom:1px solid var(--line); letter-spacing:.01em}
+h3{font-size:1.08rem; margin:2.2rem 0 .7rem; color:#2c3239}
+h4{font-size:.98rem; margin:1.6rem 0 .5rem; color:#3a4048}
+p{margin:0 0 1.1rem}
+ul,ol{margin:0 0 1.2rem; padding-left:1.5rem}
+li{margin:.4rem 0}
+code{
+  font-family:"Cascadia Mono","Consolas","SF Mono",monospace;
+  font-size:.88em; background:var(--code-bg); padding:.12em .38em;
+  border-radius:3px; border:1px solid var(--line); word-break:break-all;
+}
+pre{
+  background:var(--code-bg); color:var(--code-ink); border:1px solid var(--line);
+  border-left:3px solid var(--accent); border-radius:4px;
+  padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.65;
+}
+pre code{background:none; border:none; padding:0; font-size:.86rem; word-break:normal}
+.cap{font-size:.83rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+.box{border-radius:4px; padding:.95rem 1.15rem; margin:1.6rem 0; font-size:.95rem}
+.box p:last-child{margin-bottom:0}
+.box .t{font-weight:700; font-size:.86rem; letter-spacing:.06em; display:block; margin-bottom:.4rem}
+.note{background:var(--note-bg); border-left:4px solid var(--note-line)}
+.note .t{color:var(--note-line)}
+.warn{background:var(--warn-bg); border-left:4px solid var(--warn-line)}
+.warn .t{color:var(--warn-line)}
+.tip{background:var(--tip-bg); border-left:4px solid var(--tip-line)}
+.tip .t{color:var(--tip-line)}
+table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+th{background:var(--code-bg); font-weight:700}
+figure{margin:2rem 0}
+figure svg{display:block; width:100%; height:auto}
+figcaption{font-size:.83rem; color:var(--sub); text-align:center; margin-top:.7rem}
+.goal{border:1px solid var(--line); border-top:3px solid var(--accent); border-radius:4px; padding:1.1rem 1.3rem; margin:0 0 2.4rem; background:#fbfcfd}
+.goal h2{margin:0 0 .6rem; font-size:1rem; border:none; padding:0; letter-spacing:.06em}
+.goal ul{margin-bottom:0}
+.next{margin-top:3.5rem; padding-top:1.4rem; border-top:2px solid var(--line); color:var(--sub); font-size:.95rem}
+.next strong{color:var(--ink)}
+.chk{list-style:none; padding-left:0}
+.chk li{padding-left:1.7rem; position:relative}
+.chk li::before{content:"☐"; position:absolute; left:.2rem; color:var(--accent); font-size:1.05rem}
+.path{font-size:.93rem; color:var(--sub); background:var(--code-bg); border:1px solid var(--line); border-radius:3px; padding:.5rem .8rem; margin:0 0 1.2rem}
+@media (prefers-color-scheme:dark){
+  :root{
+    --ink:#e6e8ea; --sub:#a2a9b2; --line:#333940; --bg:#16181b;
+    --code-bg:#1e2126; --code-ink:#dfe3e8; --accent:#7fb0dd;
+    --note-bg:#1b2530; --note-line:#5f96c9;
+    --warn-bg:#2b2118; --warn-line:#d09154;
+    --tip-bg:#182619; --tip-line:#6aad7d;
+  }
+  h3{color:#d5d9dd} h4{color:#c3c9cf}
+  .goal{background:#1a1d21}
+}
+</style>
+</head>
+<body>
+<div class="book">
+
+<p class="chapno">第 3 章</p>
+<h1>最初のプロジェクト<br>— C++23 / ClangCL のビルド設定を作る</h1>
+<p class="lead">本書を通して使うプロジェクトをここで作ります。単に動くようにするだけでなく、「clang-cl に実際どんな引数が渡っているか」「リンカは何が使われているか」を自分の目で確認できる状態にしておきます。第 4 部以降の作業はすべてこの確認が土台になります。</p>
+
+<div class="goal">
+<h2>この章のゴール</h2>
+<ul>
+<li>プラットフォームツールセットを LLVM (clang-cl) に切り替える</li>
+<li>C++23 でビルドできることをコードで検証する</li>
+<li>ビルドログから <code>clang-cl.exe</code> の実体パスと引数を読み取る</li>
+<li>リンカが <code>lld-link.exe</code> であることを確認する</li>
+<li>Release 構成でもデバッグ情報を残す設定にする</li>
+</ul>
+</div>
+
+<h2>3.1 プロジェクトを作る</h2>
+
+<p>Visual Studio 2026 を起動し、新しいプロジェクトを作成します。</p>
+
+<ol>
+<li><strong>新しいプロジェクトの作成</strong> を選択</li>
+<li>テンプレートから <strong>コンソール アプリ</strong>（C++）を選択</li>
+<li>プロジェクト名を <code>ClangOptLab</code>、ソリューション名も同じにします</li>
+<li>「ソリューションとプロジェクトを同じディレクトリに配置する」は<strong>チェックしない</strong>でおきます。第 4 章で複数のソースファイルを足すため、また第 39 章でプロパティシートを追加するため、ソリューション階層があるほうが扱いやすくなります</li>
+</ol>
+
+<p>作成できたら、まず構成を整えます。画面上部のツールバーで、構成を <strong>Release</strong>、プラットフォームを <strong>x64</strong> にしてください。本書では原則として Release / x64 で作業します。最適化の話をするのに Debug 構成で測っても意味がないためです。</p>
+
+<h2>3.2 プラットフォームツールセットを切り替える</h2>
+
+<p>ソリューションエクスプローラーでプロジェクト <code>ClangOptLab</code> を右クリックし、<strong>プロパティ</strong> を開きます。</p>
+
+<div class="box warn">
+<span class="t">最初にここを変える</span>
+<p>プロパティページの左上にある <strong>構成</strong> を「<strong>すべての構成</strong>」、<strong>プラットフォーム</strong> を「<strong>すべてのプラットフォーム</strong>」に変えてから設定を始めてください。ここを既定のままにすると、Release だけ設定して Debug を忘れる、あるいはその逆、という事故が起きます。本書で今後「プロパティを変える」と書いたときは、常にこの状態から始めるものとします。</p>
+</div>
+
+<p class="path"><strong>構成プロパティ &gt; 全般 &gt; プラットフォーム ツールセット</strong> → <code>LLVM (clang-cl)</code></p>
+
+<p>ここに <code>LLVM (clang-cl)</code> が出てこない場合は、第 2 章のコンポーネントが足りていません。2.6 節を確認してください。</p>
+
+<p>設定したら、いったんビルドしてみます（<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd>）。テンプレートが生成した <code>Hello World</code> がそのままビルドできれば、切り替えは成功しています。</p>
+
+<h2>3.3 C++23 にする</h2>
+
+<p class="path"><strong>構成プロパティ &gt; C/C++ &gt; 言語 &gt; C++ 言語標準</strong></p>
+
+<p>ドロップダウンに <code>ISO C++23 標準 (/std:c++23)</code> があればそれを選びます。無ければ <code>プレビュー - 最新の C++ 標準機能 (/std:c++latest)</code> を選んでください。ここは Visual Studio と LLVM のバージョンの組み合わせによって選択肢が変わります。</p>
+
+<p>設定できたら、本当に C++23 になっているかをコードで確認します。<code>ClangOptLab.cpp</code> を次の内容に置き換えてください。</p>
+
+<pre><code>#include &lt;cstdio&gt;
+#include &lt;utility&gt;
+#include &lt;version&gt;
+
+static_assert(__cplusplus &gt;= 202302L, "C++23 でビルドされていません");
+
+enum class Level : int { Low = 1, High = 9 };
+
+int main()
+{
+    // std::to_underlying は C++23 で追加されたもの
+    std::printf("__cplusplus = %ldL\n", static_cast&lt;long&gt;(__cplusplus));
+    std::printf("Level::High = %d\n", std::to_underlying(Level::High));
+    return 0;
+}</code></pre>
+<p class="cap">リスト 3-1　ClangOptLab.cpp（C++23 の確認）</p>
+
+<p>ビルドして実行し、次のように表示されれば成功です。</p>
+
+<pre><code>__cplusplus = 202302L
+Level::High = 9</code></pre>
+
+<div class="box note">
+<span class="t"><code>/Zc:__cplusplus</code> は要りません</span>
+<p>MSVC（<code>cl.exe</code>）は互換性のため、既定では <code>__cplusplus</code> が <code>199711L</code> のままという有名な挙動を持っており、正しい値を得るには <code>/Zc:__cplusplus</code> が必要でした。clang-cl はこの点で MSVC の互換動作を引き継いでおらず、標準どおりの値を返します。上の <code>static_assert</code> がそのまま通るのはそのためです。</p>
+</div>
+
+<div class="box tip">
+<span class="t"><code>/std:c++latest</code> を選んだ場合</span>
+<p><code>__cplusplus</code> の値が <code>202302L</code> より大きくなることがあります（C++26 の作業版を指す値）。<code>static_assert</code> は <code>&gt;=</code> で書いてあるので通りますが、意図せず C++26 の機能を使ってしまう余地は残ります。可能であれば <code>/std:c++23</code> を明示するほうが、本書の趣旨には合っています。</p>
+</div>
+
+<h2>3.4 Release 構成の中身を確認する</h2>
+
+<p>最適化の実験をする前に、いま Release 構成が何をしているのかを確認しておきます。</p>
+
+<p class="path"><strong>構成プロパティ &gt; C/C++ &gt; 最適化</strong></p>
+
+<table>
+<thead><tr><th>プロパティ</th><th>Release の既定</th><th>意味</th></tr></thead>
+<tbody>
+<tr><td>最適化</td><td><code>最大限の最適化 (速度優先) (/O2)</code></td><td>速度重視の最適化一式。本書の出発点</td></tr>
+<tr><td>インライン関数の展開</td><td><code>任意の適切なもの (/Ob2)</code></td><td>インライン化の積極度</td></tr>
+<tr><td>組み込み関数を使用する</td><td><code>はい (/Oi)</code></td><td><code>memcpy</code> などを組み込み命令に置き換える</td></tr>
+</tbody>
+</table>
+
+<p><code>/O2</code> が具体的にどんな最適化パスの集合なのかは第 6 章で分解します。ここでは「Release は <code>/O2</code> から始まっている」という事実だけ押さえておいてください。</p>
+
+<h3>3.4.1 Release でもデバッグ情報を残す</h3>
+
+<p>この設定変更は、後の章のために必ずやっておいてください。</p>
+
+<p class="path"><strong>構成プロパティ &gt; C/C++ &gt; 全般 &gt; デバッグ情報の形式</strong> → <code>プログラム データベース (/Zi)</code></p>
+<p class="path"><strong>構成プロパティ &gt; リンカー &gt; デバッグ &gt; デバッグ情報の生成</strong> → <code>デバッグ情報ファイルを生成 (/DEBUG)</code></p>
+
+<p>デバッグ情報を付けても、最適化そのものは変わりません。生成されるコードは同じで、PDB ファイルが追加で作られるだけです。</p>
+
+<p>なぜこれが必要かというと、第 3 部で使うプロファイラ（PIX、Windows Performance Analyzer）が、アドレスを関数名に対応づけるために PDB を必要とするからです。PDB が無いと、プロファイル結果が <code>ClangOptLab.exe+0x1a3f</code> のような数字の羅列にしかなりません。「ホットスポットが分からない」という状態でチューニングを始めることになります。</p>
+
+<div class="box warn">
+<span class="t">PDB は「最適化前の姿」ではありません</span>
+<p>最適化されたコードの PDB は、行番号と機械語の対応が一対一ではありません。インライン化された関数、並べ替えられた命令、消えたローカル変数。デバッガでステップ実行すると行が飛び回ります。これは壊れているのではなく、最適化されたコードとはそういうものです。この対応関係の読み方は第 14 章で扱います。</p>
+</div>
+
+<h2>3.5 clang-cl に渡っている引数を見る</h2>
+
+<p>ここが、この章でいちばん重要な節です。</p>
+
+<p>プロパティページで設定した内容は、最終的にコマンドライン引数に変換されて <code>clang-cl.exe</code> に渡ります。本書ではこれから多くのオプションを足していきますが、「プロパティページで設定したつもりが渡っていない」という事故は頻繁に起きます。確認する術を先に持っておきます。</p>
+
+<h3>3.5.1 方法 1 — プロパティページのコマンドライン</h3>
+
+<p class="path"><strong>構成プロパティ &gt; C/C++ &gt; コマンド ライン</strong></p>
+
+<p>ここに、現在の設定から生成される引数がそのまま表示されます。次のような内容が見えるはずです。</p>
+
+<pre><code>/c /I"..." /Zi /W3 /WX- /diagnostics:column /O2 /Ob2 /Oi /D "NDEBUG"
+/D "_CONSOLE" /D "_UNICODE" /D "UNICODE" /Gm- /EHsc /MD /GS /fp:precise
+/permissive- /std:c++23 /Fo"x64\Release\" /Fd"x64\Release\vc143.pdb"
+/external:W3 /Gd /TP /FC</code></pre>
+
+<p>下部の <strong>追加のオプション</strong> 欄は、プロパティページに対応する項目が無いオプションを直接書き込む場所です。本書では <code>-flto=thin</code> や <code>-fprofile-use=...</code> を、しばしばここに書き足すことになります。</p>
+
+<h3>3.5.2 方法 2 — ビルドログ（こちらが本命）</h3>
+
+<p>プロパティページのコマンドラインは「これから渡す予定の引数」です。実際に起動された実行ファイルのパスまでは分かりません。第 2 章で公式 LLVM への差し替えを行った場合、それが効いているかどうかを確認するには、ビルドログを見る必要があります。</p>
+
+<p>MSBuild の出力詳細度を上げます。</p>
+
+<p class="path"><strong>ツール &gt; オプション &gt; プロジェクトおよびソリューション &gt; ビルド / 実行</strong><br>→ <strong>MSBuild プロジェクト ビルドの出力の詳細</strong> を <code>詳細</code>（Detailed）に</p>
+
+<p>この状態でリビルドし、出力ウィンドウを「ビルド」に切り替えると、次のような行が見つかります。</p>
+
+<pre><code>C:\Program Files\Microsoft Visual Studio\2026\Community\VC\Tools\Llvm\x64\bin\clang-cl.exe
+  /c /I"..." /Zi /W3 ... /std:c++23 ... ClangOptLab.cpp</code></pre>
+
+<p>先頭のフルパスが、実際に動いた <code>clang-cl.exe</code> です。<code>Directory.Build.props</code> で <code>LLVMInstallDir</code> を指定したなら、ここが <code>C:\Program Files\LLVM\bin\clang-cl.exe</code> に変わっているはずです。変わっていなければ、props ファイルの置き場所が間違っています（ソリューションファイルと同じ階層か、その上位に置く必要があります）。</p>
+
+<div class="box tip">
+<span class="t">詳細度は戻しておいても構いません</span>
+<p>詳細度を上げるとビルドが目に見えて遅くなり、出力も長大になります。確認が済んだら「最小」に戻し、必要なときだけ上げるのが実用的です。本書では以後、「ビルドログで確認する」と書いたらこの操作を指します。</p>
+</div>
+
+<h2>3.6 リンカを確認する — <code>lld-link</code></h2>
+
+<p>同じビルドログを下にスクロールすると、リンク工程の行があります。</p>
+
+<pre><code>C:\Program Files\Microsoft Visual Studio\2026\Community\VC\Tools\Llvm\x64\bin\lld-link.exe
+  /OUT:"x64\Release\ClangOptLab.exe" /DEBUG /MACHINE:X64 ... ClangOptLab.obj</code></pre>
+
+<p><strong><code>link.exe</code> ではなく <code>lld-link.exe</code> です。</strong> ClangCL ツールセットは、既定でリンカとライブラリアンも LLVM のものを使います。これは MSBuild の次のプロパティで制御されています。</p>
+
+<table>
+<thead><tr><th>プロパティ</th><th>既定値</th><th>意味</th></tr></thead>
+<tbody>
+<tr><td><code>UseLldLink</code></td><td><code>true</code></td><td>LLVM のリンカを使うかどうか</td></tr>
+<tr><td><code>LinkToolExe</code></td><td><code>lld-link.exe</code></td><td>実際に起動されるリンカの実行ファイル名</td></tr>
+<tr><td><code>UseLlvmLib</code></td><td><code>true</code></td><td>LLVM のライブラリアン（<code>llvm-lib</code>）を使うかどうか</td></tr>
+<tr><td><code>LibToolExe</code></td><td><code>llvm-lib.exe</code></td><td>実際に起動されるライブラリアン</td></tr>
+</tbody>
+</table>
+
+<p>MSVC のリンカに戻したい場合は <code>.vcxproj</code> または <code>Directory.Build.props</code> に次のように書きます。</p>
+
+<pre><code>&lt;PropertyGroup&gt;
+  &lt;UseLldLink&gt;false&lt;/UseLldLink&gt;
+  &lt;LinkToolExe&gt;link.exe&lt;/LinkToolExe&gt;
+  &lt;UseLlvmLib&gt;false&lt;/UseLlvmLib&gt;
+  &lt;LibToolExe&gt;lib.exe&lt;/LibToolExe&gt;
+&lt;/PropertyGroup&gt;</code></pre>
+<p class="cap">リスト 3-2　MSVC のリンカに戻す場合（本書では行いません）</p>
+
+<div class="box warn">
+<span class="t">LTO には <code>lld-link</code> が必要です</span>
+<p>第 4 部で扱う LTO は、<code>.obj</code> の中に機械語ではなく LLVM ビットコードを入れる方式です。MSVC の <code>link.exe</code> はこの形式を理解できないため、LTO を有効にしたまま <code>link.exe</code> でリンクすると失敗します。<strong>本書では <code>UseLldLink</code> を既定の <code>true</code> のままにしておいてください。</strong> 既存プロジェクトを ClangCL に移行した際、何らかの理由でこれが <code>false</code> になっていることがあり、第 17 章でつまずく典型的な原因になります。</p>
+</div>
+
+<figure>
+<svg viewBox="0 0 720 300" role="img" aria-label="MSBuild の ClangCL ツールセットにおけるビルドの流れと、各工程を制御するプロパティを示した図">
+  <defs>
+    <marker id="ar3" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
+      <path d="M0,0 L9,4.5 L0,9 z" fill="#2f5d8a"/>
+    </marker>
+  </defs>
+
+  <rect x="20" y="86" width="112" height="52" rx="4" fill="#f5f7f9" stroke="#dfe3e8"/>
+  <text x="76" y="110" font-size="12.5" text-anchor="middle" font-family="monospace" fill="#1b1d21">*.cpp</text>
+  <text x="76" y="128" font-size="11" text-anchor="middle" font-family="sans-serif" fill="#5c626b">ソース</text>
+
+  <rect x="186" y="80" width="150" height="64" rx="4" fill="#eef4fa" stroke="#4a80b5"/>
+  <text x="261" y="105" font-size="12.5" text-anchor="middle" font-weight="700" font-family="monospace" fill="#1b1d21">clang-cl.exe</text>
+  <text x="261" y="125" font-size="10.5" text-anchor="middle" font-family="sans-serif" fill="#5c626b">/O2 /std:c++23 /Zi</text>
+
+  <rect x="390" y="86" width="100" height="52" rx="4" fill="#f5f7f9" stroke="#dfe3e8"/>
+  <text x="440" y="110" font-size="12.5" text-anchor="middle" font-family="monospace" fill="#1b1d21">*.obj</text>
+  <text x="440" y="128" font-size="11" text-anchor="middle" font-family="sans-serif" fill="#5c626b">オブジェクト</text>
+
+  <rect x="544" y="80" width="150" height="64" rx="4" fill="#eef4fa" stroke="#4a80b5"/>
+  <text x="619" y="105" font-size="12.5" text-anchor="middle" font-weight="700" font-family="monospace" fill="#1b1d21">lld-link.exe</text>
+  <text x="619" y="125" font-size="10.5" text-anchor="middle" font-family="sans-serif" fill="#5c626b">/DEBUG /MACHINE:X64</text>
+
+  <line x1="134" y1="112" x2="182" y2="112" stroke="#2f5d8a" stroke-width="1.6" marker-end="url(#ar3)"/>
+  <line x1="338" y1="112" x2="386" y2="112" stroke="#2f5d8a" stroke-width="1.6" marker-end="url(#ar3)"/>
+  <line x1="492" y1="112" x2="540" y2="112" stroke="#2f5d8a" stroke-width="1.6" marker-end="url(#ar3)"/>
+
+  <rect x="640" y="176" width="60" height="44" rx="4" fill="#eef7f1" stroke="#4a8c5f"/>
+  <text x="670" y="203" font-size="11.5" text-anchor="middle" font-family="monospace" fill="#1b1d21">.exe</text>
+  <path d="M619,148 L619,176 L636,196" stroke="#2f5d8a" stroke-width="1.6" fill="none" marker-end="url(#ar3)"/>
+
+  <text x="186" y="176" font-size="11" font-weight="700" fill="#5c626b" font-family="sans-serif">制御するプロパティ</text>
+  <text x="186" y="197" font-size="11" font-family="monospace" fill="#5c626b">PlatformToolset = ClangCL</text>
+  <text x="186" y="216" font-size="11" font-family="monospace" fill="#5c626b">LLVMInstallDir / LLVMToolsVersion</text>
+  <text x="186" y="235" font-size="11" font-family="monospace" fill="#5c626b">UseLldLink / LinkToolExe</text>
+  <text x="186" y="254" font-size="11" font-family="monospace" fill="#5c626b">UseLlvmLib / LibToolExe</text>
+  <line x1="176" y1="164" x2="176" y2="262" stroke="#dfe3e8" stroke-width="2"/>
+
+  <text x="20" y="40" font-size="12.5" font-weight="700" fill="#2f5d8a" font-family="sans-serif">ClangCL ツールセットのビルド工程</text>
+  <text x="20" y="58" font-size="11" fill="#5c626b" font-family="sans-serif">第 17 章で、この右半分（lld-link）が LTO の主役になる</text>
+</svg>
+<figcaption>図 3-1　ClangCL ツールセットのビルド工程と、それを制御するプロパティ</figcaption>
+</figure>
+
+<h2>3.7 この章の成果物チェックリスト</h2>
+
+<ul class="chk">
+<li>プロジェクト <code>ClangOptLab</code> が Release / x64 でビルドできる</li>
+<li>プラットフォームツールセットが <code>LLVM (clang-cl)</code> になっている</li>
+<li>リスト 3-1 が実行でき、<code>__cplusplus</code> が <code>202302L</code> 以上と表示される</li>
+<li>C/C++ &gt; デバッグ情報の形式が <code>/Zi</code>、リンカー &gt; デバッグ情報の生成が <code>/DEBUG</code></li>
+<li>ビルドログで <code>clang-cl.exe</code> のフルパスを確認した</li>
+<li>ビルドログで <code>lld-link.exe</code> が使われていることを確認した</li>
+</ul>
+
+<h2>3.8 よくあるつまずき</h2>
+
+<h4>Debug 構成だけビルドが通らない</h4>
+<p>プロパティを「すべての構成」で変更していません。3.2 節の警告を参照してください。特に言語標準は構成ごとに独立しているため、片方だけ C++23 になっている状態が起きます。</p>
+
+<h4><code>static_assert</code> が失敗する</h4>
+<p>言語標準の設定が反映されていません。プロパティページの <strong>C/C++ &gt; コマンド ライン</strong> を開き、<code>/std:c++23</code> または <code>/std:c++latest</code> が実際に含まれているかを確認してください。「追加のオプション」欄に古い <code>/std:</code> 指定が残っていて、そちらが優先されているケースもあります。</p>
+
+<h4>ビルドログに <code>cl.exe</code> が出てくる</h4>
+<p>ツールセットの切り替えが特定の構成にしか適用されていないか、そもそも切り替えが保存されていません。プロパティページを開き直して確認してください。</p>
+
+<h4>リンカが <code>link.exe</code> になっている</h4>
+<p>既存プロジェクトを流用した場合に起こりえます。<code>.vcxproj</code> をテキストエディタで開き、<code>UseLldLink</code> や <code>LinkToolExe</code> の記述が無いかを確認してください。3.6 節の警告のとおり、LTO の章でつまずく原因になります。</p>
+
+<h2>3.9 まとめ</h2>
+
+<ul>
+<li>プロパティは必ず「<strong>すべての構成 / すべてのプラットフォーム</strong>」から編集する</li>
+<li>C++23 になっているかは <code>static_assert(__cplusplus &gt;= 202302L)</code> で検証する。clang-cl に <code>/Zc:__cplusplus</code> は不要</li>
+<li>Release でも <code>/Zi</code> と <code>/DEBUG</code> を有効にしておく。最適化結果は変わらず、後の計測で必須になる</li>
+<li>設定が本当に渡っているかは <strong>ビルドログ</strong>で確認する。プロパティページのコマンドラインだけでは実体パスが分からない</li>
+<li>ClangCL は既定で <code>lld-link.exe</code> を使う。これは LTO の前提条件なので変更しない</li>
+</ul>
+
+<p class="next"><strong>次章では</strong>、最適化の効果を観察するための題材アプリを作ります。単なる Hello World では LTO も PGO も効果が見えないため、「複数の翻訳単位に分かれている」「処理時間に明確な偏りがある」「結果を検証できる」という条件を満たすプログラムを設計します。あわせて、最適化に消されないベンチマークの書き方も扱います。</p>
+
+</div>
+</body>
+</html>

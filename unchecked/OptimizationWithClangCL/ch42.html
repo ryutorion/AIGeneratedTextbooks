@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第42章 総まとめ — Clang最適化入門</title>
+<style>
+:root{
+  --ink:#1b1d21; --sub:#5c626b; --line:#dfe3e8; --bg:#fff;
+  --code-bg:#f5f7f9; --code-ink:#22262b; --accent:#2f5d8a;
+  --note-bg:#eef4fa; --note-line:#4a80b5;
+  --warn-bg:#fdf4ec; --warn-line:#c07830;
+  --tip-bg:#eef7f1; --tip-line:#4a8c5f;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Meiryo",system-ui,sans-serif;
+  font-size:16px; line-height:1.9; text-align:justify;
+}
+.book{max-width:46rem; margin:0 auto; padding:3rem 1.25rem 6rem}
+.chapno{font-size:.82rem; letter-spacing:.18em; color:var(--accent); font-weight:700; margin:0 0 .4rem}
+h1{font-size:1.85rem; line-height:1.45; margin:0 0 .6rem; letter-spacing:.01em}
+.lead{color:var(--sub); font-size:1.02rem; margin:0 0 2.5rem; padding-bottom:2rem; border-bottom:2px solid var(--line)}
+h2{font-size:1.32rem; margin:3.2rem 0 1rem; padding-bottom:.45rem; border-bottom:1px solid var(--line); letter-spacing:.01em}
+h3{font-size:1.08rem; margin:2.2rem 0 .7rem; color:#2c3239}
+h4{font-size:.98rem; margin:1.6rem 0 .5rem; color:#3a4048}
+p{margin:0 0 1.1rem}
+ul,ol{margin:0 0 1.2rem; padding-left:1.5rem}
+li{margin:.4rem 0}
+code{
+  font-family:"Cascadia Mono","Consolas","SF Mono",monospace;
+  font-size:.88em; background:var(--code-bg); padding:.12em .38em;
+  border-radius:3px; border:1px solid var(--line); word-break:break-all;
+}
+pre{
+  background:var(--code-bg); color:var(--code-ink); border:1px solid var(--line);
+  border-left:3px solid var(--accent); border-radius:4px;
+  padding:1rem 1.1rem; overflow-x:auto; margin:0 0 1.4rem; line-height:1.6;
+}
+pre code{background:none; border:none; padding:0; font-size:.85rem; word-break:normal}
+.cap{font-size:.83rem; color:var(--sub); margin:-1rem 0 1.6rem; padding-left:.2rem}
+.box{border-radius:4px; padding:.95rem 1.15rem; margin:1.6rem 0; font-size:.95rem}
+.box p:last-child{margin-bottom:0}
+.box .t{font-weight:700; font-size:.86rem; letter-spacing:.06em; display:block; margin-bottom:.4rem}
+.note{background:var(--note-bg); border-left:4px solid var(--note-line)}
+.note .t{color:var(--note-line)}
+.warn{background:var(--warn-bg); border-left:4px solid var(--warn-line)}
+.warn .t{color:var(--warn-line)}
+.tip{background:var(--tip-bg); border-left:4px solid var(--tip-line)}
+.tip .t{color:var(--tip-line)}
+table{border-collapse:collapse; width:100%; margin:0 0 1.5rem; font-size:.92rem}
+th,td{border:1px solid var(--line); padding:.55rem .7rem; text-align:left; vertical-align:top}
+th{background:var(--code-bg); font-weight:700}
+figure{margin:2rem 0}
+figure svg{display:block; width:100%; height:auto}
+figcaption{font-size:.83rem; color:var(--sub); text-align:center; margin-top:.7rem}
+.goal{border:1px solid var(--line); border-top:3px solid var(--accent); border-radius:4px; padding:1.1rem 1.3rem; margin:0 0 2.4rem; background:#fbfcfd}
+.goal h2{margin:0 0 .6rem; font-size:1rem; border:none; padding:0; letter-spacing:.06em}
+.goal ul{margin-bottom:0}
+.next{margin-top:3.5rem; padding-top:1.4rem; border-top:2px solid var(--line); color:var(--sub); font-size:.95rem}
+.next strong{color:var(--ink)}
+.chk{list-style:none; padding-left:0}
+.chk li{padding-left:1.7rem; position:relative}
+.chk li::before{content:"\2610"; position:absolute; left:.2rem; color:var(--accent); font-size:1.05rem}
+.path{font-size:.93rem; color:var(--sub); background:var(--code-bg); border:1px solid var(--line); border-radius:3px; padding:.5rem .8rem; margin:0 0 1.2rem}
+.partend{margin-top:3rem; padding:1.2rem 1.4rem; border:2px solid var(--accent); border-radius:5px; background:#fbfcfd}
+.partend h3{margin-top:0; color:var(--accent)}
+.real{border-left-color:var(--tip-line)}
+@media (prefers-color-scheme:dark){
+  :root{
+    --ink:#e6e8ea; --sub:#a2a9b2; --line:#333940; --bg:#16181b;
+    --code-bg:#1e2126; --code-ink:#dfe3e8; --accent:#7fb0dd;
+    --note-bg:#1b2530; --note-line:#5f96c9;
+    --warn-bg:#2b2118; --warn-line:#d09154;
+    --tip-bg:#182619; --tip-line:#6aad7d;
+  }
+  h3{color:#d5d9dd} h4{color:#c3c9cf}
+  .goal,.partend{background:#1a1d21}
+}
+</style>
+</head>
+<body>
+<div class="book">
+
+<p class="chapno">第 42 章</p>
+<h1>総まとめ<br>— 最適化を継続するためのワークフロー</h1>
+<p class="lead">42 章を通じて、一つのプログラムに LTO、PGO、CSPGO を適用し、そのすべてを測ってきました。何が分かったのか。そこから何を持ち帰るべきか。最後に整理します。</p>
+
+<h2>42.1 本書でやったこと</h2>
+
+<table>
+<thead><tr><th>部</th><th>やったこと</th><th>残ったもの</th></tr></thead>
+<tbody>
+<tr><td>第 1 部</td><td>環境を整え、題材アプリ LogLab を作った</td><td>checksum による検証手段</td></tr>
+<tr><td>第 2 部</td><td>最適化を観察する道具を揃えた</td><td>リマーク、最適化レコード、逆アセンブル</td></tr>
+<tr><td>第 3 部</td><td>時間を正しく測る手順を確立した</td><td><code>bench.py</code>、ノイズ床という概念</td></tr>
+<tr><td>第 4 部</td><td>LTO を導入し、評価した</td><td>リンク時リマーク、<code>call</code> の数え方</td></tr>
+<tr><td>第 5 部</td><td>PGO を導入し、評価した</td><td>三段階の手順、レコード比較の方法</td></tr>
+<tr><td>第 6 部</td><td>CSPGO を試し、効かないと判定した</td><td>数分で見切る手順</td></tr>
+<tr><td>第 7 部</td><td>組み合わせ、ビルドシステム、CI に載せた</td><td>継続可能な仕組み</td></tr>
+</tbody>
+</table>
+
+<h2>42.2 全実測結果</h2>
+
+<h3>42.2.1 コンパイラの判断（決定的）</h3>
+
+<table>
+<thead><tr><th>ビルド</th><th><code>.text</code></th><th><code>call</code></th><th>間接</th><th>特筆すべき判断の変化</th></tr></thead>
+<tbody>
+<tr><td>基準（<code>/O2</code>）</td><td>8,103 B</td><td>100</td><td>8</td><td>—</td></tr>
+<tr><td>ThinLTO</td><td>8,087 B</td><td>99</td><td>8</td><td>リンク時に 2 関数を展開</td></tr>
+<tr><td>Full LTO</td><td>7,911 B</td><td>84</td><td>8</td><td>リンク時に 5 関数を展開（<code>parse_line</code> 含む）</td></tr>
+<tr><td>Full LTO + WPV</td><td>7,911 B</td><td>84</td><td>8</td><td><strong>完全に同一</strong>（実装が 3 つあるため）</td></tr>
+<tr><td>PGO</td><td>8,312 B</td><td>104</td><td>9</td><td><strong>600 以上の呼び出し箇所でしきい値が 1/3 に</strong></td></tr>
+<tr><td>CSPGO</td><td>8,344 B</td><td>104</td><td>9</td><td><strong>PGO と完全に同一</strong></td></tr>
+<tr><td>PGO + ThinLTO</td><td>9,550 B</td><td>100</td><td>9</td><td>ThinLTO が <code>parse_line</code> を取り込むようになった</td></tr>
+</tbody>
+</table>
+<p class="cap">checksum は全ビルドで一致</p>
+
+<h3>42.2.2 実行時間（環境依存）</h3>
+
+<table>
+<thead><tr><th>ビルド</th><th>環境 A</th><th>環境 B</th></tr></thead>
+<tbody>
+<tr><td>ノイズ床</td><td>0.38%</td><td>0.00〜0.02%</td></tr>
+<tr><td>ThinLTO</td><td>&minus;0.35%（差なし）</td><td>&minus;0.35〜&minus;1.05%（差なし）</td></tr>
+<tr><td>Full LTO</td><td>+0.23〜+0.62%（差なし）</td><td>+0.68%（差なし）</td></tr>
+<tr><td><strong>PGO</strong></td><td><strong>&minus;6.5〜&minus;9.0%</strong></td><td>&minus;0.66〜&minus;0.79%（差なし）</td></tr>
+<tr><td>CSPGO</td><td>—</td><td>&minus;1.43%（差なし）</td></tr>
+<tr><td>PGO + ThinLTO</td><td>—</td><td>&minus;0.25%（差なし）</td></tr>
+</tbody>
+</table>
+<p class="cap">環境 B は Intel Xeon 2.80GHz / L3 33 MB</p>
+
+<h3>42.2.3 コスト</h3>
+
+<table>
+<thead><tr><th>項目</th><th>実測</th></tr></thead>
+<tbody>
+<tr><td>ThinLTO のリンク時間</td><td>4 倍（キャッシュ有効時の再リンクは 1/4）</td></tr>
+<tr><td>Full LTO のリンク時間</td><td>5.7 倍</td></tr>
+<tr><td>計装ビルドの <code>.text</code></td><td>4.2 倍</td></tr>
+<tr><td>計装ビルドの実行時間</td><td>1.9 倍</td></tr>
+<tr><td><code>-fprofile-update=atomic</code></td><td>さらに 7.4 倍</td></tr>
+<tr><td>CSPGO の手間</td><td>PGO の 1.5〜2 倍</td></tr>
+</tbody>
+</table>
+
+<h2>42.3 本書から持ち帰る七つの原則</h2>
+
+<h3>1. 検証手段を最初に作る</h3>
+<p>第 4 章で checksum を仕込んだのは、飾りではありませんでした。第 23 章で見たとおり、<strong>LTO は ODR 違反を警告なしに通します</strong>。最適化で結果が変わったことに気づけない状態でオプションを足すのは、速さを求めているのではなく、静かに壊しているだけです。</p>
+
+<h3>2. ノイズ床を知らずに差を語らない</h3>
+<p>同じバイナリを 30 回実行して 24% の開きが出ました（第 15 章）。空試験でノイズ床を測り、それを超えない差は「測れなかった」と報告する。この規律が、第 20 章で誤った結論（Full LTO が 3.5% 遅い）を防ぎました。</p>
+
+<h3>3. 決定的な指標と確率的な指標を分ける</h3>
+<p><strong>本書で最も価値のある教訓です。</strong> コンパイラの判断——最適化レコード、<code>call</code> の数、<code>.text</code> のサイズ——は決定的で、何度測っても同じです。実行時間は確率的で、しかも環境が変わると結論まで変わります（第 31 章）。</p>
+<p>前者で「最適化が機能していること」を確認し、後者で「自分の環境で得があるか」を判断する。</p>
+
+<h3>4. 効かなかった理由を説明できるところまでやる</h3>
+<p>本書では三度、「効かなかった」に出会いました。</p>
+<ul>
+<li>LTO の実行時間（第 20 章）——ホットな処理が翻訳単位内で完結していたから</li>
+<li>デバーチャライズ（第 21 章）——実装が 3 つあったから</li>
+<li>CSPGO（第 37 章）——文脈依存の共通関数が無かったから</li>
+</ul>
+<p>いずれも、理由が<strong>適用条件そのもの</strong>を教えてくれました。効かなかった結果は失敗ではなく、知識です。</p>
+
+<h3>5. 最適化は「情報を増やす」ことである</h3>
+<p>LTO も PGO も、新しい最適化アルゴリズムではありません（第 7 章）。ミドルエンドに与える<strong>機会</strong>と<strong>情報</strong>を増やす仕組みです。だから、どんな情報が足りていないのかを考えれば、どの手法が効くかの見当が付きます。</p>
+
+<h3>6. 「多いほうがよい」は成り立たない</h3>
+<p>インライン化のしきい値を上げても速くなりませんでした（第 11 章）。むしろ PGO は<strong>しきい値を下げて</strong>成果を出しました（第 32 章）。組み合わせても、コードサイズは増えます（第 38 章）。最適化に単調性はありません。</p>
+
+<h3>7. 一度きりにしない</h3>
+<p>プロファイルは関数単位でゆっくり劣化します（第 34 章）。仕組みとして回らなければ、半年後には効かなくなっています。第 39〜41 章で扱ったのは、そのための土台です。</p>
+
+<h2>42.4 判断のフロー</h2>
+
+<figure>
+<svg viewBox="0 0 720 380" role="img" aria-label="最適化に取り組むときの判断フロー">
+  <defs>
+    <marker id="a42" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
+      <path d="M0,0 L9,4.5 L0,9 z" fill="#5c626b"/>
+    </marker>
+  </defs>
+
+  <rect x="220" y="16" width="280" height="40" rx="4" fill="#fdf4ec" stroke="#c07830"/>
+  <text x="360" y="41" font-size="11.5" text-anchor="middle" font-weight="700" font-family="sans-serif" fill="#1b1d21">結果を検証する手段はあるか？</text>
+
+  <rect x="500" y="76" width="200" height="34" rx="4" fill="#f5f7f9" stroke="#dfe3e8"/>
+  <text x="600" y="98" font-size="10.5" text-anchor="middle" font-family="sans-serif" fill="#1b1d21">無ければまずそれを作る</text>
+
+  <rect x="220" y="76" width="280" height="40" rx="4" fill="#fdf4ec" stroke="#c07830"/>
+  <text x="360" y="101" font-size="11.5" text-anchor="middle" font-weight="700" font-family="sans-serif" fill="#1b1d21">ノイズ床を測ったか？</text>
+
+  <rect x="220" y="136" width="280" height="40" rx="4" fill="#eef4fa" stroke="#4a80b5"/>
+  <text x="360" y="161" font-size="11.5" text-anchor="middle" font-weight="700" font-family="sans-serif" fill="#1b1d21">どこが遅いかプロファイラで見たか？</text>
+
+  <rect x="220" y="196" width="280" height="40" rx="4" fill="#eef4fa" stroke="#4a80b5"/>
+  <text x="360" y="221" font-size="11.5" text-anchor="middle" font-weight="700" font-family="sans-serif" fill="#1b1d21">代表的なワークロードはあるか？</text>
+
+  <rect x="20" y="256" width="200" height="52" rx="4" fill="#eef7f1" stroke="#4a8c5f"/>
+  <text x="120" y="278" font-size="11.5" text-anchor="middle" font-weight="700" font-family="sans-serif" fill="#1b1d21">PGO から始める</text>
+  <text x="120" y="296" font-size="10" text-anchor="middle" font-family="sans-serif" fill="#5c626b">効果が大きく LTO も底上げする</text>
+
+  <rect x="500" y="256" width="200" height="52" rx="4" fill="#fdf4ec" stroke="#c07830"/>
+  <text x="600" y="278" font-size="11.5" text-anchor="middle" font-weight="700" font-family="sans-serif" fill="#1b1d21">LTO から始める</text>
+  <text x="600" y="296" font-size="10" text-anchor="middle" font-family="sans-serif" fill="#5c626b">トレーニングが用意できない場合</text>
+
+  <rect x="220" y="328" width="280" height="40" rx="4" fill="#eef4fa" stroke="#4a80b5"/>
+  <text x="360" y="353" font-size="11.5" text-anchor="middle" font-weight="700" font-family="sans-serif" fill="#1b1d21">レコードと時間の両方で評価する</text>
+
+  <line x1="360" y1="60" x2="360" y2="72" stroke="#5c626b" stroke-width="1.4" marker-end="url(#a42)"/>
+  <line x1="360" y1="120" x2="360" y2="132" stroke="#5c626b" stroke-width="1.4" marker-end="url(#a42)"/>
+  <line x1="360" y1="180" x2="360" y2="192" stroke="#5c626b" stroke-width="1.4" marker-end="url(#a42)"/>
+  <path d="M300,240 L120,240 L120,252" stroke="#4a8c5f" stroke-width="1.4" fill="none" marker-end="url(#a42)"/>
+  <path d="M420,240 L600,240 L600,252" stroke="#c07830" stroke-width="1.4" fill="none" marker-end="url(#a42)"/>
+  <text x="240" y="254" font-size="10" fill="#4a8c5f" font-family="sans-serif">ある</text>
+  <text x="450" y="254" font-size="10" fill="#c07830" font-family="sans-serif">ない</text>
+  <path d="M120,312 L120,348 L216,348" stroke="#5c626b" stroke-width="1.4" fill="none" marker-end="url(#a42)"/>
+  <path d="M600,312 L600,348 L504,348" stroke="#5c626b" stroke-width="1.4" fill="none" marker-end="url(#a42)"/>
+  <line x1="504" y1="96" x2="496" y2="96" stroke="#5c626b" stroke-width="1.4" stroke-dasharray="3,3"/>
+</svg>
+<figcaption>図 42-1　最適化に取り組むときの判断フロー</figcaption>
+</figure>
+
+<h2>42.5 継続するためのワークフロー</h2>
+
+<table>
+<thead><tr><th>頻度</th><th>やること</th><th>章</th></tr></thead>
+<tbody>
+<tr><td>コミットごと</td><td>保管したプロファイルでビルド。陳腐化の件数を記録</td><td>第 41 章</td></tr>
+<tr><td>コミットごと</td><td>決定的な指標（<code>.text</code>、レコード集計）を記録</td><td>第 10・41 章</td></tr>
+<tr><td>週次</td><td>プロファイルを更新。旧版と <code>overlap</code> で比較</td><td>第 30・41 章</td></tr>
+<tr><td>リリース前</td><td>プロファイルを必ず取り直す。<code>RequireProfile=true</code></td><td>第 41 章</td></tr>
+<tr><td>四半期ごと</td><td>専用マシンで実測。組み合わせを見直す</td><td>第 15・38 章</td></tr>
+<tr><td>ツールチェーン更新時</td><td>すべて測り直す。既定値が変わっている可能性がある</td><td>第 5・11 章</td></tr>
+</tbody>
+</table>
+
+<div class="box tip">
+<span class="t">最後の行を軽視しないでください</span>
+<p>本書で見たしきい値の既定値（225 / 337）も、<code>-O3</code> が追加するパスの内訳も、LLVM のバージョンに依存します。ツールチェーンを上げたら、<strong>前提が変わったものとして測り直す</strong>のが正しい態度です。</p>
+</div>
+
+<h2>42.6 本書が扱わなかったこと</h2>
+
+<table>
+<thead><tr><th>領域</th><th>参考</th></tr></thead>
+<tbody>
+<tr><td>サンプリング型 PGO（<code>-fprofile-sample-use</code>）</td><td>付録 C。計装のオーバーヘッドが許容できない場合の選択肢</td></tr>
+<tr><td>BOLT / Propeller（リンク後のレイアウト最適化）</td><td>付録 F。Windows での適用可否を含む</td></tr>
+<tr><td>アルゴリズムとデータ構造の改善</td><td>本書の範囲外だが、たいていこちらのほうが効果が大きい</td></tr>
+<tr><td>SIMD の手書き最適化</td><td>同上</td></tr>
+<tr><td>メモリアクセスパターンの改善</td><td>本書の題材では扱えなかったが、実務では最大の要因になることが多い</td></tr>
+<tr><td>マルチスレッド化</td><td>—</td></tr>
+</tbody>
+</table>
+
+<div class="box warn">
+<span class="t">優先順位について</span>
+<p>本書はコンパイラオプションの本ですが、最後に正直なことを書いておきます。<strong>アルゴリズムの改善が可能なら、そちらのほうがほぼ確実に効果が大きい。</strong> O(n²) を O(n log n) にすれば、PGO の 7% とは桁の違う改善になります。</p>
+<p>コンパイラ最適化の出番は、アルゴリズム的な改善をやり尽くしたあと、あるいは既存のコードに手を入れられない事情があるときです。本書で身につけた計測の作法は、そのどちらの場面でも使えます。</p>
+</div>
+
+<h2>42.7 おわりに</h2>
+
+<p>第 1 章で、最適化の失敗を三つ挙げました。「測っていない」「測る場所が違う」「効いた理由が分からない」。</p>
+
+<p>本書を通じて手に入れたものを、その三つに対応させてみます。</p>
+
+<table>
+<thead><tr><th>失敗</th><th>手に入れたもの</th></tr></thead>
+<tbody>
+<tr><td>測っていない</td><td>ノイズ床、交互実行、空試験（第 15 章）</td></tr>
+<tr><td>測る場所が違う</td><td>プロファイラ、<code>llvm-profdata show --topn</code>（第 12・13・30 章）</td></tr>
+<tr><td>効いた理由が分からない</td><td>リマーク、最適化レコード、逆アセンブル（第 8・9・10・20・32 章）</td></tr>
+</tbody>
+</table>
+
+<p>そして本書は、第 31 章で四つ目の失敗に出会いました。<strong>「他人の環境の結果を、自分の環境の結果だと思い込む」</strong>ことです。同じバイナリ、同じ手順で、マシンが変わっただけで結論が変わりました。</p>
+
+<p>この経験が示しているのは、最適化に普遍的な正解は無いということです。あるのは、<strong>自分のコードと自分の環境について、根拠を持って語れる状態</strong>だけです。</p>
+
+<p>本書の数字も、あなたの環境では再現しないかもしれません。それでいいのです。再現するかどうかを確かめる手段を、あなたはもう持っています。</p>
+
+<div class="partend">
+<h3>チェックリスト — 明日から使えるもの</h3>
+<ul>
+<li><code>bench.py</code> — 交互実行による比較（第 15 章）</li>
+<li><code>summarize.py</code> — 最適化レコードの集計（第 10 章）</li>
+<li>空試験でノイズ床を測る習慣（第 15 章）</li>
+<li><code>/clang:-Rpass-missed=inline</code> — なぜ展開されないのかを聞く（第 9 章）</li>
+<li><code>/mllvm:-pass-remarks=inline</code> — リンク時に何が起きたかを聞く（第 20 章）</li>
+<li><code>llvm-profdata show --topn</code> — プロファイルの妥当性を確認する（第 30 章）</li>
+<li><code>llvm-profdata overlap</code> — トレーニングの代表性を数値化する（第 28・30 章）</li>
+<li><code>-Werror=backend-plugin</code> — プロファイルの陳腐化に気づく（第 34 章）</li>
+<li>checksum による検証（第 4 章）</li>
+</ul>
+</div>
+
+<p class="next">付録では、本書で触れられなかった細部を扱います。clang-cl のオプション早見表（付録 A）、<code>llvm-profdata</code> / <code>llvm-cov</code> のコマンドリファレンス（付録 B）、サンプリング PGO の現状（付録 C）、フロントエンド計装との使い分け（付録 D）、トラブルシューティング集（付録 E）、そして BOLT / Propeller の適用可否（付録 F）です。</p>
+
+</div>
+</body>
+</html>
