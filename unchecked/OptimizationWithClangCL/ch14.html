@@ -83,6 +83,8 @@ figcaption{font-size:.83rem; color:var(--sub); text-align:center; margin-top:.7r
 <body>
 <div class="book">
 
+<nav aria-label="章の移動" style="display:flex; justify-content:space-between; gap:1rem; margin:0 0 2rem; padding-bottom:1rem; border-bottom:2px solid var(--line); font-size:.95rem"><a href="ch13.html">← 前の章へ</a><a href="ch15.html">次の章へ →</a></nav>
+
 <p class="chapno">第 14 章</p>
 <h1>シンボル解決と PDB<br>— clang-cl の <code>/Z7</code>・<code>/Zi</code> とリンカ設定</h1>
 <p class="lead">プロファイラが関数名を表示できるかどうかは、PDB にかかっています。そして clang-cl の PDB の作られ方は、MSVC のそれとは違います。ここを知らないまま進むと、「なぜかシンボルが出ない」「別の関数の名前が表示される」という状況に必ず出会います。</p>
@@ -353,6 +355,7 @@ llvm-pdbutil dump --publics app.pdb
 
 <p class="next"><strong>次章では</strong>、第 3 部の締めくくりとして「時間の測り方」そのものを扱います。同じバイナリを 30 回走らせると実行時間が何パーセント揺れるのか、その揺れの中で「速くなった」と言うには何が必要なのか。実測データを添えて、本書で使う計測手順を確定させます。</p>
 
+<nav aria-label="章の移動" style="display:flex; justify-content:space-between; gap:1rem; margin-top:3.5rem; padding-top:1.4rem; border-top:2px solid var(--line); font-size:.95rem"><a href="ch13.html">← 前の章へ</a><a href="ch15.html">次の章へ →</a></nav>
 </div>
 </body>
 </html>

@@ -83,6 +83,8 @@ figcaption{font-size:.83rem; color:var(--sub); text-align:center; margin-top:.7r
 <body>
 <div class="book">
 
+<nav aria-label="章の移動" style="display:flex; justify-content:space-between; gap:1rem; margin:0 0 2rem; padding-bottom:1rem; border-bottom:2px solid var(--line); font-size:.95rem"><a href="ch33.html">← 前の章へ</a><a href="ch35.html">次の章へ →</a></nav>
+
 <p class="chapno">第 34 章</p>
 <h1>プロファイルの陳腐化<br>— ソース変更への追従と警告の読み方</h1>
 <p class="lead">プロファイルは、ある時点のソースコードに結び付いた記録です。コードを直せば、その記録は少しずつ現実と食い違っていきます。Clang はこれを検出できますが、<strong>警告の名前が計装方式によって違う</strong>という罠があります。</p>
@@ -319,6 +321,7 @@ msbuild ... 2&gt;&amp;1 | findstr /C:"hash mismatch" | find /c /v ""</code></pre
 
 <p class="next"><strong>次章から第 6 部（CSPGO）です。</strong> まず、いま述べた「文脈の欠落」がどういう問題なのかを具体的に見ます。そのうえで、プロファイルをもう一周取る二段構えの手順を扱います。第 4 部で見た lld-link の <code>/lto-cs-profile-generate</code> というオプションが、そこで登場します。</p>
 
+<nav aria-label="章の移動" style="display:flex; justify-content:space-between; gap:1rem; margin-top:3.5rem; padding-top:1.4rem; border-top:2px solid var(--line); font-size:.95rem"><a href="ch33.html">← 前の章へ</a><a href="ch35.html">次の章へ →</a></nav>
 </div>
 </body>
 </html>

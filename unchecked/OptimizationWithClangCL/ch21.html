@@ -83,6 +83,8 @@ figcaption{font-size:.83rem; color:var(--sub); text-align:center; margin-top:.7r
 <body>
 <div class="book">
 
+<nav aria-label="章の移動" style="display:flex; justify-content:space-between; gap:1rem; margin:0 0 2rem; padding-bottom:1rem; border-bottom:2px solid var(--line); font-size:.95rem"><a href="ch20.html">← 前の章へ</a><a href="ch22.html">次の章へ →</a></nav>
+
 <p class="chapno">第 21 章</p>
 <h1><code>-fwhole-program-vtables</code><br>— 仮想関数のデバーチャライズ</h1>
 <p class="lead">第 8 章の逆アセンブルに <code>call qword ptr [rax + 0x10]</code> という行がありました。仮想関数テーブル経由の間接呼び出しです。LTO はこれを直接呼び出しに変えられる場合があります。ただし条件は厳しく、LogLab では成立しません。その理由を理解することが、この章の本題です。</p>
@@ -277,6 +279,7 @@ class MessageFilter final : public Filter { ... };</code></pre>
 
 <p class="next"><strong>次章では</strong>、LTO と静的ライブラリ・DLL の関係を扱います。ビットコードを含む <code>.lib</code> は作れるのか、LTO はライブラリの境界を越えられるのか、DLL があると何ができなくなるのか。実際のプロジェクトで LTO を導入するときに、必ずぶつかる問題です。</p>
 
+<nav aria-label="章の移動" style="display:flex; justify-content:space-between; gap:1rem; margin-top:3.5rem; padding-top:1.4rem; border-top:2px solid var(--line); font-size:.95rem"><a href="ch20.html">← 前の章へ</a><a href="ch22.html">次の章へ →</a></nav>
 </div>
 </body>
 </html>

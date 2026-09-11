@@ -83,6 +83,8 @@ figcaption{font-size:.83rem; color:var(--sub); text-align:center; margin-top:.7r
 <body>
 <div class="book">
 
+<nav aria-label="章の移動" style="display:flex; justify-content:space-between; gap:1rem; margin:0 0 2rem; padding-bottom:1rem; border-bottom:2px solid var(--line); font-size:.95rem"><a href="ch39.html">← 前の章へ</a><a href="ch41.html">次の章へ →</a></nav>
+
 <p class="chapno">第 40 章</p>
 <h1>CMake で同じ構成を再現する</h1>
 <p class="lead">本書は MSBuild を主軸にしてきましたが、CMake を使うプロジェクトも多いはずです。同じことを CMake で表現します。LTO には専用の仕組みがあり、PGO は自前で組むことになります。</p>
@@ -353,6 +355,7 @@ cmake --preset opt   &amp;&amp; cmake --build build-opt</code></pre>
 
 <p class="next"><strong>次章では</strong>、これらを CI に載せます。毎回トレーニングを回すのか、プロファイルを保管するのか。陳腐化をどう監視するか。そして——第 31 章で学んだ「効果は環境に依存する」という教訓を、CI の設計にどう反映するか。</p>
 
+<nav aria-label="章の移動" style="display:flex; justify-content:space-between; gap:1rem; margin-top:3.5rem; padding-top:1.4rem; border-top:2px solid var(--line); font-size:.95rem"><a href="ch39.html">← 前の章へ</a><a href="ch41.html">次の章へ →</a></nav>
 </div>
 </body>
 </html>

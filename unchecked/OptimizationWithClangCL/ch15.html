@@ -83,6 +83,8 @@ figcaption{font-size:.83rem; color:var(--sub); text-align:center; margin-top:.7r
 <body>
 <div class="book">
 
+<nav aria-label="章の移動" style="display:flex; justify-content:space-between; gap:1rem; margin:0 0 2rem; padding-bottom:1rem; border-bottom:2px solid var(--line); font-size:.95rem"><a href="ch14.html">← 前の章へ</a><a href="ch16.html">次の章へ →</a></nav>
+
 <p class="chapno">第 15 章</p>
 <h1>ベンチマークの取り方<br>— ばらつき・ウォームアップ・有意差の判定</h1>
 <p class="lead">第 1 章で「測っていない最適化」を戒めました。しかし測り方が悪ければ、測らないのと大差ありません。この章では、同じバイナリの実行時間がどれだけ揺れるかを実測し、その揺れの中で「速くなった」と言うための手順を確定させます。第 3 部の締めくくりです。</p>
@@ -356,6 +358,7 @@ python bench.py x64\Release\ClangOptLab.exe x64\Release\ClangOptLab_copy.exe -n 
 
 <p class="next"><strong>次章から第 4 部</strong>です。まず LTO とは何か——なぜ <code>.obj</code> 単位の最適化では足りないのかを、第 7 章で見た IR の話とつなげて整理します。そのうえで第 17 章で Full LTO を、第 19 章で ThinLTO を実際に有効にします。</p>
 
+<nav aria-label="章の移動" style="display:flex; justify-content:space-between; gap:1rem; margin-top:3.5rem; padding-top:1.4rem; border-top:2px solid var(--line); font-size:.95rem"><a href="ch14.html">← 前の章へ</a><a href="ch16.html">次の章へ →</a></nav>
 </div>
 </body>
 </html>

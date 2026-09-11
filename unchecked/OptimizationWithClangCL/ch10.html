@@ -83,6 +83,8 @@ figcaption{font-size:.83rem; color:var(--sub); text-align:center; margin-top:.7r
 <body>
 <div class="book">
 
+<nav aria-label="章の移動" style="display:flex; justify-content:space-between; gap:1rem; margin:0 0 2rem; padding-bottom:1rem; border-bottom:2px solid var(--line); font-size:.95rem"><a href="ch09.html">← 前の章へ</a><a href="ch11.html">次の章へ →</a></nav>
+
 <p class="chapno">第 10 章</p>
 <h1>最適化レコードで記録する<br>— <code>-fsave-optimization-record</code> と opt-viewer</h1>
 <p class="lead">前章のリマークは、出力ウィンドウを流れて消えていきます。同じ情報を YAML ファイルとして保存できれば、集計もできますし、LTO の前後で比べることもできます。第 4 部以降で「何が変わったか」を語るための土台をここで作ります。</p>
@@ -302,6 +304,7 @@ for (kind, p, n), v in counts.most_common(20):
 
 <p class="next"><strong>次章では</strong>、第 2 部の締めくくりとしてインライン化そのものを掘り下げます。<code>cost</code> と <code>threshold</code> のモデル、<code>-mllvm -inline-threshold</code> でしきい値を動かしたときに何が起きるか、そして<strong>なぜしきい値をいじるのが最後の手段なのか</strong>。第 5 部の PGO へ橋を渡す章になります。</p>
 
+<nav aria-label="章の移動" style="display:flex; justify-content:space-between; gap:1rem; margin-top:3.5rem; padding-top:1.4rem; border-top:2px solid var(--line); font-size:.95rem"><a href="ch09.html">← 前の章へ</a><a href="ch11.html">次の章へ →</a></nav>
 </div>
 </body>
 </html>

@@ -79,6 +79,8 @@ figcaption{font-size:.83rem; color:var(--sub); text-align:center; margin-top:.7r
 <body>
 <div class="book">
 
+<nav aria-label="章の移動" style="display:flex; justify-content:space-between; gap:1rem; margin:0 0 2rem; padding-bottom:1rem; border-bottom:2px solid var(--line); font-size:.95rem"><a href="ch01.html">← 前の章へ</a><a href="ch03.html">次の章へ →</a></nav>
+
 <p class="chapno">第 2 章</p>
 <h1>Visual Studio 2026 と ClangCL のセットアップ</h1>
 <p class="lead">ClangCL は Visual Studio に同梱されていますが、既定ではインストールされません。この章では必要なコンポーネントを入れ、コマンドラインからバージョンを確認し、必要に応じて公式 LLVM に差し替えるところまでを行います。</p>
@@ -316,6 +318,7 @@ where llvm-objdump</code></pre>
 
 <p class="next"><strong>次章では</strong>、実際に Visual Studio でプロジェクトを作り、プラットフォームツールセットを LLVM (clang-cl) に切り替えます。C++23 の設定、リリース構成の確認、そして「実際に clang-cl にどんな引数が渡っているか」をビルドログから読み取る方法まで扱います。あわせて、ClangCL が既定で <code>lld-link</code> を使うという事実を確認します。これは第 4 部の LTO で効いてきます。</p>
 
+<nav aria-label="章の移動" style="display:flex; justify-content:space-between; gap:1rem; margin-top:3.5rem; padding-top:1.4rem; border-top:2px solid var(--line); font-size:.95rem"><a href="ch01.html">← 前の章へ</a><a href="ch03.html">次の章へ →</a></nav>
 </div>
 </body>
 </html>

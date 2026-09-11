@@ -83,6 +83,8 @@ figcaption{font-size:.83rem; color:var(--sub); text-align:center; margin-top:.7r
 <body>
 <div class="book">
 
+<nav aria-label="章の移動" style="display:flex; justify-content:space-between; gap:1rem; margin:0 0 2rem; padding-bottom:1rem; border-bottom:2px solid var(--line); font-size:.95rem"><a href="ch25.html">← 前の章へ</a><a href="ch27.html">次の章へ →</a></nav>
+
 <p class="chapno">第 26 章</p>
 <h1>計装ビルド<br>— <code>-fprofile-generate</code> とプロファイルランタイム</h1>
 <p class="lead">オプションは一つです。しかし Windows では「ライブラリが見つからない」という壁にぶつかることがあります。仕組みを知っていれば数分で解決する問題なので、先に押さえておきます。</p>
@@ -253,6 +255,7 @@ dir /s /b "C:\Program Files\LLVM\lib\clang_rt.profile*"</code></pre>
 
 <p class="next"><strong>次章では</strong>、プロファイルの出力先を制御します。既定ではカレントディレクトリに固定の名前で出るため、複数回実行すると上書きされてしまいます。<code>LLVM_PROFILE_FILE</code> 環境変数とそのパターン指定を使って、実行ごと・プロセスごとにファイルを分ける方法を扱います。</p>
 
+<nav aria-label="章の移動" style="display:flex; justify-content:space-between; gap:1rem; margin-top:3.5rem; padding-top:1.4rem; border-top:2px solid var(--line); font-size:.95rem"><a href="ch25.html">← 前の章へ</a><a href="ch27.html">次の章へ →</a></nav>
 </div>
 </body>
 </html>

@@ -83,6 +83,8 @@ figcaption{font-size:.83rem; color:var(--sub); text-align:center; margin-top:.7r
 <body>
 <div class="book">
 
+<nav aria-label="章の移動" style="display:flex; justify-content:space-between; gap:1rem; margin:0 0 2rem; padding-bottom:1rem; border-bottom:2px solid var(--line); font-size:.95rem"><a href="ch16.html">← 前の章へ</a><a href="ch18.html">次の章へ →</a></nav>
+
 <p class="chapno">第 17 章</p>
 <h1>Full LTO を有効にする<br>— <code>-flto</code> と lld-link への切り替え</h1>
 <p class="lead">設定そのものはオプション一つです。しかし「設定したつもりで効いていない」という状態が起きやすいところでもあります。確認の手順をセットで身につけます。</p>
@@ -258,6 +260,7 @@ llvm-objdump -d --no-show-raw-insn lto.exe   | findstr /C:"call" | find /c /v ""
 
 <p class="next"><strong>次章では</strong>、その ThinLTO の仕組みを見ます。「全部を統合する」のをやめて、代わりに何をしているのか。サマリインデックスという考え方を理解すると、ThinLTO が Full LTO より効果が小さくなる理由も、リンクが速い理由も、同じ一つの設計から説明できるようになります。</p>
 
+<nav aria-label="章の移動" style="display:flex; justify-content:space-between; gap:1rem; margin-top:3.5rem; padding-top:1.4rem; border-top:2px solid var(--line); font-size:.95rem"><a href="ch16.html">← 前の章へ</a><a href="ch18.html">次の章へ →</a></nav>
 </div>
 </body>
 </html>

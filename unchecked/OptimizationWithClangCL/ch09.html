@@ -83,6 +83,8 @@ figcaption{font-size:.83rem; color:var(--sub); text-align:center; margin-top:.7r
 <body>
 <div class="book">
 
+<nav aria-label="章の移動" style="display:flex; justify-content:space-between; gap:1rem; margin:0 0 2rem; padding-bottom:1rem; border-bottom:2px solid var(--line); font-size:.95rem"><a href="ch08.html">← 前の章へ</a><a href="ch10.html">次の章へ →</a></nav>
+
 <p class="chapno">第 9 章</p>
 <h1>最適化リマークを読む<br>— <code>-Rpass</code> / <code>-Rpass-missed</code> / <code>-Rpass-analysis</code></h1>
 <p class="lead">逆アセンブルは最適化の「結果」を見せてくれますが、「なぜそうなったか」は教えてくれません。Clang には、最適化パス自身に判断の理由を語らせる仕組みがあります。本書で最も出番の多い道具です。</p>
@@ -300,6 +302,7 @@ clang-cl /c /O2 /Iinclude /clang:-Rpass=inline src\tokenizer.cpp 2&gt;&amp;1 `
 
 <p class="next"><strong>次章では</strong>、同じ情報を YAML ファイルとして保存する <code>-fsave-optimization-record</code> を扱います。ファイルになれば、集計もできますし、前回のビルドとの比較もできます。さらに opt-viewer を使えば、ソースコード上に最適化の判断を重ねた HTML を生成できます。第 4 部以降で「LTO の前後を比べる」ときの主力になります。</p>
 
+<nav aria-label="章の移動" style="display:flex; justify-content:space-between; gap:1rem; margin-top:3.5rem; padding-top:1.4rem; border-top:2px solid var(--line); font-size:.95rem"><a href="ch08.html">← 前の章へ</a><a href="ch10.html">次の章へ →</a></nav>
 </div>
 </body>
 </html>

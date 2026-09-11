@@ -83,6 +83,8 @@ figcaption{font-size:.83rem; color:var(--sub); text-align:center; margin-top:.7r
 <body>
 <div class="book">
 
+<nav aria-label="章の移動" style="display:flex; justify-content:space-between; gap:1rem; margin:0 0 2rem; padding-bottom:1rem; border-bottom:2px solid var(--line); font-size:.95rem"><a href="ch10.html">← 前の章へ</a><a href="ch12.html">次の章へ →</a></nav>
+
 <p class="chapno">第 11 章</p>
 <h1>インライン化としきい値<br>— <code>-mllvm -inline-threshold</code> の効果と副作用</h1>
 <p class="lead">インライン化は本書で最も重要な最適化です。LTO も PGO も、突き詰めれば「インライナにより良い判断をさせる」ための仕組みだと言えます。この章ではその判断の仕組みを解剖し、手動でしきい値を動かして何が起きるかを実測します。そして<strong>なぜそれが最後の手段なのか</strong>を確認します。</p>
@@ -323,6 +325,7 @@ for (int i = 0; i &lt; n; ++i) {
 
 <p class="next"><strong>次章から第 3 部</strong>に入ります。まず PIX for Windows を導入し、LogLab のどこに時間が費やされているのかを実際に見ます。「<code>parse_line</code> が重いはずだ」という予想が正しいのかどうか、ここで初めて確かめることになります。</p>
 
+<nav aria-label="章の移動" style="display:flex; justify-content:space-between; gap:1rem; margin-top:3.5rem; padding-top:1.4rem; border-top:2px solid var(--line); font-size:.95rem"><a href="ch10.html">← 前の章へ</a><a href="ch12.html">次の章へ →</a></nav>
 </div>
 </body>
 </html>

@@ -83,6 +83,8 @@ figcaption{font-size:.83rem; color:var(--sub); text-align:center; margin-top:.7r
 <body>
 <div class="book">
 
+<nav aria-label="章の移動" style="display:flex; justify-content:space-between; gap:1rem; margin:0 0 2rem; padding-bottom:1rem; border-bottom:2px solid var(--line); font-size:.95rem"><a href="ch07.html">← 前の章へ</a><a href="ch09.html">次の章へ →</a></nav>
+
 <p class="chapno">第 8 章</p>
 <h1>生成コードを見る<br>— <code>/FA</code>、llvm-objdump、逆アセンブルウィンドウ</h1>
 <p class="lead">最適化の結果を最終的に裏付けるのは、生成された機械語です。この章では三つの見方を使い分けられるようにし、そこから何を読み取るべきかを整理します。全部を読む必要はありません。見るべき場所は決まっています。</p>
@@ -289,6 +291,7 @@ findstr /C:"call" baseline_O2.asm &gt; baseline_O2_calls.txt</code></pre>
 
 <p class="next"><strong>次章では</strong>、機械語を読む代わりに、コンパイラ自身に説明させる方法を扱います。「この関数をインライン化した／しなかった、その理由はこれだ」を出力させる最適化リマークです。逆アセンブルが「結果」を見るものだとすれば、リマークは「判断」を見るものです。本書で最も使う道具になります。</p>
 
+<nav aria-label="章の移動" style="display:flex; justify-content:space-between; gap:1rem; margin-top:3.5rem; padding-top:1.4rem; border-top:2px solid var(--line); font-size:.95rem"><a href="ch07.html">← 前の章へ</a><a href="ch09.html">次の章へ →</a></nav>
 </div>
 </body>
 </html>

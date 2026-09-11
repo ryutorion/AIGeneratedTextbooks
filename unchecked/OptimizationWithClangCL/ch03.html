@@ -80,6 +80,8 @@ figcaption{font-size:.83rem; color:var(--sub); text-align:center; margin-top:.7r
 <body>
 <div class="book">
 
+<nav aria-label="章の移動" style="display:flex; justify-content:space-between; gap:1rem; margin:0 0 2rem; padding-bottom:1rem; border-bottom:2px solid var(--line); font-size:.95rem"><a href="ch02.html">← 前の章へ</a><a href="ch04.html">次の章へ →</a></nav>
+
 <p class="chapno">第 3 章</p>
 <h1>最初のプロジェクト<br>— C++23 / ClangCL のビルド設定を作る</h1>
 <p class="lead">本書を通して使うプロジェクトをここで作ります。単に動くようにするだけでなく、「clang-cl に実際どんな引数が渡っているか」「リンカは何が使われているか」を自分の目で確認できる状態にしておきます。第 4 部以降の作業はすべてこの確認が土台になります。</p>
@@ -351,6 +353,7 @@ Level::High = 9</code></pre>
 
 <p class="next"><strong>次章では</strong>、最適化の効果を観察するための題材アプリを作ります。単なる Hello World では LTO も PGO も効果が見えないため、「複数の翻訳単位に分かれている」「処理時間に明確な偏りがある」「結果を検証できる」という条件を満たすプログラムを設計します。あわせて、最適化に消されないベンチマークの書き方も扱います。</p>
 
+<nav aria-label="章の移動" style="display:flex; justify-content:space-between; gap:1rem; margin-top:3.5rem; padding-top:1.4rem; border-top:2px solid var(--line); font-size:.95rem"><a href="ch02.html">← 前の章へ</a><a href="ch04.html">次の章へ →</a></nav>
 </div>
 </body>
 </html>

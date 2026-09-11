@@ -83,6 +83,8 @@ figcaption{font-size:.83rem; color:var(--sub); text-align:center; margin-top:.7r
 <body>
 <div class="book">
 
+<nav aria-label="章の移動" style="display:flex; justify-content:space-between; gap:1rem; margin:0 0 2rem; padding-bottom:1rem; border-bottom:2px solid var(--line); font-size:.95rem"><a href="ch29.html">← 前の章へ</a><a href="ch31.html">次の章へ →</a></nav>
+
 <p class="chapno">第 30 章</p>
 <h1>プロファイルの中身を読む<br>— <code>llvm-profdata show</code> / <code>overlap</code> と llvm-cov</h1>
 <p class="lead">プロファイルはブラックボックスではありません。中身を読めば、トレーニングが妥当だったかを最適化ビルドを作る前に判断できます。ここが Clang の PGO の大きな強みです。</p>
@@ -327,6 +329,7 @@ llvm-cov show ClangOptLab_cov.exe -instr-profile=cov.profdata src\stats.cpp</cod
 
 <p class="next"><strong>次章では</strong>、いよいよプロファイルを使って最適化ビルドを作ります。オプションは一つ、確認することも決まっています。そして第 15 章の手順で測ります。第 20 章の LTO とは違う結果になります。</p>
 
+<nav aria-label="章の移動" style="display:flex; justify-content:space-between; gap:1rem; margin-top:3.5rem; padding-top:1.4rem; border-top:2px solid var(--line); font-size:.95rem"><a href="ch29.html">← 前の章へ</a><a href="ch31.html">次の章へ →</a></nav>
 </div>
 </body>
 </html>

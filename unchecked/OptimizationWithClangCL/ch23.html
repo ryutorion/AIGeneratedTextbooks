@@ -83,6 +83,8 @@ figcaption{font-size:.83rem; color:var(--sub); text-align:center; margin-top:.7r
 <body>
 <div class="book">
 
+<nav aria-label="章の移動" style="display:flex; justify-content:space-between; gap:1rem; margin:0 0 2rem; padding-bottom:1rem; border-bottom:2px solid var(--line); font-size:.95rem"><a href="ch22.html">← 前の章へ</a><a href="ch24.html">次の章へ →</a></nav>
+
 <p class="chapno">第 23 章</p>
 <h1>LTO の代償<br>— デバッグ情報・ビルド時間・メモリと、失敗時の切り分け</h1>
 <p class="lead">ここまで LTO の効果を見てきました。この章では支払うものを整理します。導入するかどうかは、効果と代償を並べて初めて判断できます。あわせて「LTO を入れたら壊れた」ときの切り分け方も扱います。</p>
@@ -268,6 +270,7 @@ llvm-dis tokenizer.obj.4.opt.bc    -o opt.ll</code></pre>
 
 <p class="next"><strong>次章で第 4 部を締めくくります。</strong> MSVC にも <code>/GL</code> と <code>/LTCG</code> という同じ目的の機能があります。何が同じで何が違うのか。既存の MSVC プロジェクトを ClangCL に移すとき、設定をどう読み替えればよいのか。そして、PGO との組み合わせ方がどう違うのか——これは第 5 部への橋渡しになります。</p>
 
+<nav aria-label="章の移動" style="display:flex; justify-content:space-between; gap:1rem; margin-top:3.5rem; padding-top:1.4rem; border-top:2px solid var(--line); font-size:.95rem"><a href="ch22.html">← 前の章へ</a><a href="ch24.html">次の章へ →</a></nav>
 </div>
 </body>
 </html>

@@ -83,6 +83,8 @@ figcaption{font-size:.83rem; color:var(--sub); text-align:center; margin-top:.7r
 <body>
 <div class="book">
 
+<nav aria-label="章の移動" style="display:flex; justify-content:space-between; gap:1rem; margin:0 0 2rem; padding-bottom:1rem; border-bottom:2px solid var(--line); font-size:.95rem"><a href="ch05.html">← 前の章へ</a><a href="ch07.html">次の章へ →</a></nav>
+
 <p class="chapno">第 6 章</p>
 <h1><code>/O2</code> の正体<br>— clang-cl と MSVC のオプション対応関係</h1>
 <p class="lead">本書はこれから多くのオプションを追加していきます。その前に、clang-cl がオプションをどう解釈するのかを押さえておきます。ここを飛ばすと「書いたのに効かない」という、気づきにくい失敗を繰り返すことになります。</p>
@@ -345,6 +347,7 @@ int caller(int n) {
 
 <p class="next"><strong>次章では</strong>、その <code>-O2</code> が具体的に何をしているのかを見ます。LLVM の最適化パイプラインの構造、<code>-O1</code> から <code>-O2</code>、<code>-O3</code> へと何が足されていくのか、そしてなぜ <code>-O3</code> にしても大して変わらないのか。パイプラインを実際に表示させて確認します。</p>
 
+<nav aria-label="章の移動" style="display:flex; justify-content:space-between; gap:1rem; margin-top:3.5rem; padding-top:1.4rem; border-top:2px solid var(--line); font-size:.95rem"><a href="ch05.html">← 前の章へ</a><a href="ch07.html">次の章へ →</a></nav>
 </div>
 </body>
 </html>

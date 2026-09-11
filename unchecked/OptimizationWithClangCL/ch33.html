@@ -83,6 +83,8 @@ figcaption{font-size:.83rem; color:var(--sub); text-align:center; margin-top:.7r
 <body>
 <div class="book">
 
+<nav aria-label="章の移動" style="display:flex; justify-content:space-between; gap:1rem; margin:0 0 2rem; padding-bottom:1rem; border-bottom:2px solid var(--line); font-size:.95rem"><a href="ch32.html">← 前の章へ</a><a href="ch34.html">次の章へ →</a></nav>
+
 <p class="chapno">第 33 章</p>
 <h1>マルチスレッド計装<br>— <code>-fprofile-update=atomic</code> とオーバーヘッド</h1>
 <p class="lead">計装ビルドはカウンタを加算します。複数スレッドが同じカウンタを同時に更新したら、どうなるのか。正確にするオプションはありますが、実測すると計装ビルドが 7 倍以上遅くなりました。</p>
@@ -238,6 +240,7 @@ write counter = 101
 
 <p class="next"><strong>次章で第 5 部を締めくくります。</strong> プロファイルは、そのコードのある時点の姿を記録したものです。ソースを直したら、その記録はどうなるのか。Clang は関数ごとにハッシュを持っていて、食い違いを検出できます。ただし、警告の出し方が計装方式によって違うという罠があります。</p>
 
+<nav aria-label="章の移動" style="display:flex; justify-content:space-between; gap:1rem; margin-top:3.5rem; padding-top:1.4rem; border-top:2px solid var(--line); font-size:.95rem"><a href="ch32.html">← 前の章へ</a><a href="ch34.html">次の章へ →</a></nav>
 </div>
 </body>
 </html>

@@ -83,6 +83,8 @@ figcaption{font-size:.83rem; color:var(--sub); text-align:center; margin-top:.7r
 <body>
 <div class="book">
 
+<nav aria-label="章の移動" style="display:flex; justify-content:space-between; gap:1rem; margin:0 0 2rem; padding-bottom:1rem; border-bottom:2px solid var(--line); font-size:.95rem"><a href="ch27.html">← 前の章へ</a><a href="ch29.html">次の章へ →</a></nav>
+
 <p class="chapno">第 28 章</p>
 <h1>トレーニングワークロードの設計<br>— 「代表的な実行」とは何か</h1>
 <p class="lead">PGO の品質は、プロファイルの品質で決まります。そしてプロファイルの品質は、何を実行したかで決まります。この章では、トレーニングを間違えると PGO が<strong>性能を悪化させる</strong>ことを実測で確かめます。</p>
@@ -269,6 +271,7 @@ IndirectCall profile overlap: 50.000%</code></pre>
 
 <p class="next"><strong>次章では</strong>、集めた <code>.profraw</code> を <code>llvm-profdata merge</code> でまとめます。単なる形式変換ではなく、複数のトレーニングを重み付けして配合する機能もあります。本章で触れた「起動と定常のバランス」は、ここで調整することになります。</p>
 
+<nav aria-label="章の移動" style="display:flex; justify-content:space-between; gap:1rem; margin-top:3.5rem; padding-top:1.4rem; border-top:2px solid var(--line); font-size:.95rem"><a href="ch27.html">← 前の章へ</a><a href="ch29.html">次の章へ →</a></nav>
 </div>
 </body>
 </html>

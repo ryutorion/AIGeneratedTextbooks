@@ -83,6 +83,8 @@ figcaption{font-size:.83rem; color:var(--sub); text-align:center; margin-top:.7r
 <body>
 <div class="book">
 
+<nav aria-label="章の移動" style="display:flex; justify-content:space-between; gap:1rem; margin:0 0 2rem; padding-bottom:1rem; border-bottom:2px solid var(--line); font-size:.95rem"><a href="ch06.html">← 前の章へ</a><a href="ch08.html">次の章へ →</a></nav>
+
 <p class="chapno">第 7 章</p>
 <h1>LLVM 最適化パイプライン概観<br>— <code>-O0</code> から <code>-O3</code> まで、何が足されていくのか</h1>
 <p class="lead">前章で <code>/O2</code> が <code>-O2</code> であることは分かりました。では <code>-O2</code> とは何なのか。この章では最適化パイプラインの構造を眺め、レベルごとに何が加わるのかを実際に表示させて確認します。LTO と PGO が<strong>どこに</strong>効くのかを理解するための土台です。</p>
@@ -350,6 +352,7 @@ always-inline,require&lt;globals-aa&gt;, ...</code></pre>
 
 <p class="next"><strong>次章では</strong>、IR よりもう一段下、実際に生成された機械語を見る方法を扱います。<code>/FA</code> によるアセンブリリスト、<code>llvm-objdump</code> による逆アセンブル、Visual Studio の逆アセンブルウィンドウ。三つの手段の使い分けと、最適化の痕跡をどこに探せばよいかを整理します。</p>
 
+<nav aria-label="章の移動" style="display:flex; justify-content:space-between; gap:1rem; margin-top:3.5rem; padding-top:1.4rem; border-top:2px solid var(--line); font-size:.95rem"><a href="ch06.html">← 前の章へ</a><a href="ch08.html">次の章へ →</a></nav>
 </div>
 </body>
 </html>
